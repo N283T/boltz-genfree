@@ -1,7 +1,7 @@
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 
 import numpy as np
 import torch
@@ -346,11 +346,11 @@ class BoltzWriter(BasePredictionWriter):
             # Save embeddings
             if self.write_embeddings and "s" in prediction and "z" in prediction:
                 if batch_size == 1:
-                    s = prediction["s"].cpu().numpy()
-                    z = prediction["z"].cpu().numpy()
+                    s = prediction["s"].float().cpu().numpy()
+                    z = prediction["z"].float().cpu().numpy()
                 else:
-                    s = prediction["s"][record_idx].cpu().numpy()
-                    z = prediction["z"][record_idx].cpu().numpy()
+                    s = prediction["s"][record_idx].float().cpu().numpy()
+                    z = prediction["z"][record_idx].float().cpu().numpy()
 
                 path = (
                     struct_dir
@@ -375,6 +375,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
         self,
         data_dir: str,
         output_dir: str,
+        experiment_metadata: Optional[dict[str, object]] = None,
     ) -> None:
         """Initialize the writer.
 
@@ -389,6 +390,40 @@ class BoltzAffinityWriter(BasePredictionWriter):
         self.data_dir = Path(data_dir)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.experiment_metadata = experiment_metadata or {}
+
+    @staticmethod
+    def _summary(
+        prediction: dict[str, Tensor],
+        record: Record,
+    ) -> dict[str, object]:
+        """Build the legacy scalar affinity summary for one prediction."""
+        summary: dict[str, object] = {
+            "affinity_pred_value": prediction["affinity_pred_value"].item(),
+            "affinity_probability_binary": prediction[
+                "affinity_probability_binary"
+            ].item(),
+        }
+        if record.affinity and record.affinity.chain_name:
+            summary["binder_chain"] = record.affinity.chain_name
+        if "affinity_pred_value1" in prediction:
+            summary.update(
+                {
+                    "affinity_pred_value1": prediction[
+                        "affinity_pred_value1"
+                    ].item(),
+                    "affinity_probability_binary1": prediction[
+                        "affinity_probability_binary1"
+                    ].item(),
+                    "affinity_pred_value2": prediction[
+                        "affinity_pred_value2"
+                    ].item(),
+                    "affinity_probability_binary2": prediction[
+                        "affinity_probability_binary2"
+                    ].item(),
+                }
+            )
+        return summary
 
     def write_on_batch_end(
         self,
@@ -405,38 +440,54 @@ class BoltzAffinityWriter(BasePredictionWriter):
             self.failed += 1
             return
         record = batch["record"][0]
-        # Dump affinity summary
-        affinity_summary = {}
-        pred_affinity_value = prediction["affinity_pred_value"]
-        pred_affinity_probability = prediction["affinity_probability_binary"]
-        affinity_summary = {
-            "affinity_pred_value": pred_affinity_value.item(),
-            "affinity_probability_binary": pred_affinity_probability.item(),
-        }
-        if record.affinity and record.affinity.chain_name:
-            affinity_summary["binder_chain"] = record.affinity.chain_name
-        if "affinity_pred_value1" in prediction:
-            pred_affinity_value1 = prediction["affinity_pred_value1"]
-            pred_affinity_probability1 = prediction["affinity_probability_binary1"]
-            pred_affinity_value2 = prediction["affinity_pred_value2"]
-            pred_affinity_probability2 = prediction["affinity_probability_binary2"]
-            affinity_summary["affinity_pred_value1"] = pred_affinity_value1.item()
-            affinity_summary["affinity_probability_binary1"] = (
-                pred_affinity_probability1.item()
-            )
-            affinity_summary["affinity_pred_value2"] = pred_affinity_value2.item()
-            affinity_summary["affinity_probability_binary2"] = (
-                pred_affinity_probability2.item()
-            )
-
-        # Save the affinity summary
         struct_dir = self.output_dir / record.id
         struct_dir.mkdir(exist_ok=True)
         output_id = get_affinity_output_id(record)
-        path = struct_dir / f"affinity_{output_id}.json"
 
+        # Preserve the original output for compatibility. It represents the
+        # first requested distogram mode.
+        affinity_summary = self._summary(prediction, record)
+        path = struct_dir / f"affinity_{output_id}.json"
         with path.open("w") as f:
             f.write(json.dumps(affinity_summary, indent=4))
+
+        for mode, mode_prediction in prediction.get(
+            "affinity_by_distogram_mode",
+            {},
+        ).items():
+            bins = mode_prediction["affinity_distogram_bins"].detach().cpu()
+            pair_mask = mode_prediction[
+                "affinity_distogram_intervened_pair_mask"
+            ].detach().cpu()
+            num_bins = int(bins.max().item()) + 1
+            num_bins = max(num_bins, 64)
+            histogram = torch.bincount(
+                bins.reshape(-1),
+                minlength=num_bins,
+            ).tolist()
+            mode_summary = self._summary(mode_prediction, record)
+            mode_summary.update(
+                {
+                    "distogram_intervention": mode,
+                    "conditioner_added": mode != "zero_conditioning",
+                    "effective_distogram": {
+                        "shape": list(bins.shape),
+                        "min_bin": int(bins.min().item()),
+                        "max_bin": int(bins.max().item()),
+                        "intervened_pair_count": int(pair_mask.sum().item()),
+                        "bin_histogram": histogram,
+                    },
+                    "experiment": self.experiment_metadata,
+                }
+            )
+            mode_stem = f"affinity_{output_id}__distogram_{mode}"
+            with (struct_dir / f"{mode_stem}.json").open("w") as f:
+                f.write(json.dumps(mode_summary, indent=4))
+            np.savez_compressed(
+                struct_dir / f"{mode_stem}.npz",
+                bins=bins.numpy().astype(np.uint8),
+                intervened_pair_mask=pair_mask.numpy().astype(bool),
+            )
 
     def on_predict_epoch_end(
         self,

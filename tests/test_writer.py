@@ -306,3 +306,60 @@ def test_affinity_writer_uses_per_copy_output_name(tmp_path: Path):
 
     assert affinity["binder_chain"] == "L2"
     assert affinity["affinity_pred_value"] == pytest.approx(1.25)
+
+
+def test_affinity_writer_writes_mode_outputs_and_distogram_artifact(
+    tmp_path: Path,
+):
+    writer = BoltzAffinityWriter(
+        data_dir=str(tmp_path / "data"),
+        output_dir=str(tmp_path / "out"),
+        experiment_metadata={"seed": 7},
+    )
+    record = _make_record(
+        "record_a",
+        affinity=AffinityInfo(
+            chain_id=0,
+            mw=123.4,
+            chain_name="L2",
+            output_id="record_a_L2",
+        ),
+    )
+    mode_prediction = {
+        "affinity_pred_value": torch.tensor(1.25),
+        "affinity_probability_binary": torch.tensor(0.75),
+        "affinity_distogram_bins": torch.tensor([[[0, 63], [63, 0]]]),
+        "affinity_distogram_intervened_pair_mask": torch.tensor(
+            [[[False, True], [True, False]]]
+        ),
+    }
+    prediction = {
+        "exception": False,
+        "affinity_pred_value": torch.tensor(1.25),
+        "affinity_probability_binary": torch.tensor(0.75),
+        "affinity_by_distogram_mode": {"constant_far": mode_prediction},
+    }
+
+    writer.write_on_batch_end(
+        trainer=None,
+        pl_module=None,
+        prediction=prediction,
+        batch_indices=[],
+        batch={"record": [record]},
+        batch_idx=0,
+        dataloader_idx=0,
+    )
+
+    import json
+
+    stem = "affinity_record_a_L2__distogram_constant_far"
+    with (tmp_path / "out" / "record_a" / f"{stem}.json").open() as f:
+        summary = json.load(f)
+    artifact = np.load(tmp_path / "out" / "record_a" / f"{stem}.npz")
+
+    assert summary["distogram_intervention"] == "constant_far"
+    assert summary["conditioner_added"] is True
+    assert summary["effective_distogram"]["intervened_pair_count"] == 2
+    assert summary["experiment"] == {"seed": 7}
+    assert artifact["bins"].dtype == np.uint8
+    assert artifact["intervened_pair_mask"].sum() == 2

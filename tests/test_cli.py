@@ -9,10 +9,17 @@ import pytest
 
 from boltz.main import (
     _available_cpu_count,
+    _resolved_input_sources,
     _resolve_affinity_max_parallel_samples,
     _validate_checkpoint_for_load,
     predict,
 )
+
+
+def test_resolved_input_sources_accepts_expanded_input_list(tmp_path: Path):
+    inputs = [tmp_path / "a.yaml", tmp_path / "b.yaml"]
+
+    assert _resolved_input_sources(inputs) == [str(path.resolve()) for path in inputs]
 
 
 class TestSubsampleMsaDefault:
@@ -28,6 +35,14 @@ class TestSubsampleMsaDefault:
                 return
         pytest.fail("subsample_msa parameter not found on predict command")
 
+
+def test_predict_exposes_embedding_resume_options():
+    params = {param.name: param for param in predict.params}
+
+    assert params["resume_embeddings_dir"].default is None
+    assert params["resume_recycling_steps"].default is None
+
+
     def test_is_boolean_flag_pair(self):
         """subsample_msa should support --subsample_msa / --no_subsample_msa."""
         for param in predict.params:
@@ -41,6 +56,14 @@ class TestSubsampleMsaDefault:
                 )
                 return
         pytest.fail("subsample_msa parameter not found on predict command")
+
+
+def test_predict_exposes_affinity_structure_skip():
+    params = {param.name: param for param in predict.params}
+
+    assert params["affinity_skip_structure"].is_flag
+    assert params["affinity_skip_structure"].default is False
+    assert params["affinity_prepared_geometry_label"].default is None
 
 
 class TestBatchSizeOption:

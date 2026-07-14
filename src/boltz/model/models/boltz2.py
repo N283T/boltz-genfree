@@ -1,4 +1,5 @@
 import gc
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -20,6 +21,9 @@ from boltz.model.loss.confidencev2 import (
 )
 from boltz.model.loss.distogramv2 import distogram_loss
 from boltz.model.modules.affinity import AffinityModule
+from boltz.model.modules.affinity_distogram import (
+    validate_affinity_distogram_mode,
+)
 from boltz.model.modules.confidencev2 import ConfidenceModule
 from boltz.model.modules.diffusion_conditioning import DiffusionConditioning
 from boltz.model.modules.diffusionv2 import AtomDiffusion
@@ -106,6 +110,7 @@ class Boltz2(LightningModule):
         use_templates_v2: bool = False,
         use_kernels: bool = False,
         use_flash_attn: bool = False,
+        affinity_distogram_modes: Optional[list[str]] = None,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -299,6 +304,12 @@ class Boltz2(LightningModule):
         self.affinity_prediction = affinity_prediction
         self.affinity_ensemble = affinity_ensemble
         self.affinity_mw_correction = affinity_mw_correction
+        if affinity_distogram_modes is None:
+            affinity_distogram_modes = []
+        self.affinity_distogram_modes = tuple(
+            validate_affinity_distogram_mode(mode)
+            for mode in dict.fromkeys(["control", *affinity_distogram_modes])
+        )
         self.run_trunk_and_structure = run_trunk_and_structure
         self.skip_run_structure = skip_run_structure
         self.token_level_confidence = token_level_confidence
@@ -406,6 +417,109 @@ class Boltz2(LightningModule):
                 x["label"] for x in self.val_group_mapper.values()
             }, msg
 
+    def _run_affinity_mode(
+        self,
+        *,
+        s_inputs: Tensor,
+        z_affinity: Tensor,
+        coords_affinity: Tensor,
+        feats: dict[str, Tensor],
+        mode: str,
+    ) -> dict[str, Tensor]:
+        """Run one affinity intervention against fixed trunk and pose tensors."""
+        if self.affinity_ensemble:
+            member1 = self.affinity_module1(
+                s_inputs=s_inputs,
+                z=z_affinity,
+                x_pred=coords_affinity,
+                feats=feats,
+                multiplicity=1,
+                use_kernels=self.use_kernels,
+                distogram_mode=mode,
+                return_distogram=True,
+            )
+            member2 = self.affinity_module2(
+                s_inputs=s_inputs,
+                z=z_affinity,
+                x_pred=coords_affinity,
+                feats=feats,
+                multiplicity=1,
+                use_kernels=self.use_kernels,
+                distogram_mode=mode,
+            )
+            probability1 = torch.nn.functional.sigmoid(
+                member1["affinity_logits_binary"]
+            )
+            probability2 = torch.nn.functional.sigmoid(
+                member2["affinity_logits_binary"]
+            )
+            output = {
+                "affinity_pred_value": (
+                    member1["affinity_pred_value"]
+                    + member2["affinity_pred_value"]
+                )
+                / 2,
+                "affinity_probability_binary": (probability1 + probability2) / 2,
+                "affinity_pred_value1": member1["affinity_pred_value"],
+                "affinity_probability_binary1": probability1,
+                "affinity_pred_value2": member2["affinity_pred_value"],
+                "affinity_probability_binary2": probability2,
+                "affinity_distogram_bins": member1["affinity_distogram_bins"],
+                "affinity_distogram_intervened_pair_mask": member1[
+                    "affinity_distogram_intervened_pair_mask"
+                ],
+            }
+            if self.affinity_mw_correction:
+                model_coef = 1.03525938
+                mw_coef = -0.59992683
+                bias = 2.83288489
+                mw = feats["affinity_mw"][0] ** 0.3
+                output["affinity_pred_value"] = (
+                    model_coef * output["affinity_pred_value"] + mw_coef * mw + bias
+                )
+            return output
+
+        member = self.affinity_module(
+            s_inputs=s_inputs,
+            z=z_affinity,
+            x_pred=coords_affinity,
+            feats=feats,
+            multiplicity=1,
+            use_kernels=self.use_kernels,
+            distogram_mode=mode,
+            return_distogram=True,
+        )
+        return {
+            "affinity_pred_value": member["affinity_pred_value"],
+            "affinity_probability_binary": torch.nn.functional.sigmoid(
+                member["affinity_logits_binary"]
+            ),
+            "affinity_distogram_bins": member["affinity_distogram_bins"],
+            "affinity_distogram_intervened_pair_mask": member[
+                "affinity_distogram_intervened_pair_mask"
+            ],
+        }
+
+    def _select_affinity_coordinates(
+        self,
+        dict_out: dict[str, Tensor],
+        feats: dict[str, Tensor],
+    ) -> Tensor:
+        """Select predicted coordinates or reuse prepared input geometry."""
+        if self.skip_run_structure:
+            coordinates = feats["coords"]
+            if coordinates.ndim != 4 or coordinates.shape[1] != 1:
+                msg = (
+                    "Prepared affinity coordinates must have shape "
+                    "(batch, 1, atoms, 3)."
+                )
+                raise ValueError(msg)
+            return coordinates
+
+        argsort = torch.argsort(dict_out["iptm"], descending=True)
+        best_idx = argsort[0].item()
+        return dict_out["sample_atom_coords"].detach()[best_idx][None, None]
+
     def forward(
         self,
         feats: dict[str, Tensor],
@@ -415,6 +529,8 @@ class Boltz2(LightningModule):
         diffusion_samples: int = 1,
         max_parallel_samples: Optional[int] = None,
         run_confidence_sequentially: bool = False,
+        resume_embeddings: Optional[list[tuple[Tensor, Tensor]]] = None,
+        resume_recycling_steps: Optional[int] = None,
     ) -> dict[str, Tensor]:
         with torch.set_grad_enabled(
             self.training and self.structure_prediction_training
@@ -439,12 +555,59 @@ class Boltz2(LightningModule):
             # Perform rounds of the pairwise stack
             s = torch.zeros_like(s_init)
             z = torch.zeros_like(z_init)
+            first_recycling_step = 0
+            if resume_embeddings is not None:
+                if resume_recycling_steps is None:
+                    msg = "resume_recycling_steps is required with resume_embeddings."
+                    raise ValueError(msg)
+                if resume_recycling_steps < 0:
+                    msg = "resume_recycling_steps must be non-negative."
+                    raise ValueError(msg)
+                if resume_recycling_steps > recycling_steps:
+                    msg = (
+                        "resume_recycling_steps cannot exceed the requested "
+                        "recycling_steps."
+                    )
+                    raise ValueError(msg)
+                if len(resume_embeddings) != s.shape[0]:
+                    msg = (
+                        f"Got {len(resume_embeddings)} resume embedding rows for "
+                        f"batch size {s.shape[0]}."
+                    )
+                    raise ValueError(msg)
+
+                for batch_idx, (resume_s_raw, resume_z_raw) in enumerate(
+                    resume_embeddings
+                ):
+                    resume_s = resume_s_raw.to(device=s.device, dtype=s.dtype)
+                    resume_z = resume_z_raw.to(device=z.device, dtype=z.dtype)
+                    expected_tokens = int(
+                        feats["token_pad_mask"][batch_idx].sum().item()
+                    )
+                    expected_s = (expected_tokens, s.shape[-1])
+                    expected_z = (expected_tokens, expected_tokens, z.shape[-1])
+                    if tuple(resume_s.shape) != expected_s:
+                        msg = (
+                            f"Resume s embedding row {batch_idx} has shape "
+                            f"{tuple(resume_s.shape)}; expected {expected_s}."
+                        )
+                        raise ValueError(msg)
+                    if tuple(resume_z.shape) != expected_z:
+                        msg = (
+                            f"Resume z embedding row {batch_idx} has shape "
+                            f"{tuple(resume_z.shape)}; expected {expected_z}."
+                        )
+                        raise ValueError(msg)
+                    s[batch_idx, :expected_tokens] = resume_s
+                    z[batch_idx, :expected_tokens, :expected_tokens] = resume_z
+
+                first_recycling_step = resume_recycling_steps + 1
 
             # Compute pairwise mask
             mask = feats["token_pad_mask"].float()
             pair_mask = mask[:, :, None] * mask[:, None, :]
             if self.run_trunk_and_structure:
-                for i in range(recycling_steps + 1):
+                for i in range(first_recycling_step, recycling_steps + 1):
                     with torch.set_grad_enabled(
                         self.training
                         and self.structure_prediction_training
@@ -632,106 +795,25 @@ class Boltz2(LightningModule):
             )
             z_affinity = z * cross_pair_mask[None, :, :, None]
 
-            argsort = torch.argsort(dict_out["iptm"], descending=True)
-            best_idx = argsort[0].item()
-            coords_affinity = dict_out["sample_atom_coords"].detach()[best_idx][
-                None, None
-            ]
+            coords_affinity = self._select_affinity_coordinates(dict_out, feats)
             s_inputs = self.input_embedder(feats, affinity=True)
 
             with torch.autocast(autocast_device_type(s.device.type), enabled=False):
-                if self.affinity_ensemble:
-                    dict_out_affinity1 = self.affinity_module1(
+                affinity_by_distogram_mode = {
+                    mode: self._run_affinity_mode(
                         s_inputs=s_inputs.detach(),
-                        z=z_affinity.detach(),
-                        x_pred=coords_affinity,
+                        z_affinity=z_affinity.detach(),
+                        coords_affinity=coords_affinity,
                         feats=feats,
-                        multiplicity=1,
-                        use_kernels=self.use_kernels,
+                        mode=mode,
                     )
-
-                    dict_out_affinity1["affinity_probability_binary"] = (
-                        torch.nn.functional.sigmoid(
-                            dict_out_affinity1["affinity_logits_binary"]
-                        )
-                    )
-                    dict_out_affinity2 = self.affinity_module2(
-                        s_inputs=s_inputs.detach(),
-                        z=z_affinity.detach(),
-                        x_pred=coords_affinity,
-                        feats=feats,
-                        multiplicity=1,
-                        use_kernels=self.use_kernels,
-                    )
-                    dict_out_affinity2["affinity_probability_binary"] = (
-                        torch.nn.functional.sigmoid(
-                            dict_out_affinity2["affinity_logits_binary"]
-                        )
-                    )
-
-                    dict_out_affinity_ensemble = {
-                        "affinity_pred_value": (
-                            dict_out_affinity1["affinity_pred_value"]
-                            + dict_out_affinity2["affinity_pred_value"]
-                        )
-                        / 2,
-                        "affinity_probability_binary": (
-                            dict_out_affinity1["affinity_probability_binary"]
-                            + dict_out_affinity2["affinity_probability_binary"]
-                        )
-                        / 2,
-                    }
-
-                    dict_out_affinity1 = {
-                        "affinity_pred_value1": dict_out_affinity1[
-                            "affinity_pred_value"
-                        ],
-                        "affinity_probability_binary1": dict_out_affinity1[
-                            "affinity_probability_binary"
-                        ],
-                    }
-                    dict_out_affinity2 = {
-                        "affinity_pred_value2": dict_out_affinity2[
-                            "affinity_pred_value"
-                        ],
-                        "affinity_probability_binary2": dict_out_affinity2[
-                            "affinity_probability_binary"
-                        ],
-                    }
-                    if self.affinity_mw_correction:
-                        model_coef = 1.03525938
-                        mw_coef = -0.59992683
-                        bias = 2.83288489
-                        mw = feats["affinity_mw"][0] ** 0.3
-                        dict_out_affinity_ensemble["affinity_pred_value"] = (
-                            model_coef
-                            * dict_out_affinity_ensemble["affinity_pred_value"]
-                            + mw_coef * mw
-                            + bias
-                        )
-
-                    dict_out.update(dict_out_affinity_ensemble)
-                    dict_out.update(dict_out_affinity1)
-                    dict_out.update(dict_out_affinity2)
-                else:
-                    dict_out_affinity = self.affinity_module(
-                        s_inputs=s_inputs.detach(),
-                        z=z_affinity.detach(),
-                        x_pred=coords_affinity,
-                        feats=feats,
-                        multiplicity=1,
-                        use_kernels=self.use_kernels,
-                    )
-                    dict_out.update(
-                        {
-                            "affinity_pred_value": dict_out_affinity[
-                                "affinity_pred_value"
-                            ],
-                            "affinity_probability_binary": torch.nn.functional.sigmoid(
-                                dict_out_affinity["affinity_logits_binary"]
-                            ),
-                        }
-                    )
+                    for mode in self.affinity_distogram_modes
+                }
+                primary_mode = self.affinity_distogram_modes[0]
+                dict_out.update(affinity_by_distogram_mode[primary_mode])
+                dict_out["affinity_by_distogram_mode"] = (
+                    affinity_by_distogram_mode
+                )
 
         return dict_out
 
@@ -1070,8 +1152,82 @@ class Boltz2(LightningModule):
                 # This will aggregate, compute and log all metrics
                 validator.on_epoch_end(model=self)
 
+    @staticmethod
+    def _resume_embedding_path(base_dir: Path, record_id: str) -> Path:
+        nested = base_dir / record_id / f"embeddings_{record_id}.npz"
+        if nested.exists():
+            return nested
+        return base_dir / f"embeddings_{record_id}.npz"
+
+    @staticmethod
+    def _normalize_resume_embedding(array: np.ndarray, name: str) -> Tensor:
+        tensor = torch.as_tensor(array)
+        expected_ndim = {"s": 2, "z": 3}.get(name)
+        if expected_ndim is None:
+            msg = f"Unknown resume embedding name: {name}"
+            raise ValueError(msg)
+        if tensor.ndim == expected_ndim + 1 and tensor.shape[0] == 1:
+            tensor = tensor.squeeze(0)
+        if tensor.ndim != expected_ndim:
+            msg = (
+                f"Resume {name} embedding must have {expected_ndim} dimensions; "
+                f"got shape {tuple(tensor.shape)}."
+            )
+            raise ValueError(msg)
+        return tensor
+
+    @classmethod
+    def _load_resume_embeddings(
+        cls,
+        records: list[Any],
+        base_dir: Path,
+        token_indices: Optional[Tensor] = None,
+        token_masks: Optional[Tensor] = None,
+    ) -> list[tuple[Tensor, Tensor]]:
+        embeddings = []
+        for record_idx, record in enumerate(records):
+            path = cls._resume_embedding_path(base_dir, record.id)
+            if not path.exists():
+                msg = f"Missing resume embeddings for {record.id}: {path}"
+                raise FileNotFoundError(msg)
+            with np.load(path) as data:
+                if "s" not in data or "z" not in data:
+                    msg = f"Resume embeddings must contain s and z arrays: {path}"
+                    raise ValueError(msg)
+                s = cls._normalize_resume_embedding(data["s"], "s")
+                z = cls._normalize_resume_embedding(data["z"], "z")
+
+            if token_indices is not None:
+                indices = token_indices[record_idx].detach().cpu().long()
+                if token_masks is not None:
+                    indices = indices[
+                        token_masks[record_idx].detach().cpu().bool()
+                    ]
+                if indices.numel() == 0:
+                    msg = f"No resume token indices for {record.id}."
+                    raise ValueError(msg)
+                if indices.min().item() < 0 or indices.max().item() >= s.shape[0]:
+                    msg = (
+                        f"Resume token indices for {record.id} are outside the "
+                        f"saved token range 0..{s.shape[0] - 1}."
+                    )
+                    raise ValueError(msg)
+                s = s.index_select(0, indices)
+                z = z.index_select(0, indices).index_select(1, indices)
+            embeddings.append((s, z))
+        return embeddings
+
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> dict:
         try:
+            resume_embeddings = None
+            resume_embeddings_dir = self.predict_args.get("resume_embeddings_dir")
+            if resume_embeddings_dir is not None:
+                resume_embeddings = self._load_resume_embeddings(
+                    batch["record"],
+                    Path(resume_embeddings_dir),
+                    token_indices=batch.get("resume_token_idx"),
+                    token_masks=batch.get("token_pad_mask"),
+                )
             out = self(
                 batch,
                 recycling_steps=self.predict_args["recycling_steps"],
@@ -1079,6 +1235,10 @@ class Boltz2(LightningModule):
                 diffusion_samples=self.predict_args["diffusion_samples"],
                 max_parallel_samples=self.predict_args["max_parallel_samples"],
                 run_confidence_sequentially=True,
+                resume_embeddings=resume_embeddings,
+                resume_recycling_steps=self.predict_args.get(
+                    "resume_recycling_steps"
+                ),
             )
             pred_dict = {"exception": False}
             if "keys_dict_batch" in self.predict_args:
@@ -1093,7 +1253,10 @@ class Boltz2(LightningModule):
             if "keys_dict_out" in self.predict_args:
                 for key in self.predict_args["keys_dict_out"]:
                     pred_dict[key] = out[key]
-            pred_dict["coords"] = out["sample_atom_coords"]
+            pred_dict["coords"] = out.get(
+                "sample_atom_coords",
+                batch["coords"].squeeze(1),
+            )
             if self.confidence_prediction:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)
                 if self.predict_args.get("write_full_pde", True):
@@ -1127,6 +1290,9 @@ class Boltz2(LightningModule):
                     pred_dict["protein_iptm"] = out["protein_iptm"]
                     pred_dict["pair_chains_iptm"] = out["pair_chains_iptm"]
             if self.affinity_prediction:
+                pred_dict["affinity_by_distogram_mode"] = out[
+                    "affinity_by_distogram_mode"
+                ]
                 pred_dict["affinity_pred_value"] = out["affinity_pred_value"]
                 pred_dict["affinity_probability_binary"] = out[
                     "affinity_probability_binary"

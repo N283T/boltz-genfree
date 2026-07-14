@@ -3,6 +3,11 @@ from torch import nn
 
 import boltz.model.layers.initialize as init
 from boltz.model.layers.pairformer import PairformerNoSeqModule
+from boltz.model.modules.affinity_distogram import (
+    build_affinity_distogram_bins,
+    uses_affinity_conditioning,
+    validate_affinity_distogram_mode,
+)
 from boltz.model.modules.encodersv2 import PairwiseConditioning
 from boltz.model.modules.transformersv2 import DiffusionTransformer
 from boltz.model.modules.utils import LinearNoBias
@@ -82,7 +87,10 @@ class AffinityModule(nn.Module):
         feats,
         multiplicity=1,
         use_kernels=False,
+        distogram_mode="control",
+        return_distogram=False,
     ):
+        distogram_mode = validate_affinity_distogram_mode(distogram_mode)
         z = self.z_linear(self.z_norm(z))
         z = z.repeat_interleave(multiplicity, 0)
 
@@ -91,6 +99,16 @@ class AffinityModule(nn.Module):
             + self.s_to_z_prod_in1(s_inputs)[:, :, None, :]
             + self.s_to_z_prod_in2(s_inputs)[:, None, :, :]
         )
+
+        pad_token_mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
+        rec_mask = (feats["mol_type"] == 0).repeat_interleave(multiplicity, 0)
+        rec_mask = rec_mask * pad_token_mask
+        lig_mask = (
+            feats["affinity_token_mask"]
+            .repeat_interleave(multiplicity, 0)
+            .to(torch.bool)
+        )
+        lig_mask = lig_mask * pad_token_mask
 
         token_to_rep_atom = feats["token_to_rep_atom"]
         token_to_rep_atom = token_to_rep_atom.repeat_interleave(multiplicity, 0)
@@ -102,22 +120,21 @@ class AffinityModule(nn.Module):
             B = BM // multiplicity
             mult = multiplicity
         x_pred_repr = torch.bmm(token_to_rep_atom.float(), x_pred)
-        d = torch.cdist(x_pred_repr, x_pred_repr)
-
-        distogram = (d.unsqueeze(-1) > self.boundaries).sum(dim=-1).long()
-        distogram = self.dist_bin_pairwise_embed(distogram)
-
-        z = z + self.pairwise_conditioner(z_trunk=z, token_rel_pos_feats=distogram)
-
-        pad_token_mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
-        rec_mask = (feats["mol_type"] == 0).repeat_interleave(multiplicity, 0)
-        rec_mask = rec_mask * pad_token_mask
-        lig_mask = (
-            feats["affinity_token_mask"]
-            .repeat_interleave(multiplicity, 0)
-            .to(torch.bool)
+        distogram_bins, intervened_pair_mask = build_affinity_distogram_bins(
+            representative_coordinates=x_pred_repr,
+            boundaries=self.boundaries,
+            receptor_mask=rec_mask,
+            ligand_mask=lig_mask,
+            mode=distogram_mode,
         )
-        lig_mask = lig_mask * pad_token_mask
+        distogram = self.dist_bin_pairwise_embed(distogram_bins)
+
+        if uses_affinity_conditioning(distogram_mode):
+            z = z + self.pairwise_conditioner(
+                z_trunk=z,
+                token_rel_pos_feats=distogram,
+            )
+
         cross_pair_mask = (
             lig_mask[:, :, None] * rec_mask[:, None, :]
             + rec_mask[:, :, None] * lig_mask[:, None, :]
@@ -135,6 +152,11 @@ class AffinityModule(nn.Module):
         out_dict.update(
             self.affinity_heads(z=z, feats=feats, multiplicity=multiplicity)
         )
+        if return_distogram:
+            out_dict["affinity_distogram_bins"] = distogram_bins
+            out_dict["affinity_distogram_intervened_pair_mask"] = (
+                intervened_pair_mask
+            )
 
         return out_dict
 

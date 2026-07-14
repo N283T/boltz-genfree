@@ -243,6 +243,9 @@ class PredictionDataset(torch.utils.data.Dataset):
                 max_tokens=256,
                 max_atoms=2048,
             )
+            resume_token_idx = torch.from_numpy(
+                tokenized.tokens["token_idx"].copy()
+            ).long()
 
         # Load conformers
         molecules = {}
@@ -287,6 +290,9 @@ class PredictionDataset(torch.utils.data.Dataset):
             override_method=self.override_method,
             compute_affinity=self.affinity,
         )
+
+        if self.affinity:
+            features["resume_token_idx"] = resume_token_idx
 
         # Add record
         features["record"] = record

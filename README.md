@@ -2,6 +2,10 @@
 
 Community-maintained fork of [Boltz](https://github.com/jwohlwend/boltz) with bug fixes, broader compatibility, and CI.
 
+This private branch also contains the repository-owned affinity distogram
+intervention and embedding-resume hooks described in
+[docs/distogram_interventions.md](docs/distogram_interventions.md).
+
 ## What's different from upstream?
 
 **Compatibility:**

@@ -6,7 +6,11 @@ import pytest
 
 from boltz.data import const
 from boltz.data.types import AffinityInfo, ChainInfo, Manifest, Record, StructureInfo
-from boltz.main import expand_affinity_records, filter_inputs_affinity
+from boltz.main import (
+    expand_affinity_records,
+    filter_inputs_affinity,
+    filter_inputs_structure,
+)
 
 
 def _make_affinity_record(record_id: str = "target") -> Record:
@@ -81,7 +85,9 @@ def test_expand_affinity_records_sanitizes_output_id():
 
 
 def test_expand_affinity_records_supports_legacy_chain_id_only():
-    record = replace(_make_affinity_record(), affinity=AffinityInfo(chain_id=1, mw=123.4))
+    record = replace(
+        _make_affinity_record(), affinity=AffinityInfo(chain_id=1, mw=123.4)
+    )
     manifest = Manifest(records=[record])
 
     expanded = expand_affinity_records(manifest)
@@ -117,6 +123,25 @@ def test_filter_inputs_affinity_tracks_per_copy_outputs(tmp_path: Path):
     assert filtered.records[0].affinity.chain_name == "L2"
 
 
+def test_filter_inputs_affinity_requires_requested_intervention_outputs(
+    tmp_path: Path,
+):
+    pred_dir = tmp_path / "predictions" / "target"
+    pred_dir.mkdir(parents=True)
+    (pred_dir / "pre_affinity_target.npz").write_bytes(b"ok")
+    (pred_dir / "affinity_target_L1.json").write_text("{}")
+
+    manifest = expand_affinity_records(Manifest(records=[_make_affinity_record()]))
+    filtered = filter_inputs_affinity(
+        manifest,
+        tmp_path,
+        override=False,
+        distogram_modes=("control", "constant_far"),
+    )
+
+    assert len(filtered.records) == 2
+
+
 def test_filter_inputs_affinity_keeps_existing_outputs_with_override(tmp_path: Path):
     pred_dir = tmp_path / "predictions" / "target"
     pred_dir.mkdir(parents=True)
@@ -129,3 +154,20 @@ def test_filter_inputs_affinity_keeps_existing_outputs_with_override(tmp_path: P
     filtered = filter_inputs_affinity(manifest, tmp_path, override=True)
 
     assert len(filtered.records) == 2
+
+
+def test_filter_inputs_structure_does_not_treat_embedding_cache_as_prediction(
+    tmp_path: Path,
+):
+    pred_dir = tmp_path / "predictions" / "target"
+    pred_dir.mkdir(parents=True)
+    (pred_dir / "embeddings_target.npz").write_bytes(b"cache")
+    manifest = Manifest(records=[_make_affinity_record()])
+
+    filtered = filter_inputs_structure(
+        manifest,
+        tmp_path,
+        resume_embeddings=True,
+    )
+
+    assert [record.id for record in filtered.records] == ["target"]

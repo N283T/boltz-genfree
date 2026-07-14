@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import pickle
 import platform
@@ -105,6 +106,21 @@ def _validate_checkpoint_for_load(path: Path, description: str) -> None:
             "or pass a valid checkpoint path."
         )
         raise click.ClickException(msg)
+
+
+def _sha256_file(path: Path) -> str:
+    """Return the SHA-256 digest of a local artifact."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _resolved_input_sources(data: Union[Path, List[Path]]) -> list[str]:
+    """Return stable absolute paths after input expansion."""
+    paths = [data] if isinstance(data, Path) else data
+    return [str(path.resolve()) for path in paths]
 
 
 def _available_cpu_count() -> int:
@@ -438,6 +454,7 @@ def filter_inputs_structure(
     manifest: Manifest,
     outdir: Path,
     override: bool = False,
+    resume_embeddings: bool = False,
 ) -> Manifest:
     """Filter the manifest to only include missing predictions.
 
@@ -449,6 +466,8 @@ def filter_inputs_structure(
         The output directory.
     override: bool
         Whether to override existing predictions.
+    resume_embeddings: bool
+        Ignore directories containing only cached embeddings.
 
     Returns
     -------
@@ -461,7 +480,18 @@ def filter_inputs_structure(
     # Check if existing predictions are found (only top-level prediction folders)
     pred_dir = outdir / "predictions"
     if pred_dir.exists():
-        existing = {d.name for d in pred_dir.iterdir() if d.is_dir()}
+        if resume_embeddings:
+            existing = {
+                d.name
+                for d in pred_dir.iterdir()
+                if d.is_dir()
+                and (
+                    any(d.glob(f"{d.name}_model_*.cif"))
+                    or any(d.glob(f"{d.name}_model_*.pdb"))
+                )
+            }
+        else:
+            existing = {d.name for d in pred_dir.iterdir() if d.is_dir()}
     else:
         existing = set()
 
@@ -497,6 +527,7 @@ def filter_inputs_affinity(
     manifest: Manifest,
     outdir: Path,
     override: bool = False,
+    distogram_modes: tuple[str, ...] = ("control",),
 ) -> Manifest:
     """Check the input data and output directory for affinity.
 
@@ -521,14 +552,22 @@ def filter_inputs_affinity(
 
     pred_dir = outdir / "predictions"
 
-    def affinity_output_path(record):
+    def has_affinity_outputs(record):
         output_id = get_affinity_output_id(record)
-        return pred_dir / record.id / f"affinity_{output_id}.json"
+        record_dir = pred_dir / record.id
+        legacy_control = record_dir / f"affinity_{output_id}.json"
+        return all(
+            (
+                record_dir / f"affinity_{output_id}__distogram_{mode}.json"
+            ).exists()
+            or (mode == "control" and legacy_control.exists())
+            for mode in distogram_modes
+        )
 
     existing = [
         record
         for record in manifest.records
-        if record.affinity and affinity_output_path(record).exists()
+        if record.affinity and has_affinity_outputs(record)
     ]
 
     # Remove them from the input data
@@ -1292,6 +1331,43 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     help="Whether to add the Molecular Weight correction to the affinity value head.",
 )
 @click.option(
+    "--affinity_distogram_mode",
+    "affinity_distogram_modes",
+    type=click.Choice(
+        [
+            "control",
+            "collapsed_coordinates",
+            "constant_middle",
+            "constant_far",
+            "zero_conditioning",
+        ]
+    ),
+    multiple=True,
+    default=("control",),
+    show_default=True,
+    help=(
+        "Affinity distogram intervention. Repeat this option to evaluate "
+        "multiple modes against the same trunk and selected pose."
+    ),
+)
+@click.option(
+    "--affinity_skip_structure",
+    is_flag=True,
+    help=(
+        "Skip affinity-stage structure diffusion and score the coordinates "
+        "stored in pre_affinity artifacts directly."
+    ),
+)
+@click.option(
+    "--affinity_prepared_geometry_label",
+    type=str,
+    default=None,
+    help=(
+        "Provenance label for prepared coordinates used with "
+        "--affinity_skip_structure."
+    ),
+)
+@click.option(
     "--sampling_steps_affinity",
     type=int,
     help="The number of sampling steps to use for affinity prediction.",
@@ -1347,6 +1423,21 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     is_flag=True,
     help="Whether to dump the s and z embeddings into a npz file.",
 )
+@click.option(
+    "--resume_embeddings_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Directory containing embeddings_<id>.npz files from an earlier "
+        "Boltz-2 run. Both flat and predictions/<id>/ layouts are accepted."
+    ),
+)
+@click.option(
+    "--resume_recycling_steps",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Recycling step count used to produce the resumed embeddings.",
+)
 def predict(  # noqa: C901, PLR0915, PLR0912
     data: str,
     out_dir: str,
@@ -1381,6 +1472,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     model: Literal["boltz1", "boltz2"],
     method: Optional[str],
     affinity_mw_correction: Optional[bool],
+    affinity_distogram_modes: tuple[str, ...],
+    affinity_skip_structure: bool,
+    affinity_prepared_geometry_label: Optional[str],
     preprocessing_threads: int,
     max_msa_seqs: int,
     subsample_msa: bool,
@@ -1388,6 +1482,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     no_kernels: bool,
     flash_attn: bool,
     write_embeddings: bool,
+    resume_embeddings_dir: Optional[Path],
+    resume_recycling_steps: Optional[int],
 ) -> None:
     """Run predictions with Boltz."""
     import torch
@@ -1402,6 +1498,30 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     from boltz.data.write.writer import BoltzAffinityWriter, BoltzWriter
     from boltz.model.models.boltz1 import Boltz1
     from boltz.model.models.boltz2 import Boltz2
+
+    affinity_distogram_modes = tuple(
+        dict.fromkeys(("control", *affinity_distogram_modes))
+    )
+
+    if resume_embeddings_dir is None and resume_recycling_steps is not None:
+        raise click.UsageError(
+            "--resume_recycling_steps requires --resume_embeddings_dir."
+        )
+    if resume_embeddings_dir is not None:
+        if model != "boltz2":
+            raise click.UsageError(
+                "--resume_embeddings_dir is only supported for Boltz-2."
+            )
+        if resume_recycling_steps is None:
+            raise click.UsageError(
+                "--resume_recycling_steps is required with "
+                "--resume_embeddings_dir."
+            )
+        if resume_recycling_steps > recycling_steps:
+            raise click.UsageError(
+                "--resume_recycling_steps cannot exceed --recycling_steps."
+            )
+        resume_embeddings_dir = resume_embeddings_dir.expanduser().resolve()
 
     # PyTorch 2.6+ defaults torch.load to weights_only=True, which rejects
     # Lightning checkpoints containing OmegaConf config objects and custom types.
@@ -1553,6 +1673,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         manifest=manifest,
         outdir=out_dir,
         override=override,
+        resume_embeddings=resume_embeddings_dir is not None,
     )
 
     # Load processed data
@@ -1704,6 +1825,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_full_pae": write_full_pae,
             "write_full_pde": write_full_pde,
         }
+        if resume_embeddings_dir is not None:
+            predict_args["resume_embeddings_dir"] = str(resume_embeddings_dir)
+            predict_args["resume_recycling_steps"] = resume_recycling_steps
 
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = use_potentials
@@ -1758,6 +1882,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             manifest=manifest_affinity,
             outdir=out_dir,
             override=override,
+            distogram_modes=affinity_distogram_modes,
         )
         if not manifest_filtered.records:
             click.echo("Found existing affinity predictions for all inputs, skipping.")
@@ -1770,9 +1895,55 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         msg += "s." if len(manifest_filtered.records) > 1 else "."
         click.echo(msg)
 
+        if affinity_checkpoint is None:
+            affinity_checkpoint = cache / "boltz2_aff.ckpt"
+        affinity_checkpoint = Path(affinity_checkpoint).expanduser()
+        _validate_checkpoint_for_load(
+            affinity_checkpoint,
+            "Boltz-2 affinity weights",
+        )
+        structure_checkpoint = (
+            Path(checkpoint).expanduser()
+            if checkpoint is not None
+            else cache / "boltz2_conf.ckpt"
+        )
+        _validate_checkpoint_for_load(
+            structure_checkpoint,
+            "Boltz-2 structure weights",
+        )
+
         pred_writer = BoltzAffinityWriter(
             data_dir=processed.targets_dir,
             output_dir=out_dir / "predictions",
+            experiment_metadata={
+                "runtime": "boltz-community",
+                "runtime_version": _pkg_version("boltz-community"),
+                "input_sources": _resolved_input_sources(data),
+                "structure_checkpoint": str(structure_checkpoint.resolve()),
+                "structure_checkpoint_sha256": _sha256_file(
+                    structure_checkpoint
+                ),
+                "affinity_checkpoint": str(affinity_checkpoint.resolve()),
+                "affinity_checkpoint_sha256": _sha256_file(affinity_checkpoint),
+                "seed": seed,
+                "structure_recycling_steps": recycling_steps,
+                "structure_sampling_steps": sampling_steps,
+                "structure_diffusion_samples": diffusion_samples,
+                "affinity_recycling_steps": 5,
+                "affinity_sampling_steps": sampling_steps_affinity,
+                "affinity_diffusion_samples": diffusion_samples_affinity,
+                "affinity_skip_structure": affinity_skip_structure,
+                "affinity_prepared_geometry_label": (
+                    affinity_prepared_geometry_label
+                ),
+                "distogram_modes": list(affinity_distogram_modes),
+                "resume_embeddings_dir": (
+                    str(resume_embeddings_dir)
+                    if resume_embeddings_dir is not None
+                    else None
+                ),
+                "resume_recycling_steps": resume_recycling_steps,
+            },
         )
 
         data_module = Boltz2InferenceDataModule(
@@ -1803,20 +1974,24 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_full_pae": False,
             "write_full_pde": False,
         }
-
-        # Load affinity model
-        if affinity_checkpoint is None:
-            affinity_checkpoint = cache / "boltz2_aff.ckpt"
-        affinity_checkpoint = Path(affinity_checkpoint).expanduser()
+        if resume_embeddings_dir is not None:
+            if resume_recycling_steps > 5:
+                raise click.UsageError(
+                    "--resume_recycling_steps cannot exceed the affinity "
+                    "model's fixed 5 recycling steps."
+                )
+            predict_affinity_args["resume_embeddings_dir"] = str(
+                resume_embeddings_dir
+            )
+            predict_affinity_args["resume_recycling_steps"] = (
+                resume_recycling_steps
+            )
 
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = False
         steering_args.physical_guidance_update = False
         steering_args.contact_guidance_update = False
 
-        _validate_checkpoint_for_load(
-            affinity_checkpoint, "Boltz-2 affinity weights"
-        )
         model_module = Boltz2.load_from_checkpoint(
             affinity_checkpoint,
             strict=True,
@@ -1828,6 +2003,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             msa_args=asdict(msa_args),
             steering_args=asdict(steering_args),
             affinity_mw_correction=affinity_mw_correction,
+            affinity_distogram_modes=list(affinity_distogram_modes),
+            skip_run_structure=affinity_skip_structure,
         )
         model_module.eval()
 
