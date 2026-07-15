@@ -1,10 +1,8 @@
 name: CPU Tests
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  # During the experimental phase, run this manually on the exact branch or
+  # commit intended for publication instead of consuming Actions on every PR.
   workflow_dispatch:
 
 jobs:

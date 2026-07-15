@@ -1,8 +1,7 @@
 name: GPU Tests
 
 on:
-  push:
-    branches: [main]
+  # GPU validation is reserved for deliberate pre-publication checks.
   workflow_dispatch:
 
 jobs:
