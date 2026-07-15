@@ -1370,6 +1370,10 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
             "constant_far",
             "uniform_random",
             "normal_random",
+            "zero_distogram_features",
+            "uniform_mean_embedding",
+            "zero_conditioner_pair_features",
+            "distogram_only_affinity",
             "zero_conditioning",
         ]
     ),

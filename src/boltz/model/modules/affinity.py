@@ -5,6 +5,8 @@ import boltz.model.layers.initialize as init
 from boltz.model.layers.pairformer import PairformerNoSeqModule
 from boltz.model.modules.affinity_distogram import (
     build_affinity_distogram_bins,
+    intervene_affinity_distogram_features,
+    intervene_affinity_pair_features,
     uses_affinity_conditioning,
     validate_affinity_distogram_mode,
 )
@@ -136,10 +138,16 @@ class AffinityModule(nn.Module):
             random_pair_scope=random_pair_scope,
         )
         distogram = self.dist_bin_pairwise_embed(distogram_bins)
+        distogram = intervene_affinity_distogram_features(
+            distogram,
+            self.dist_bin_pairwise_embed.weight,
+            distogram_mode,
+        )
+        z, conditioner_z = intervene_affinity_pair_features(z, distogram_mode)
 
         if uses_affinity_conditioning(distogram_mode):
             z = z + self.pairwise_conditioner(
-                z_trunk=z,
+                z_trunk=conditioner_z,
                 token_rel_pos_feats=distogram,
             )
 

@@ -6,6 +6,8 @@ import torch
 from boltz.model.modules.affinity_distogram import (
     AFFINITY_DISTOGRAM_MODES,
     build_affinity_distogram_bins,
+    intervene_affinity_distogram_features,
+    intervene_affinity_pair_features,
     protein_ligand_pair_mask,
     uses_affinity_conditioning,
 )
@@ -132,6 +134,86 @@ def test_zero_conditioning_retains_real_bins_for_audit(geometry):
     assert torch.equal(zero_conditioning, control)
     assert pair_mask.all()
     assert not uses_affinity_conditioning("zero_conditioning")
+
+
+@pytest.mark.parametrize("mode", ["zero_distogram_features", "uniform_mean_embedding"])
+def test_feature_null_modes_retain_real_bins_and_conditioner(geometry, mode):
+    coordinates, boundaries, receptor_mask, ligand_mask = geometry
+    control, _ = build_affinity_distogram_bins(
+        coordinates,
+        boundaries,
+        receptor_mask,
+        ligand_mask,
+        mode="control",
+    )
+    bins, pair_mask = build_affinity_distogram_bins(
+        coordinates,
+        boundaries,
+        receptor_mask,
+        ligand_mask,
+        mode=mode,
+    )
+
+    assert torch.equal(bins, control)
+    assert pair_mask.all()
+    assert uses_affinity_conditioning(mode)
+
+
+def test_zero_distogram_features_are_structure_independent():
+    first = torch.randn(1, 4, 4, 8)
+    second = torch.randn(1, 4, 4, 8)
+    weights = torch.randn(64, 8)
+
+    first_result = intervene_affinity_distogram_features(
+        first, weights, "zero_distogram_features"
+    )
+    second_result = intervene_affinity_distogram_features(
+        second, weights, "zero_distogram_features"
+    )
+
+    assert torch.equal(first_result, torch.zeros_like(first))
+    assert torch.equal(first_result, second_result)
+
+
+def test_uniform_mean_embedding_is_structure_independent():
+    first = torch.randn(1, 4, 4, 8)
+    second = torch.randn(1, 4, 4, 8)
+    weights = torch.arange(64 * 8, dtype=torch.float32).reshape(64, 8)
+    expected = weights.mean(dim=0).view(1, 1, 1, 8).expand_as(first)
+
+    first_result = intervene_affinity_distogram_features(
+        first, weights, "uniform_mean_embedding"
+    )
+    second_result = intervene_affinity_distogram_features(
+        second, weights, "uniform_mean_embedding"
+    )
+
+    assert torch.equal(first_result, expected)
+    assert torch.equal(first_result, second_result)
+
+
+def test_zero_conditioner_pair_features_preserves_residual():
+    z = torch.randn(1, 4, 4, 8)
+
+    residual, conditioner = intervene_affinity_pair_features(
+        z, "zero_conditioner_pair_features"
+    )
+
+    assert torch.equal(residual, z)
+    assert torch.equal(conditioner, torch.zeros_like(z))
+    assert uses_affinity_conditioning("zero_conditioner_pair_features")
+
+
+def test_distogram_only_affinity_zeros_both_pair_feature_paths():
+    z = torch.randn(1, 4, 4, 8)
+
+    residual, conditioner = intervene_affinity_pair_features(
+        z, "distogram_only_affinity"
+    )
+
+    assert torch.equal(residual, torch.zeros_like(z))
+    assert torch.equal(conditioner, torch.zeros_like(z))
+    assert uses_affinity_conditioning("distogram_only_affinity")
 
 
 @pytest.mark.parametrize("mode", ["uniform_random", "normal_random"])

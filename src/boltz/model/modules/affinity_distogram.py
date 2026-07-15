@@ -12,6 +12,10 @@ AffinityDistogramMode = Literal[
     "constant_far",
     "uniform_random",
     "normal_random",
+    "zero_distogram_features",
+    "uniform_mean_embedding",
+    "zero_conditioner_pair_features",
+    "distogram_only_affinity",
     "zero_conditioning",
 ]
 RandomPairScope = Literal["all", "protein_ligand"]
@@ -23,6 +27,10 @@ AFFINITY_DISTOGRAM_MODES: tuple[AffinityDistogramMode, ...] = (
     "constant_far",
     "uniform_random",
     "normal_random",
+    "zero_distogram_features",
+    "uniform_mean_embedding",
+    "zero_conditioner_pair_features",
+    "distogram_only_affinity",
     "zero_conditioning",
 )
 
@@ -64,9 +72,10 @@ def build_affinity_distogram_bins(
     Constant interventions replace only protein-ligand pairs. Protein-protein
     and ligand-ligand geometry remains coordinate-derived. Collapsed coordinates
     affect all pairs containing a ligand token. Random interventions replace all
-    valid pairs with a symmetric, structure-independent pseudo-distogram. Zero
-    conditioning retains the real bins for auditing; the caller is responsible
-    for skipping the conditioner term for every valid affinity token pair.
+    valid pairs with a symmetric, structure-independent pseudo-distogram.
+    Feature-level null interventions and zero conditioning retain the real bins
+    for auditing. The caller replaces the embedded features for feature-level
+    interventions or skips the conditioner term for zero conditioning.
     """
     mode = validate_affinity_distogram_mode(mode)
     if representative_coordinates.ndim != COORDINATE_DIMENSIONS:
@@ -147,7 +156,13 @@ def build_affinity_distogram_bins(
         intervened_pair_mask = torch.zeros_like(valid_pair_mask)
     elif mode == "collapsed_coordinates":
         intervened_pair_mask = ligand_pair_mask
-    elif mode == "zero_conditioning":
+    elif mode in {
+        "zero_distogram_features",
+        "uniform_mean_embedding",
+        "zero_conditioner_pair_features",
+        "distogram_only_affinity",
+        "zero_conditioning",
+    }:
         intervened_pair_mask = valid_pair_mask
     else:
         intervened_pair_mask = protein_ligand_mask
@@ -160,6 +175,34 @@ def build_affinity_distogram_bins(
         bins = torch.where(protein_ligand_mask, far_bin, bins)
 
     return bins, intervened_pair_mask
+
+
+def intervene_affinity_distogram_features(
+    distogram: Tensor,
+    embedding_weight: Tensor,
+    mode: str,
+) -> Tensor:
+    """Apply a structure-independent intervention after bin embedding."""
+    mode = validate_affinity_distogram_mode(mode)
+    if mode == "zero_distogram_features":
+        return torch.zeros_like(distogram)
+    if mode == "uniform_mean_embedding":
+        mean_embedding = embedding_weight.mean(dim=0)
+        return mean_embedding.view(*([1] * (distogram.ndim - 1)), -1).expand_as(
+            distogram
+        )
+    return distogram
+
+
+def intervene_affinity_pair_features(z: Tensor, mode: str) -> tuple[Tensor, Tensor]:
+    """Return residual and conditioner pair features for a mechanism ablation."""
+    mode = validate_affinity_distogram_mode(mode)
+    if mode == "distogram_only_affinity":
+        zeros = torch.zeros_like(z)
+        return zeros, zeros
+    if mode == "zero_conditioner_pair_features":
+        return z, torch.zeros_like(z)
+    return z, z
 
 
 def uses_affinity_conditioning(mode: str) -> bool:
