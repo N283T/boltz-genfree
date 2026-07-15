@@ -10,14 +10,19 @@ AffinityDistogramMode = Literal[
     "collapsed_coordinates",
     "constant_middle",
     "constant_far",
+    "uniform_random",
+    "normal_random",
     "zero_conditioning",
 ]
+RandomPairScope = Literal["all", "protein_ligand"]
 
 AFFINITY_DISTOGRAM_MODES: tuple[AffinityDistogramMode, ...] = (
     "control",
     "collapsed_coordinates",
     "constant_middle",
     "constant_far",
+    "uniform_random",
+    "normal_random",
     "zero_conditioning",
 )
 
@@ -49,14 +54,19 @@ def build_affinity_distogram_bins(
     receptor_mask: Tensor,
     ligand_mask: Tensor,
     mode: str = "control",
+    random_seed: int = 0,
+    normal_mean: float = 12.0,
+    normal_std: float = 4.0,
+    random_pair_scope: RandomPairScope = "all",
 ) -> tuple[Tensor, Tensor]:
     """Build effective affinity distogram bins and the intervened pair mask.
 
     Constant interventions replace only protein-ligand pairs. Protein-protein
     and ligand-ligand geometry remains coordinate-derived. Collapsed coordinates
-    affect all pairs containing a ligand token. Zero conditioning retains the
-    real bins for auditing; the caller is responsible for skipping the
-    conditioner term for every valid affinity token pair.
+    affect all pairs containing a ligand token. Random interventions replace all
+    valid pairs with a symmetric, structure-independent pseudo-distogram. Zero
+    conditioning retains the real bins for auditing; the caller is responsible
+    for skipping the conditioner term for every valid affinity token pair.
     """
     mode = validate_affinity_distogram_mode(mode)
     if representative_coordinates.ndim != COORDINATE_DIMENSIONS:
@@ -70,6 +80,51 @@ def build_affinity_distogram_bins(
         msg = f"Ligand mask shape {ligand_mask.shape} != {expected_mask_shape}"
         raise ValueError(msg)
 
+    if random_pair_scope not in {"all", "protein_ligand"}:
+        msg = f"Unknown random pair scope: {random_pair_scope!r}"
+        raise ValueError(msg)
+
+    valid_mask = receptor_mask.to(torch.bool) | ligand_mask.to(torch.bool)
+    valid_pair_mask = valid_mask[:, :, None] & valid_mask[:, None, :]
+    random_bins = None
+    if mode in {"uniform_random", "normal_random"}:
+        if normal_std <= 0:
+            raise ValueError("normal_std must be positive.")
+        generator = torch.Generator(device=representative_coordinates.device)
+        generator.manual_seed(random_seed)
+        shape = valid_pair_mask.shape
+        num_bins = boundaries.numel() + 1
+        if mode == "uniform_random":
+            sampled = torch.randint(
+                0,
+                num_bins,
+                shape,
+                generator=generator,
+                device=representative_coordinates.device,
+            )
+        else:
+            sampled_distances = torch.randn(
+                shape,
+                generator=generator,
+                device=representative_coordinates.device,
+                dtype=boundaries.dtype,
+            )
+            sampled_distances = (
+                sampled_distances * normal_std + normal_mean
+            ).clamp_min(0)
+            sampled = (sampled_distances.unsqueeze(-1) > boundaries).sum(
+                dim=-1
+            ).long()
+        upper = torch.triu(sampled, diagonal=1)
+        random_bins = upper + upper.transpose(1, 2)
+        random_bins = torch.where(
+            valid_pair_mask,
+            random_bins,
+            torch.zeros_like(random_bins),
+        )
+        if random_pair_scope == "all":
+            return random_bins, valid_pair_mask
+
     coordinates = representative_coordinates
     if mode == "collapsed_coordinates":
         coordinates = torch.where(
@@ -81,13 +136,14 @@ def build_affinity_distogram_bins(
     distances = torch.cdist(coordinates, coordinates)
     bins = (distances.unsqueeze(-1) > boundaries).sum(dim=-1).long()
     protein_ligand_mask = protein_ligand_pair_mask(receptor_mask, ligand_mask)
-    valid_mask = receptor_mask.to(torch.bool) | ligand_mask.to(torch.bool)
-    valid_pair_mask = valid_mask[:, :, None] & valid_mask[:, None, :]
     ligand_pair_mask = (
         ligand_mask.to(torch.bool)[:, :, None] | ligand_mask.to(torch.bool)[:, None, :]
     ) & valid_pair_mask
 
-    if mode == "control":
+    if random_bins is not None:
+        bins = torch.where(protein_ligand_mask, random_bins, bins)
+        intervened_pair_mask = protein_ligand_mask
+    elif mode == "control":
         intervened_pair_mask = torch.zeros_like(valid_pair_mask)
     elif mode == "collapsed_coordinates":
         intervened_pair_mask = ligand_pair_mask

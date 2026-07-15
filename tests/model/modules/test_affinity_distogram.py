@@ -134,6 +134,113 @@ def test_zero_conditioning_retains_real_bins_for_audit(geometry):
     assert not uses_affinity_conditioning("zero_conditioning")
 
 
+@pytest.mark.parametrize("mode", ["uniform_random", "normal_random"])
+def test_random_modes_are_symmetric_reproducible_and_structure_independent(
+    geometry,
+    mode,
+):
+    coordinates, boundaries, receptor_mask, ligand_mask = geometry
+    first, pair_mask = build_affinity_distogram_bins(
+        coordinates,
+        boundaries,
+        receptor_mask,
+        ligand_mask,
+        mode=mode,
+        random_seed=17,
+    )
+    repeated, _ = build_affinity_distogram_bins(
+        coordinates * 1000,
+        boundaries,
+        receptor_mask,
+        ligand_mask,
+        mode=mode,
+        random_seed=17,
+    )
+    changed_seed, _ = build_affinity_distogram_bins(
+        coordinates,
+        boundaries,
+        receptor_mask,
+        ligand_mask,
+        mode=mode,
+        random_seed=18,
+    )
+
+    assert torch.equal(first, repeated)
+    assert not torch.equal(first, changed_seed)
+    assert torch.equal(first, first.transpose(1, 2))
+    assert torch.all(first.diagonal(dim1=1, dim2=2) == 0)
+    assert pair_mask.all()
+
+
+def test_normal_random_rejects_non_positive_standard_deviation(geometry):
+    coordinates, boundaries, receptor_mask, ligand_mask = geometry
+    with pytest.raises(ValueError, match="normal_std must be positive"):
+        build_affinity_distogram_bins(
+            coordinates,
+            boundaries,
+            receptor_mask,
+            ligand_mask,
+            mode="normal_random",
+            normal_std=0,
+        )
+
+
+@pytest.mark.parametrize("mode", ["uniform_random", "normal_random"])
+def test_random_modes_do_not_compute_coordinate_distances(geometry, monkeypatch, mode):
+    coordinates, boundaries, receptor_mask, ligand_mask = geometry
+
+    def fail_cdist(*args, **kwargs):
+        raise AssertionError("random modes must not inspect coordinates")
+
+    monkeypatch.setattr(torch, "cdist", fail_cdist)
+    build_affinity_distogram_bins(
+        coordinates,
+        boundaries,
+        receptor_mask,
+        ligand_mask,
+        mode=mode,
+    )
+
+
+@pytest.mark.parametrize("mode", ["uniform_random", "normal_random"])
+def test_protein_ligand_random_scope_preserves_other_pairs(geometry, mode):
+    coordinates, boundaries, receptor_mask, ligand_mask = geometry
+    control, _ = build_affinity_distogram_bins(
+        coordinates,
+        boundaries,
+        receptor_mask,
+        ligand_mask,
+        mode="control",
+    )
+    bins, intervened = build_affinity_distogram_bins(
+        coordinates,
+        boundaries,
+        receptor_mask,
+        ligand_mask,
+        mode=mode,
+        random_seed=17,
+        random_pair_scope="protein_ligand",
+    )
+    protein_ligand = protein_ligand_pair_mask(receptor_mask, ligand_mask)
+
+    assert torch.equal(intervened, protein_ligand)
+    assert torch.equal(bins[~protein_ligand], control[~protein_ligand])
+    assert torch.equal(bins, bins.transpose(1, 2))
+
+
+def test_unknown_random_pair_scope_is_rejected(geometry):
+    coordinates, boundaries, receptor_mask, ligand_mask = geometry
+    with pytest.raises(ValueError, match="Unknown random pair scope"):
+        build_affinity_distogram_bins(
+            coordinates,
+            boundaries,
+            receptor_mask,
+            ligand_mask,
+            mode="uniform_random",
+            random_pair_scope="mystery",
+        )
+
+
 def test_unknown_mode_is_rejected(geometry):
     coordinates, boundaries, receptor_mask, ligand_mask = geometry
     with pytest.raises(ValueError, match="Unknown affinity distogram mode"):

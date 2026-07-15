@@ -455,6 +455,7 @@ def filter_inputs_structure(
     outdir: Path,
     override: bool = False,
     resume_embeddings: bool = False,
+    skip_structure: bool = False,
 ) -> Manifest:
     """Filter the manifest to only include missing predictions.
 
@@ -468,6 +469,8 @@ def filter_inputs_structure(
         Whether to override existing predictions.
     resume_embeddings: bool
         Ignore directories containing only cached embeddings.
+    skip_structure: bool
+        Require prepared pre-affinity artifacts and skip structure inference.
 
     Returns
     -------
@@ -476,6 +479,27 @@ def filter_inputs_structure(
 
     """
     from boltz.data.types import Manifest
+
+    if skip_structure:
+        pred_dir = outdir / "predictions"
+        missing = [
+            record.id
+            for record in manifest.records
+            if record.affinity
+            and not (
+                pred_dir / record.id / f"pre_affinity_{record.id}.npz"
+            ).exists()
+        ]
+        if missing:
+            msg = (
+                "--affinity_skip_structure requires prepared pre_affinity "
+                f"artifacts; missing: {', '.join(missing)}"
+            )
+            raise click.ClickException(msg)
+        click.echo(
+            "Skipping structure prediction; using prepared pre_affinity artifacts."
+        )
+        return Manifest([])
 
     # Check if existing predictions are found (only top-level prediction folders)
     pred_dir = outdir / "predictions"
@@ -528,6 +552,7 @@ def filter_inputs_affinity(
     outdir: Path,
     override: bool = False,
     distogram_modes: tuple[str, ...] = ("control",),
+    output_tag: Optional[str] = None,
 ) -> Manifest:
     """Check the input data and output directory for affinity.
 
@@ -558,9 +583,13 @@ def filter_inputs_affinity(
         legacy_control = record_dir / f"affinity_{output_id}.json"
         return all(
             (
-                record_dir / f"affinity_{output_id}__distogram_{mode}.json"
+                record_dir
+                / (
+                    f"affinity_{output_id}__distogram_{mode}"
+                    f"{'__run_' + output_tag if output_tag else ''}.json"
+                )
             ).exists()
-            or (mode == "control" and legacy_control.exists())
+            or (mode == "control" and output_tag is None and legacy_control.exists())
             for mode in distogram_modes
         )
 
@@ -1339,6 +1368,8 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
             "collapsed_coordinates",
             "constant_middle",
             "constant_far",
+            "uniform_random",
+            "normal_random",
             "zero_conditioning",
         ]
     ),
@@ -1351,11 +1382,45 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     ),
 )
 @click.option(
+    "--affinity_distogram_seed",
+    type=int,
+    default=0,
+    show_default=True,
+    help="Seed for structure-independent random affinity distograms.",
+)
+@click.option(
+    "--affinity_random_distance_mean",
+    type=float,
+    default=12.0,
+    show_default=True,
+    help="Mean distance in angstroms for the normal-random distogram.",
+)
+@click.option(
+    "--affinity_random_distance_std",
+    type=float,
+    default=4.0,
+    show_default=True,
+    help="Distance standard deviation for the normal-random distogram.",
+)
+@click.option(
+    "--affinity_random_pair_scope",
+    type=click.Choice(["all", "protein_ligand"]),
+    default="all",
+    show_default=True,
+    help="Token pairs replaced by a random distogram.",
+)
+@click.option(
+    "--affinity_output_tag",
+    type=str,
+    default=None,
+    help="Filename-safe tag that keeps repeated intervention outputs distinct.",
+)
+@click.option(
     "--affinity_skip_structure",
     is_flag=True,
     help=(
-        "Skip affinity-stage structure diffusion and score the coordinates "
-        "stored in pre_affinity artifacts directly."
+        "Require prepared pre_affinity artifacts and skip structure "
+        "prediction before affinity scoring."
     ),
 )
 @click.option(
@@ -1473,6 +1538,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     method: Optional[str],
     affinity_mw_correction: Optional[bool],
     affinity_distogram_modes: tuple[str, ...],
+    affinity_distogram_seed: int,
+    affinity_random_distance_mean: float,
+    affinity_random_distance_std: float,
+    affinity_random_pair_scope: str,
+    affinity_output_tag: Optional[str],
     affinity_skip_structure: bool,
     affinity_prepared_geometry_label: Optional[str],
     preprocessing_threads: int,
@@ -1499,9 +1569,19 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     from boltz.model.models.boltz1 import Boltz1
     from boltz.model.models.boltz2 import Boltz2
 
-    affinity_distogram_modes = tuple(
-        dict.fromkeys(("control", *affinity_distogram_modes))
-    )
+    affinity_distogram_modes = tuple(dict.fromkeys(affinity_distogram_modes))
+    if not affinity_distogram_modes:
+        raise click.UsageError("At least one --affinity_distogram_mode is required.")
+    if affinity_random_distance_std <= 0:
+        raise click.UsageError("--affinity_random_distance_std must be positive.")
+    if affinity_output_tag is not None and not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]*",
+        affinity_output_tag,
+    ):
+        raise click.UsageError(
+            "--affinity_output_tag must contain only letters, digits, '.', '_', "
+            "or '-', and must start with a letter or digit."
+        )
 
     if resume_embeddings_dir is None and resume_recycling_steps is not None:
         raise click.UsageError(
@@ -1674,6 +1754,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         outdir=out_dir,
         override=override,
         resume_embeddings=resume_embeddings_dir is not None,
+        skip_structure=affinity_skip_structure,
     )
 
     # Load processed data
@@ -1883,6 +1964,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             outdir=out_dir,
             override=override,
             distogram_modes=affinity_distogram_modes,
+            output_tag=affinity_output_tag,
         )
         if not manifest_filtered.records:
             click.echo("Found existing affinity predictions for all inputs, skipping.")
@@ -1915,6 +1997,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         pred_writer = BoltzAffinityWriter(
             data_dir=processed.targets_dir,
             output_dir=out_dir / "predictions",
+            write_embeddings=write_embeddings,
+            output_tag=affinity_output_tag,
             experiment_metadata={
                 "runtime": "boltz-community",
                 "runtime_version": _pkg_version("boltz-community"),
@@ -1933,6 +2017,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "affinity_sampling_steps": sampling_steps_affinity,
                 "affinity_diffusion_samples": diffusion_samples_affinity,
                 "affinity_skip_structure": affinity_skip_structure,
+                "affinity_distogram_seed": affinity_distogram_seed,
+                "affinity_random_distance_mean": affinity_random_distance_mean,
+                "affinity_random_distance_std": affinity_random_distance_std,
+                "affinity_random_pair_scope": affinity_random_pair_scope,
+                "affinity_output_tag": affinity_output_tag,
                 "affinity_prepared_geometry_label": (
                     affinity_prepared_geometry_label
                 ),
@@ -1943,6 +2032,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                     else None
                 ),
                 "resume_recycling_steps": resume_recycling_steps,
+                "written_embeddings_recycling_steps": (
+                    recycling_steps if write_embeddings else None
+                ),
             },
         )
 
@@ -1974,6 +2066,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_full_pae": False,
             "write_full_pde": False,
         }
+        if write_embeddings:
+            predict_affinity_args["write_embeddings_recycling_step"] = (
+                recycling_steps
+            )
         if resume_embeddings_dir is not None:
             if resume_recycling_steps > 5:
                 raise click.UsageError(
@@ -2004,6 +2100,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             steering_args=asdict(steering_args),
             affinity_mw_correction=affinity_mw_correction,
             affinity_distogram_modes=list(affinity_distogram_modes),
+            affinity_distogram_seed=affinity_distogram_seed,
+            affinity_random_distance_mean=affinity_random_distance_mean,
+            affinity_random_distance_std=affinity_random_distance_std,
+            affinity_random_pair_scope=affinity_random_pair_scope,
             skip_run_structure=affinity_skip_structure,
         )
         model_module.eval()

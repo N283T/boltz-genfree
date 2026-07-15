@@ -11,6 +11,7 @@ from boltz.main import (
     filter_inputs_affinity,
     filter_inputs_structure,
 )
+from boltz.data.write.writer import BoltzAffinityWriter
 
 
 def _make_affinity_record(record_id: str = "target") -> Record:
@@ -156,6 +157,24 @@ def test_filter_inputs_affinity_keeps_existing_outputs_with_override(tmp_path: P
     assert len(filtered.records) == 2
 
 
+def test_filter_inputs_affinity_uses_output_tag(tmp_path: Path):
+    pred_dir = tmp_path / "predictions" / "target"
+    pred_dir.mkdir(parents=True)
+    (pred_dir / "pre_affinity_target.npz").write_bytes(b"ok")
+    tagged = pred_dir / "affinity_target_L1__distogram_normal_random__run_seed17.json"
+    tagged.write_text("{}")
+    manifest = expand_affinity_records(Manifest(records=[_make_affinity_record()]))
+
+    filtered = filter_inputs_affinity(
+        manifest,
+        tmp_path,
+        distogram_modes=("normal_random",),
+        output_tag="seed17",
+    )
+
+    assert [record.affinity.chain_name for record in filtered.records] == ["L2"]
+
+
 def test_filter_inputs_structure_does_not_treat_embedding_cache_as_prediction(
     tmp_path: Path,
 ):
@@ -171,3 +190,49 @@ def test_filter_inputs_structure_does_not_treat_embedding_cache_as_prediction(
     )
 
     assert [record.id for record in filtered.records] == ["target"]
+
+
+def test_filter_inputs_structure_hard_skips_with_prepared_affinity(tmp_path: Path):
+    pred_dir = tmp_path / "predictions" / "target"
+    pred_dir.mkdir(parents=True)
+    (pred_dir / "pre_affinity_target.npz").write_bytes(b"prepared")
+    manifest = Manifest(records=[_make_affinity_record()])
+
+    filtered = filter_inputs_structure(
+        manifest,
+        tmp_path,
+        resume_embeddings=True,
+        skip_structure=True,
+    )
+
+    assert filtered.records == []
+
+
+def test_filter_inputs_structure_hard_skip_requires_prepared_affinity(tmp_path: Path):
+    manifest = Manifest(records=[_make_affinity_record()])
+
+    with pytest.raises(
+        click.ClickException,
+        match="requires prepared pre_affinity artifacts; missing: target",
+    ):
+        filter_inputs_structure(manifest, tmp_path, skip_structure=True)
+
+
+def test_affinity_writer_accepts_embedding_output(tmp_path: Path):
+    writer = BoltzAffinityWriter(
+        data_dir=tmp_path,
+        output_dir=tmp_path / "predictions",
+        write_embeddings=True,
+    )
+
+    assert writer.write_embeddings is True
+
+
+def test_affinity_writer_accepts_output_tag(tmp_path: Path):
+    writer = BoltzAffinityWriter(
+        data_dir=tmp_path,
+        output_dir=tmp_path / "predictions",
+        output_tag="seed17",
+    )
+
+    assert writer.output_tag == "seed17"

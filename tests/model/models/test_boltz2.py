@@ -67,7 +67,7 @@ def test_boltz2_stores_validate_structure(monkeypatch):
         assert model.validate_structure is validate_structure
 
     model = _minimal_boltz2(False, ["constant_far"])
-    assert model.affinity_distogram_modes == ("control", "constant_far")
+    assert model.affinity_distogram_modes == ("constant_far",)
 
 
 def test_select_affinity_coordinates_can_reuse_prepared_geometry(monkeypatch):

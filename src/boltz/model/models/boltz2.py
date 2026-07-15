@@ -111,6 +111,10 @@ class Boltz2(LightningModule):
         use_kernels: bool = False,
         use_flash_attn: bool = False,
         affinity_distogram_modes: Optional[list[str]] = None,
+        affinity_distogram_seed: int = 0,
+        affinity_random_distance_mean: float = 12.0,
+        affinity_random_distance_std: float = 4.0,
+        affinity_random_pair_scope: str = "all",
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -305,11 +309,15 @@ class Boltz2(LightningModule):
         self.affinity_ensemble = affinity_ensemble
         self.affinity_mw_correction = affinity_mw_correction
         if affinity_distogram_modes is None:
-            affinity_distogram_modes = []
+            affinity_distogram_modes = ["control"]
         self.affinity_distogram_modes = tuple(
             validate_affinity_distogram_mode(mode)
-            for mode in dict.fromkeys(["control", *affinity_distogram_modes])
+            for mode in dict.fromkeys(affinity_distogram_modes)
         )
+        self.affinity_distogram_seed = affinity_distogram_seed
+        self.affinity_random_distance_mean = affinity_random_distance_mean
+        self.affinity_random_distance_std = affinity_random_distance_std
+        self.affinity_random_pair_scope = affinity_random_pair_scope
         self.run_trunk_and_structure = run_trunk_and_structure
         self.skip_run_structure = skip_run_structure
         self.token_level_confidence = token_level_confidence
@@ -436,6 +444,10 @@ class Boltz2(LightningModule):
                 multiplicity=1,
                 use_kernels=self.use_kernels,
                 distogram_mode=mode,
+                distogram_seed=self.affinity_distogram_seed,
+                random_distance_mean=self.affinity_random_distance_mean,
+                random_distance_std=self.affinity_random_distance_std,
+                random_pair_scope=self.affinity_random_pair_scope,
                 return_distogram=True,
             )
             member2 = self.affinity_module2(
@@ -446,6 +458,10 @@ class Boltz2(LightningModule):
                 multiplicity=1,
                 use_kernels=self.use_kernels,
                 distogram_mode=mode,
+                distogram_seed=self.affinity_distogram_seed,
+                random_distance_mean=self.affinity_random_distance_mean,
+                random_distance_std=self.affinity_random_distance_std,
+                random_pair_scope=self.affinity_random_pair_scope,
             )
             probability1 = torch.nn.functional.sigmoid(
                 member1["affinity_logits_binary"]
@@ -487,6 +503,10 @@ class Boltz2(LightningModule):
             multiplicity=1,
             use_kernels=self.use_kernels,
             distogram_mode=mode,
+            distogram_seed=self.affinity_distogram_seed,
+            random_distance_mean=self.affinity_random_distance_mean,
+            random_distance_std=self.affinity_random_distance_std,
+            random_pair_scope=self.affinity_random_pair_scope,
             return_distogram=True,
         )
         return {
@@ -531,6 +551,7 @@ class Boltz2(LightningModule):
         run_confidence_sequentially: bool = False,
         resume_embeddings: Optional[list[tuple[Tensor, Tensor]]] = None,
         resume_recycling_steps: Optional[int] = None,
+        capture_embeddings_at_step: Optional[int] = None,
     ) -> dict[str, Tensor]:
         with torch.set_grad_enabled(
             self.training and self.structure_prediction_training
@@ -555,6 +576,8 @@ class Boltz2(LightningModule):
             # Perform rounds of the pairwise stack
             s = torch.zeros_like(s_init)
             z = torch.zeros_like(z_init)
+            captured_s = None
+            captured_z = None
             first_recycling_step = 0
             if resume_embeddings is not None:
                 if resume_recycling_steps is None:
@@ -602,6 +625,19 @@ class Boltz2(LightningModule):
                     z[batch_idx, :expected_tokens, :expected_tokens] = resume_z
 
                 first_recycling_step = resume_recycling_steps + 1
+
+                # MSA subsampling draws one CPU randperm per recycling step.
+                # Advance past skipped steps so resumed recycling sees the
+                # same MSA subsets as an uninterrupted run.
+                msa_module = (
+                    self.msa_module._orig_mod
+                    if self.is_msa_compiled and not self.training
+                    else self.msa_module
+                )
+                if msa_module.subsample_msa:
+                    msa_depth = feats["msa"].shape[1]
+                    for _ in range(first_recycling_step):
+                        torch.randperm(msa_depth)
 
             # Compute pairwise mask
             mask = feats["token_pad_mask"].float()
@@ -664,12 +700,19 @@ class Boltz2(LightningModule):
                             use_flash_attn=self.use_flash_attn,
                         )
 
+                        if i == capture_embeddings_at_step:
+                            captured_s = s.detach().clone()
+                            captured_z = z.detach().clone()
+
             pdistogram = self.distogram_module(z)
             dict_out = {
                 "pdistogram": pdistogram,
                 "s": s,
                 "z": z,
             }
+            if captured_s is not None and captured_z is not None:
+                dict_out["captured_s"] = captured_s
+                dict_out["captured_z"] = captured_z
 
             if (
                 self.run_trunk_and_structure
@@ -1239,6 +1282,9 @@ class Boltz2(LightningModule):
                 resume_recycling_steps=self.predict_args.get(
                     "resume_recycling_steps"
                 ),
+                capture_embeddings_at_step=self.predict_args.get(
+                    "write_embeddings_recycling_step"
+                ),
             )
             pred_dict = {"exception": False}
             if "keys_dict_batch" in self.predict_args:
@@ -1247,8 +1293,8 @@ class Boltz2(LightningModule):
 
             pred_dict["masks"] = batch["atom_pad_mask"]
             pred_dict["token_masks"] = batch["token_pad_mask"]
-            pred_dict["s"] = out["s"]
-            pred_dict["z"] = out["z"]
+            pred_dict["s"] = out.get("captured_s", out["s"])
+            pred_dict["z"] = out.get("captured_z", out["z"])
 
             if "keys_dict_out" in self.predict_args:
                 for key in self.predict_args["keys_dict_out"]:

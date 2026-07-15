@@ -88,6 +88,10 @@ class AffinityModule(nn.Module):
         multiplicity=1,
         use_kernels=False,
         distogram_mode="control",
+        distogram_seed=0,
+        random_distance_mean=12.0,
+        random_distance_std=4.0,
+        random_pair_scope="all",
         return_distogram=False,
     ):
         distogram_mode = validate_affinity_distogram_mode(distogram_mode)
@@ -126,6 +130,10 @@ class AffinityModule(nn.Module):
             receptor_mask=rec_mask,
             ligand_mask=lig_mask,
             mode=distogram_mode,
+            random_seed=distogram_seed,
+            normal_mean=random_distance_mean,
+            normal_std=random_distance_std,
+            random_pair_scope=random_pair_scope,
         )
         distogram = self.dist_bin_pairwise_embed(distogram_bins)
 

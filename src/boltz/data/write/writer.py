@@ -376,6 +376,8 @@ class BoltzAffinityWriter(BasePredictionWriter):
         data_dir: str,
         output_dir: str,
         experiment_metadata: Optional[dict[str, object]] = None,
+        write_embeddings: bool = False,
+        output_tag: Optional[str] = None,
     ) -> None:
         """Initialize the writer.
 
@@ -391,6 +393,8 @@ class BoltzAffinityWriter(BasePredictionWriter):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.experiment_metadata = experiment_metadata or {}
+        self.write_embeddings = write_embeddings
+        self.output_tag = output_tag
 
     @staticmethod
     def _summary(
@@ -447,7 +451,8 @@ class BoltzAffinityWriter(BasePredictionWriter):
         # Preserve the original output for compatibility. It represents the
         # first requested distogram mode.
         affinity_summary = self._summary(prediction, record)
-        path = struct_dir / f"affinity_{output_id}.json"
+        legacy_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
+        path = struct_dir / f"affinity_{output_id}{legacy_suffix}.json"
         with path.open("w") as f:
             f.write(json.dumps(affinity_summary, indent=4))
 
@@ -480,13 +485,21 @@ class BoltzAffinityWriter(BasePredictionWriter):
                     "experiment": self.experiment_metadata,
                 }
             )
-            mode_stem = f"affinity_{output_id}__distogram_{mode}"
+            tag_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
+            mode_stem = f"affinity_{output_id}__distogram_{mode}{tag_suffix}"
             with (struct_dir / f"{mode_stem}.json").open("w") as f:
                 f.write(json.dumps(mode_summary, indent=4))
             np.savez_compressed(
                 struct_dir / f"{mode_stem}.npz",
                 bins=bins.numpy().astype(np.uint8),
                 intervened_pair_mask=pair_mask.numpy().astype(bool),
+            )
+
+        if self.write_embeddings and "s" in prediction and "z" in prediction:
+            np.savez_compressed(
+                struct_dir / f"embeddings_{record.id}.npz",
+                s=prediction["s"].float().cpu().numpy(),
+                z=prediction["z"].float().cpu().numpy(),
             )
 
     def on_predict_epoch_end(

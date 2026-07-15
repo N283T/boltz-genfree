@@ -35,14 +35,6 @@ class TestSubsampleMsaDefault:
                 return
         pytest.fail("subsample_msa parameter not found on predict command")
 
-
-def test_predict_exposes_embedding_resume_options():
-    params = {param.name: param for param in predict.params}
-
-    assert params["resume_embeddings_dir"].default is None
-    assert params["resume_recycling_steps"].default is None
-
-
     def test_is_boolean_flag_pair(self):
         """subsample_msa should support --subsample_msa / --no_subsample_msa."""
         for param in predict.params:
@@ -58,12 +50,30 @@ def test_predict_exposes_embedding_resume_options():
         pytest.fail("subsample_msa parameter not found on predict command")
 
 
+def test_predict_exposes_embedding_resume_options():
+    params = {param.name: param for param in predict.params}
+
+    assert params["resume_embeddings_dir"].default is None
+    assert params["resume_recycling_steps"].default is None
+
+
+def test_predict_defaults_to_one_explicit_control_mode():
+    params = {param.name: param for param in predict.params}
+
+    assert params["affinity_distogram_modes"].default == ("control",)
+
+
 def test_predict_exposes_affinity_structure_skip():
     params = {param.name: param for param in predict.params}
 
     assert params["affinity_skip_structure"].is_flag
     assert params["affinity_skip_structure"].default is False
     assert params["affinity_prepared_geometry_label"].default is None
+    assert params["affinity_distogram_seed"].default == 0
+    assert params["affinity_random_distance_mean"].default == 12.0
+    assert params["affinity_random_distance_std"].default == 4.0
+    assert params["affinity_random_pair_scope"].default == "all"
+    assert params["affinity_output_tag"].default is None
 
 
 class TestBatchSizeOption:
