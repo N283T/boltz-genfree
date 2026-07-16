@@ -175,6 +175,25 @@ class AffinityCropper(Cropper):
         prior-free baseline for affinity inference without a generated complex
         structure, not a pocket-selection heuristic.
         """
+        return self.crop_sequence_window(
+            data,
+            protein_start=0,
+            max_tokens=max_tokens,
+            max_atoms=max_atoms,
+        )
+
+    def crop_sequence_window(
+        self,
+        data: Tokenized,
+        protein_start: int,
+        max_tokens: int,
+        max_atoms: Optional[int] = None,
+    ) -> Tokenized:
+        """Select binder tokens and a deterministic receptor sequence window."""
+        if protein_start < 0:
+            msg = "Sequence affinity window start must be non-negative."
+            raise ValueError(msg)
+
         token_data = data.tokens
         binder_tokens = token_data[token_data["affinity_mask"]]
         if not binder_tokens.size:
@@ -191,12 +210,19 @@ class AffinityCropper(Cropper):
         protein_tokens = token_data[
             token_data["mol_type"] == const.chain_type_ids["PROTEIN"]
         ]
+        if protein_start >= protein_tokens.size:
+            msg = (
+                f"Sequence affinity window start {protein_start} is outside "
+                f"the {protein_tokens.size}-token receptor."
+            )
+            raise ValueError(msg)
+        protein_tokens = protein_tokens[
+            protein_start : protein_start + self.max_tokens_protein
+        ]
         selected_ids = {int(idx) for idx in binder_tokens["token_idx"]}
         total_atoms = binder_atoms
         protein_count = 0
         for token in protein_tokens:
-            if protein_count >= self.max_tokens_protein:
-                break
             token_id = int(token["token_idx"])
             if token_id in selected_ids:
                 continue

@@ -72,3 +72,25 @@ def test_sequence_prefix_crop_does_not_depend_on_coordinates_or_resolution():
     assert first_crop.tokens["token_idx"].tolist() == second_crop.tokens[
         "token_idx"
     ].tolist()
+
+
+def test_sequence_window_crop_uses_zero_based_protein_offset():
+    cropper = AffinityCropper(max_tokens_protein=2)
+
+    cropped = cropper.crop_sequence_window(
+        _sequence_tokenized(),
+        protein_start=1,
+        max_tokens=5,
+        max_atoms=20,
+    )
+
+    assert cropped.tokens["token_idx"].tolist() == [1, 2, 4, 5, 6]
+
+
+def test_sequence_window_crop_rejects_start_outside_receptor():
+    with pytest.raises(ValueError, match="outside the 4-token receptor"):
+        AffinityCropper().crop_sequence_window(
+            _sequence_tokenized(),
+            protein_start=4,
+            max_tokens=5,
+        )

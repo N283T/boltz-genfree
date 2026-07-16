@@ -171,6 +171,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         affinity: bool = False,
         affinity_crop_indices_dir: Optional[Path] = None,
         affinity_structure_free: bool = False,
+        affinity_sequence_window_start: int = 0,
     ) -> None:
         """Initialize the training dataset.
 
@@ -206,6 +207,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.affinity = affinity
         self.affinity_crop_indices_dir = affinity_crop_indices_dir
         self.affinity_structure_free = affinity_structure_free
+        self.affinity_sequence_window_start = affinity_sequence_window_start
         if self.affinity:
             self.cropper = AffinityCropper()
 
@@ -264,8 +266,9 @@ class PredictionDataset(torch.utils.data.Dataset):
 
         if self.affinity:
             if self.affinity_structure_free:
-                tokenized = self.cropper.crop_sequence_prefix(
+                tokenized = self.cropper.crop_sequence_window(
                     tokenized,
+                    protein_start=self.affinity_sequence_window_start,
                     max_tokens=256,
                     max_atoms=2048,
                 )
@@ -369,6 +372,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         affinity: bool = False,
         affinity_crop_indices_dir: Optional[Path] = None,
         affinity_structure_free: bool = False,
+        affinity_sequence_window_start: int = 0,
         pin_memory: bool = True,
     ) -> None:
         """Initialize the DataModule.
@@ -415,6 +419,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         self.affinity = affinity
         self.affinity_crop_indices_dir = affinity_crop_indices_dir
         self.affinity_structure_free = affinity_structure_free
+        self.affinity_sequence_window_start = affinity_sequence_window_start
         self.pin_memory = pin_memory
 
     def predict_dataloader(self) -> DataLoader:
@@ -438,6 +443,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             affinity=self.affinity,
             affinity_crop_indices_dir=self.affinity_crop_indices_dir,
             affinity_structure_free=self.affinity_structure_free,
+            affinity_sequence_window_start=self.affinity_sequence_window_start,
         )
         return DataLoader(
             dataset,

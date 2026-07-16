@@ -545,6 +545,18 @@ class BoltzAffinityWriter(BasePredictionWriter):
                         False,
                     )
                 ),
+                sequence_window_start=np.asarray(
+                    self.experiment_metadata.get(
+                        "affinity_sequence_window_start",
+                        -1,
+                    )
+                ),
+                sequence_window_size=np.asarray(
+                    self.experiment_metadata.get(
+                        "affinity_sequence_window_size",
+                        -1,
+                    )
+                ),
             )
             context_keys = (
                 "s_inputs",

@@ -1470,6 +1470,16 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     ),
 )
 @click.option(
+    "--affinity_sequence_window_start",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help=(
+        "Zero-based protein-token start for the 200-token deterministic "
+        "structure-free sequence window."
+    ),
+)
+@click.option(
     "--affinity_head_only",
     is_flag=True,
     help=(
@@ -1613,6 +1623,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     affinity_output_tag: Optional[str],
     affinity_skip_structure: bool,
     affinity_structure_free: bool,
+    affinity_sequence_window_start: int,
     affinity_head_only: bool,
     affinity_context_dir: Optional[Path],
     affinity_crop_indices_dir: Optional[Path],
@@ -1706,6 +1717,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "--affinity_random_pair_scope all."
             )
         affinity_skip_structure = True
+    elif affinity_sequence_window_start != 0:
+        raise click.UsageError(
+            "--affinity_sequence_window_start requires --affinity_structure_free."
+        )
 
     if affinity_context_dir is not None:
         affinity_context_dir = affinity_context_dir.expanduser().resolve()
@@ -2176,7 +2191,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                     )
                 ),
                 "affinity_crop_mode": (
-                    "sequence_prefix"
+                    (
+                        "sequence_prefix"
+                        if affinity_sequence_window_start == 0
+                        else "sequence_window"
+                    )
                     if affinity_structure_free
                     else (
                         "saved_affinity_head_context"
@@ -2190,6 +2209,14 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 ),
                 "affinity_coordinate_derived_distogram_target": (
                     not affinity_structure_free
+                ),
+                "affinity_sequence_window_start": (
+                    affinity_sequence_window_start
+                    if affinity_structure_free
+                    else None
+                ),
+                "affinity_sequence_window_size": (
+                    200 if affinity_structure_free else None
                 ),
                 "affinity_head_coordinate_source": (
                     "none"
@@ -2249,6 +2276,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             affinity=True,
             affinity_crop_indices_dir=affinity_crop_indices_dir,
             affinity_structure_free=affinity_structure_free,
+            affinity_sequence_window_start=affinity_sequence_window_start,
             pin_memory=pin_memory,
         )
 
