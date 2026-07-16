@@ -1243,6 +1243,8 @@ def process_atom_features(
     compute_frames: bool = False,
     override_coords: Optional[Tensor] = None,
     bfactor_md_correction: bool = False,
+    compute_distogram_target: bool = True,
+    use_structure_coordinates: bool = True,
 ) -> dict[str, Tensor]:
     """Get the atom features.
 
@@ -1384,14 +1386,20 @@ def process_atom_features(
         backbone_feat_index.extend(backbone_index)
 
         # Get token coordinates across sampled ensembles  and apply transforms
-        token_coords = np.array(
-            [
-                data.structure.coords[
-                    ensemble_atom_start + start : ensemble_atom_start + end
-                ]["coords"]
-                for ensemble_atom_start in ensemble_atom_starts
-            ]
-        )
+        if use_structure_coordinates:
+            token_coords = np.array(
+                [
+                    data.structure.coords[
+                        ensemble_atom_start + start : ensemble_atom_start + end
+                    ]["coords"]
+                    for ensemble_atom_start in ensemble_atom_starts
+                ]
+            )
+        else:
+            token_coords = np.zeros(
+                (len(ensemble_atom_starts), int(token["atom_num"]), 3),
+                dtype=np.float32,
+            )
         coord_data.append(token_coords)
 
         if compute_frames:
@@ -1399,7 +1407,10 @@ def process_atom_features(
             res_type = const.tokens[token["res_type"]]
             res_name = str(token["res_name"])
 
-            if token["atom_num"] < 3 or res_type in ["PAD", "UNK", "-"]:
+            if not use_structure_coordinates:
+                idx_frame_a, idx_frame_b, idx_frame_c = 0, 0, 0
+                mask_frame = False
+            elif token["atom_num"] < 3 or res_type in ["PAD", "UNK", "-"]:
                 idx_frame_a, idx_frame_b, idx_frame_c = 0, 0, 0
                 mask_frame = False
             elif (token["mol_type"] == const.chain_type_ids["PROTEIN"]) and (
@@ -1484,11 +1495,11 @@ def process_atom_features(
             )
             resolved_frame_data.append(mask_frame)
 
-        # Get distogram coordinates
-        disto_coords_ensemble_tok = data.structure.coords[
-            e_offsets + token["disto_idx"]
-        ]["coords"]
-        disto_coords_ensemble.append(disto_coords_ensemble_tok)
+        if compute_distogram_target:
+            disto_coords_ensemble_tok = data.structure.coords[
+                e_offsets + token["disto_idx"]
+            ]["coords"]
+            disto_coords_ensemble.append(disto_coords_ensemble_tok)
 
         # Update atom data. This is technically never used again (we rely on coord_data),
         # but we update for consistency and to make sure the Atom object has valid, transformed coordinates.
@@ -1504,7 +1515,15 @@ def process_atom_features(
         atom_chirality.append(token_atoms_chirality)
         atom_idx += len(token_atoms)
 
-    disto_coords_ensemble = np.array(disto_coords_ensemble)  # (N_TOK, N_ENS, 3)
+    if compute_distogram_target:
+        disto_coords_ensemble = np.array(disto_coords_ensemble)
+    else:
+        # Keep the inference feature schema stable without reading token-level
+        # coordinates or constructing a coordinate-derived target distogram.
+        disto_coords_ensemble = np.zeros(
+            (len(data.tokens), len(e_offsets), 3),
+            dtype=np.float32,
+        )
 
     # Compute ensemble distogram
     L = len(data.tokens)
@@ -1520,13 +1539,16 @@ def process_atom_features(
     disto_target = torch.zeros(L, L, len(idx_list), num_bins)  # TODO1
 
     # disto_target = torch.zeros(L, L, num_bins)
-    for i, e_idx in enumerate(idx_list):
-        t_center = torch.Tensor(disto_coords_ensemble[:, e_idx, :])
-        t_dists = torch.cdist(t_center, t_center)
-        boundaries = torch.linspace(min_dist, max_dist, num_bins - 1)
-        distogram = (t_dists.unsqueeze(-1) > boundaries).sum(dim=-1).long()
-        # disto_target += one_hot(distogram, num_classes=num_bins)
-        disto_target[:, :, i, :] = one_hot(distogram, num_classes=num_bins)  # TODO1
+    if compute_distogram_target:
+        for i, e_idx in enumerate(idx_list):
+            t_center = torch.Tensor(disto_coords_ensemble[:, e_idx, :])
+            t_dists = torch.cdist(t_center, t_center)
+            boundaries = torch.linspace(min_dist, max_dist, num_bins - 1)
+            distogram = (t_dists.unsqueeze(-1) > boundaries).sum(dim=-1).long()
+            disto_target[:, :, i, :] = one_hot(
+                distogram,
+                num_classes=num_bins,
+            )
 
     # Normalize distogram
     # disto_target = disto_target / disto_target.sum(-1)[..., None]  # remove TODO1
@@ -2322,6 +2344,8 @@ class Boltz2Featurizer:
             list[tuple[tuple[int, int], tuple[int, int], float]]
         ] = None,
         compute_affinity: bool = False,
+        compute_distogram_target: bool = True,
+        use_structure_coordinates: bool = True,
     ) -> dict[str, Tensor]:
         """Compute features.
 
@@ -2396,6 +2420,8 @@ class Boltz2Featurizer:
             compute_frames=compute_frames,
             override_coords=override_coords,
             bfactor_md_correction=bfactor_md_correction,
+            compute_distogram_target=compute_distogram_target,
+            use_structure_coordinates=use_structure_coordinates,
         )
 
         # Compute MSA features

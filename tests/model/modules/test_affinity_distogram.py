@@ -6,11 +6,50 @@ import torch
 from boltz.model.modules.affinity_distogram import (
     AFFINITY_DISTOGRAM_MODES,
     build_affinity_distogram_bins,
+    build_structure_free_affinity_distogram_bins,
     intervene_affinity_distogram_features,
     intervene_affinity_pair_features,
     protein_ligand_pair_mask,
     uses_affinity_conditioning,
 )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "zero_distogram_features",
+        "uniform_mean_embedding",
+        "zero_conditioning",
+        "uniform_random",
+        "normal_random",
+    ],
+)
+def test_structure_free_bins_require_no_coordinates(geometry, mode):
+    _, boundaries, receptor_mask, ligand_mask = geometry
+
+    bins, pair_mask = build_structure_free_affinity_distogram_bins(
+        boundaries=boundaries,
+        receptor_mask=receptor_mask,
+        ligand_mask=ligand_mask,
+        mode=mode,
+        random_seed=17,
+    )
+
+    assert bins.shape == pair_mask.shape == (1, 4, 4)
+    assert torch.equal(bins, bins.transpose(1, 2))
+    assert pair_mask.all()
+
+
+def test_structure_free_bins_reject_coordinate_dependent_mode(geometry):
+    _, boundaries, receptor_mask, ligand_mask = geometry
+
+    with pytest.raises(ValueError, match="is not coordinate-free"):
+        build_structure_free_affinity_distogram_bins(
+            boundaries=boundaries,
+            receptor_mask=receptor_mask,
+            ligand_mask=ligand_mask,
+            mode="control",
+        )
 
 
 @pytest.fixture

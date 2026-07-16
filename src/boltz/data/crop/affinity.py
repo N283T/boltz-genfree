@@ -163,6 +163,60 @@ class AffinityCropper(Cropper):
         # Return the cropped tokens
         return replace(data, tokens=token_data, bonds=token_bonds)
 
+    def crop_sequence_prefix(
+        self,
+        data: Tokenized,
+        max_tokens: int,
+        max_atoms: Optional[int] = None,
+    ) -> Tokenized:
+        """Select binder tokens and a deterministic receptor sequence prefix.
+
+        This crop deliberately ignores coordinates and resolved masks. It is a
+        prior-free baseline for affinity inference without a generated complex
+        structure, not a pocket-selection heuristic.
+        """
+        token_data = data.tokens
+        binder_tokens = token_data[token_data["affinity_mask"]]
+        if not binder_tokens.size:
+            msg = "Sequence affinity crop found no binder tokens."
+            raise ValueError(msg)
+
+        binder_atoms = int(np.sum(binder_tokens["atom_num"]))
+        if binder_tokens.size > max_tokens or (
+            max_atoms is not None and binder_atoms > max_atoms
+        ):
+            msg = "Binder alone exceeds the sequence affinity crop limits."
+            raise ValueError(msg)
+
+        protein_tokens = token_data[
+            token_data["mol_type"] == const.chain_type_ids["PROTEIN"]
+        ]
+        selected_ids = {int(idx) for idx in binder_tokens["token_idx"]}
+        total_atoms = binder_atoms
+        protein_count = 0
+        for token in protein_tokens:
+            if protein_count >= self.max_tokens_protein:
+                break
+            token_id = int(token["token_idx"])
+            if token_id in selected_ids:
+                continue
+            token_atoms = int(token["atom_num"])
+            if len(selected_ids) + 1 > max_tokens:
+                break
+            if max_atoms is not None and total_atoms + token_atoms > max_atoms:
+                break
+            selected_ids.add(token_id)
+            total_atoms += token_atoms
+            protein_count += 1
+
+        if protein_count == 0:
+            msg = "Sequence affinity crop found no protein receptor tokens."
+            raise ValueError(msg)
+        return self.crop_by_token_indices(
+            data,
+            np.asarray(sorted(selected_ids), dtype=np.int64),
+        )
+
     @staticmethod
     def crop_by_token_indices(data: Tokenized, token_indices: np.ndarray) -> Tokenized:
         """Apply an explicit crop expressed in original token IDs."""

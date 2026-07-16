@@ -477,6 +477,7 @@ def filter_inputs_structure(
     override: bool = False,
     resume_embeddings: bool = False,
     skip_structure: bool = False,
+    structure_free: bool = False,
 ) -> Manifest:
     """Filter the manifest to only include missing predictions.
 
@@ -500,6 +501,13 @@ def filter_inputs_structure(
 
     """
     from boltz.data.types import Manifest
+
+    if structure_free:
+        click.echo(
+            "Skipping structure prediction; affinity will use processed inputs "
+            "with no generated complex coordinates."
+        )
+        return Manifest([])
 
     if skip_structure:
         pred_dir = outdir / "predictions"
@@ -573,6 +581,7 @@ def filter_inputs_affinity(
     override: bool = False,
     distogram_modes: tuple[str, ...] = ("control",),
     output_tag: Optional[str] = None,
+    require_pre_affinity: bool = True,
 ) -> Manifest:
     """Check the input data and output directory for affinity.
 
@@ -644,11 +653,16 @@ def filter_inputs_affinity(
         click.echo(msg)
 
     # Skip records whose structure prediction failed (no pre_affinity npz)
-    missing = [
-        r
-        for r in manifest.records
-        if r.affinity and not (pred_dir / r.id / f"pre_affinity_{r.id}.npz").exists()
-    ]
+    missing = (
+        [
+            r
+            for r in manifest.records
+            if r.affinity
+            and not (pred_dir / r.id / f"pre_affinity_{r.id}.npz").exists()
+        ]
+        if require_pre_affinity
+        else []
+    )
     if missing:
         missing_ids = {r.id for r in missing}
         manifest = Manifest([r for r in manifest.records if r.id not in missing_ids])
@@ -1448,6 +1462,14 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     ),
 )
 @click.option(
+    "--affinity_structure_free",
+    is_flag=True,
+    help=(
+        "Run affinity trunk and head from processed inputs using a deterministic "
+        "sequence-prefix crop, without loading or generating complex coordinates."
+    ),
+)
+@click.option(
     "--affinity_head_only",
     is_flag=True,
     help=(
@@ -1590,6 +1612,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     affinity_random_pair_scope: str,
     affinity_output_tag: Optional[str],
     affinity_skip_structure: bool,
+    affinity_structure_free: bool,
     affinity_head_only: bool,
     affinity_context_dir: Optional[Path],
     affinity_crop_indices_dir: Optional[Path],
@@ -1639,6 +1662,48 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         if affinity_context_dir is None:
             raise click.UsageError(
                 "--affinity_head_only requires --affinity_context_dir."
+            )
+        affinity_skip_structure = True
+
+    if affinity_structure_free:
+        if model != "boltz2":
+            raise click.UsageError(
+                "--affinity_structure_free is only supported for Boltz-2."
+            )
+        if affinity_head_only or affinity_context_dir is not None:
+            raise click.UsageError(
+                "--affinity_structure_free cannot use affinity head replay context."
+            )
+        if affinity_crop_indices_dir is not None:
+            raise click.UsageError(
+                "--affinity_structure_free uses its built-in sequence crop and "
+                "cannot use --affinity_crop_indices_dir."
+            )
+        if affinity_prepared_geometry_label is not None:
+            raise click.UsageError(
+                "--affinity_prepared_geometry_label is invalid for a "
+                "structure-free run."
+            )
+        allowed_modes = {
+            "uniform_random",
+            "normal_random",
+            "zero_distogram_features",
+            "uniform_mean_embedding",
+            "zero_conditioning",
+        }
+        unsupported = sorted(set(affinity_distogram_modes) - allowed_modes)
+        if unsupported:
+            raise click.UsageError(
+                "--affinity_structure_free does not allow coordinate-dependent "
+                f"distogram modes: {', '.join(unsupported)}"
+            )
+        if (
+            set(affinity_distogram_modes) & {"uniform_random", "normal_random"}
+            and affinity_random_pair_scope != "all"
+        ):
+            raise click.UsageError(
+                "Structure-free random distograms require "
+                "--affinity_random_pair_scope all."
             )
         affinity_skip_structure = True
 
@@ -1827,6 +1892,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         override=override,
         resume_embeddings=resume_embeddings_dir is not None,
         skip_structure=affinity_skip_structure,
+        structure_free=affinity_structure_free,
     )
 
     # Load processed data
@@ -2043,6 +2109,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             override=override,
             distogram_modes=affinity_distogram_modes,
             output_tag=affinity_output_tag,
+            require_pre_affinity=not affinity_structure_free,
         )
         if not manifest_filtered.records:
             click.echo("Found existing affinity predictions for all inputs, skipping.")
@@ -2098,6 +2165,41 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "affinity_sampling_steps": sampling_steps_affinity,
                 "affinity_diffusion_samples": diffusion_samples_affinity,
                 "affinity_skip_structure": affinity_skip_structure,
+                "affinity_structure_free": affinity_structure_free,
+                "affinity_input_source": (
+                    "processed_input"
+                    if affinity_structure_free
+                    else (
+                        "saved_affinity_head_context"
+                        if affinity_head_only
+                        else "pre_affinity_generated_complex"
+                    )
+                ),
+                "affinity_crop_mode": (
+                    "sequence_prefix"
+                    if affinity_structure_free
+                    else (
+                        "saved_affinity_head_context"
+                        if affinity_head_only
+                        else (
+                            "explicit_token_indices"
+                            if affinity_crop_indices_dir is not None
+                            else "spatial_prepared_geometry"
+                        )
+                    )
+                ),
+                "affinity_coordinate_derived_distogram_target": (
+                    not affinity_structure_free
+                ),
+                "affinity_head_coordinate_source": (
+                    "none"
+                    if affinity_structure_free
+                    else (
+                        "saved_affinity_head_context"
+                        if affinity_head_only
+                        else "selected_complex_pose"
+                    )
+                ),
                 "affinity_head_only": affinity_head_only,
                 "affinity_context_dir": (
                     str(affinity_context_dir)
@@ -2130,7 +2232,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 
         data_module = Boltz2InferenceDataModule(
             manifest=manifest_filtered,
-            target_dir=out_dir / "predictions",
+            target_dir=(
+                processed.targets_dir
+                if affinity_structure_free
+                else out_dir / "predictions"
+            ),
             msa_dir=processed.msa_dir,
             mol_dir=mol_dir,
             num_workers=num_workers,
@@ -2142,6 +2248,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             override_method="other",
             affinity=True,
             affinity_crop_indices_dir=affinity_crop_indices_dir,
+            affinity_structure_free=affinity_structure_free,
             pin_memory=pin_memory,
         )
 
@@ -2188,6 +2295,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             affinity_mw_correction=affinity_mw_correction,
             affinity_distogram_modes=list(affinity_distogram_modes),
             affinity_distogram_seed=affinity_distogram_seed,
+            affinity_coordinate_free=affinity_structure_free,
             affinity_random_distance_mean=affinity_random_distance_mean,
             affinity_random_distance_std=affinity_random_distance_std,
             affinity_random_pair_scope=affinity_random_pair_scope,

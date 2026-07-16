@@ -32,6 +32,7 @@ def load_input(
     template_dir: Optional[Path] = None,
     extra_mols_dir: Optional[Path] = None,
     affinity: bool = False,
+    affinity_structure_free: bool = False,
 ) -> Input:
     """Load the given input data.
 
@@ -59,7 +60,7 @@ def load_input(
 
     """
     # Load the structure
-    if affinity:
+    if affinity and not affinity_structure_free:
         structure = StructureV2.load(
             target_dir / record.id / f"pre_affinity_{record.id}.npz"
         )
@@ -169,6 +170,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         override_method: Optional[str] = None,
         affinity: bool = False,
         affinity_crop_indices_dir: Optional[Path] = None,
+        affinity_structure_free: bool = False,
     ) -> None:
         """Initialize the training dataset.
 
@@ -203,6 +205,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.override_method = override_method
         self.affinity = affinity
         self.affinity_crop_indices_dir = affinity_crop_indices_dir
+        self.affinity_structure_free = affinity_structure_free
         if self.affinity:
             self.cropper = AffinityCropper()
 
@@ -253,24 +256,32 @@ class PredictionDataset(torch.utils.data.Dataset):
             template_dir=self.template_dir,
             extra_mols_dir=self.extra_mols_dir,
             affinity=self.affinity,
+            affinity_structure_free=self.affinity_structure_free,
         )
 
         # Tokenize structure
         tokenized = self.tokenizer.tokenize(input_data)
 
         if self.affinity:
-            crop_indices = self._load_affinity_crop_indices(record.id)
-            if crop_indices is None:
-                tokenized = self.cropper.crop(
+            if self.affinity_structure_free:
+                tokenized = self.cropper.crop_sequence_prefix(
                     tokenized,
                     max_tokens=256,
                     max_atoms=2048,
                 )
             else:
-                tokenized = self.cropper.crop_by_token_indices(
-                    tokenized,
-                    crop_indices,
-                )
+                crop_indices = self._load_affinity_crop_indices(record.id)
+                if crop_indices is None:
+                    tokenized = self.cropper.crop(
+                        tokenized,
+                        max_tokens=256,
+                        max_atoms=2048,
+                    )
+                else:
+                    tokenized = self.cropper.crop_by_token_indices(
+                        tokenized,
+                        crop_indices,
+                    )
             resume_token_idx = torch.from_numpy(
                 tokenized.tokens["token_idx"].copy()
             ).long()
@@ -317,6 +328,8 @@ class PredictionDataset(torch.utils.data.Dataset):
             compute_constraint_features=True,
             override_method=self.override_method,
             compute_affinity=self.affinity,
+            compute_distogram_target=not self.affinity_structure_free,
+            use_structure_coordinates=not self.affinity_structure_free,
         )
 
         if self.affinity:
@@ -355,6 +368,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         override_method: Optional[str] = None,
         affinity: bool = False,
         affinity_crop_indices_dir: Optional[Path] = None,
+        affinity_structure_free: bool = False,
         pin_memory: bool = True,
     ) -> None:
         """Initialize the DataModule.
@@ -400,6 +414,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         self.override_method = override_method
         self.affinity = affinity
         self.affinity_crop_indices_dir = affinity_crop_indices_dir
+        self.affinity_structure_free = affinity_structure_free
         self.pin_memory = pin_memory
 
     def predict_dataloader(self) -> DataLoader:
@@ -422,6 +437,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             override_method=self.override_method,
             affinity=self.affinity,
             affinity_crop_indices_dir=self.affinity_crop_indices_dir,
+            affinity_structure_free=self.affinity_structure_free,
         )
         return DataLoader(
             dataset,

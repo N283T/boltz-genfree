@@ -218,6 +218,25 @@ def test_filter_inputs_structure_hard_skip_requires_prepared_affinity(tmp_path: 
         filter_inputs_structure(manifest, tmp_path, skip_structure=True)
 
 
+def test_structure_free_filter_requires_no_pre_affinity(tmp_path: Path):
+    manifest = Manifest(records=[_make_affinity_record()])
+
+    filtered_structure = filter_inputs_structure(
+        manifest,
+        tmp_path,
+        skip_structure=True,
+        structure_free=True,
+    )
+    filtered_affinity = filter_inputs_affinity(
+        manifest,
+        tmp_path,
+        require_pre_affinity=False,
+    )
+
+    assert filtered_structure.records == []
+    assert [record.id for record in filtered_affinity.records] == ["target"]
+
+
 def test_affinity_writer_accepts_embedding_output(tmp_path: Path):
     writer = BoltzAffinityWriter(
         data_dir=tmp_path,

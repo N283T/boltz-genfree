@@ -13,6 +13,20 @@ def _tokenized() -> Tokenized:
     return Tokenized(tokens=tokens, bonds=bonds, structure=None, msa={})  # type: ignore[arg-type]
 
 
+def _sequence_tokenized() -> Tokenized:
+    tokens = np.zeros(7, dtype=TokenV2)
+    tokens["token_idx"] = np.arange(7)
+    tokens["atom_num"] = [5, 5, 5, 5, 1, 1, 1]
+    tokens["mol_type"][:4] = 0
+    tokens["mol_type"][4:] = 3
+    tokens["affinity_mask"][4:] = True
+    # Coordinates and resolution must not affect the sequence crop.
+    tokens["center_coords"] = np.arange(21).reshape(7, 3)
+    tokens["resolved_mask"] = [False, True, False, True, False, True, False]
+    bonds = np.zeros(0, dtype=TokenBondV2)
+    return Tokenized(tokens=tokens, bonds=bonds, structure=None, msa={})  # type: ignore[arg-type]
+
+
 def test_explicit_affinity_crop_preserves_token_order_and_internal_bonds():
     cropped = AffinityCropper.crop_by_token_indices(
         _tokenized(),
@@ -31,3 +45,30 @@ def test_explicit_affinity_crop_requires_binder():
 def test_explicit_affinity_crop_rejects_unknown_token_id():
     with pytest.raises(ValueError, match="missing token IDs"):
         AffinityCropper.crop_by_token_indices(_tokenized(), np.array([3, 9]))
+
+
+def test_sequence_prefix_crop_keeps_all_binder_and_prefix_receptor_tokens():
+    cropper = AffinityCropper(max_tokens_protein=2)
+
+    cropped = cropper.crop_sequence_prefix(
+        _sequence_tokenized(),
+        max_tokens=5,
+        max_atoms=20,
+    )
+
+    assert cropped.tokens["token_idx"].tolist() == [0, 1, 4, 5, 6]
+
+
+def test_sequence_prefix_crop_does_not_depend_on_coordinates_or_resolution():
+    cropper = AffinityCropper(max_tokens_protein=2)
+    first = _sequence_tokenized()
+    second = _sequence_tokenized()
+    second.tokens["center_coords"] *= -100
+    second.tokens["resolved_mask"] = ~second.tokens["resolved_mask"]
+
+    first_crop = cropper.crop_sequence_prefix(first, max_tokens=5, max_atoms=20)
+    second_crop = cropper.crop_sequence_prefix(second, max_tokens=5, max_atoms=20)
+
+    assert first_crop.tokens["token_idx"].tolist() == second_crop.tokens[
+        "token_idx"
+    ].tolist()

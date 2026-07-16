@@ -522,9 +522,28 @@ class BoltzAffinityWriter(BasePredictionWriter):
                 struct_dir / f"affinity_crop_{record.id}.npz",
                 token_idx=token_idx.numpy(),
                 crop_source=np.asarray(
-                    "explicit_token_indices"
-                    if self.experiment_metadata.get("affinity_crop_indices_dir")
-                    else "prepared_geometry"
+                    self.experiment_metadata.get(
+                        "affinity_crop_mode",
+                        (
+                            "explicit_token_indices"
+                            if self.experiment_metadata.get(
+                                "affinity_crop_indices_dir"
+                            )
+                            else "prepared_geometry"
+                        ),
+                    )
+                ),
+                input_source=np.asarray(
+                    self.experiment_metadata.get(
+                        "affinity_input_source",
+                        "pre_affinity_generated_complex",
+                    )
+                ),
+                generated_coordinates_read=np.asarray(
+                    not self.experiment_metadata.get(
+                        "affinity_structure_free",
+                        False,
+                    )
                 ),
             )
             context_keys = (

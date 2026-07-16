@@ -88,6 +88,8 @@ def test_predict_exposes_embedding_resume_options():
     assert params["affinity_head_only"].default is False
     assert params["affinity_context_dir"].default is None
     assert params["affinity_crop_indices_dir"].default is None
+    assert params["affinity_structure_free"].is_flag
+    assert params["affinity_structure_free"].default is False
 
 
 def test_predict_defaults_to_one_explicit_control_mode():

@@ -19,6 +19,15 @@ AffinityDistogramMode = Literal[
     "zero_conditioning",
 ]
 RandomPairScope = Literal["all", "protein_ligand"]
+STRUCTURE_FREE_AFFINITY_MODES = frozenset(
+    {
+        "uniform_random",
+        "normal_random",
+        "zero_distogram_features",
+        "uniform_mean_embedding",
+        "zero_conditioning",
+    }
+)
 
 AFFINITY_DISTOGRAM_MODES: tuple[AffinityDistogramMode, ...] = (
     "control",
@@ -54,6 +63,61 @@ def protein_ligand_pair_mask(
     return (ligand_mask[:, :, None] & receptor_mask[:, None, :]) | (
         receptor_mask[:, :, None] & ligand_mask[:, None, :]
     )
+
+
+def build_structure_free_affinity_distogram_bins(
+    boundaries: Tensor,
+    receptor_mask: Tensor,
+    ligand_mask: Tensor,
+    mode: str,
+    random_seed: int = 0,
+    normal_mean: float = 12.0,
+    normal_std: float = 4.0,
+) -> tuple[Tensor, Tensor]:
+    """Build affinity bins without accepting or reading any coordinates."""
+    mode = validate_affinity_distogram_mode(mode)
+    if mode not in STRUCTURE_FREE_AFFINITY_MODES:
+        choices = ", ".join(sorted(STRUCTURE_FREE_AFFINITY_MODES))
+        msg = f"Mode {mode!r} is not coordinate-free; expected one of: {choices}"
+        raise ValueError(msg)
+    if receptor_mask.shape != ligand_mask.shape:
+        msg = "Receptor and ligand masks must have identical shapes."
+        raise ValueError(msg)
+    if mode == "normal_random" and normal_std <= 0:
+        raise ValueError("normal_std must be positive.")
+
+    valid_mask = receptor_mask.to(torch.bool) | ligand_mask.to(torch.bool)
+    valid_pair_mask = valid_mask[:, :, None] & valid_mask[:, None, :]
+    bins = torch.zeros(valid_pair_mask.shape, dtype=torch.long, device=boundaries.device)
+    if mode not in {"uniform_random", "normal_random"}:
+        return bins, valid_pair_mask
+
+    generator = torch.Generator(device=boundaries.device)
+    generator.manual_seed(random_seed)
+    num_bins = boundaries.numel() + 1
+    if mode == "uniform_random":
+        sampled = torch.randint(
+            0,
+            num_bins,
+            valid_pair_mask.shape,
+            generator=generator,
+            device=boundaries.device,
+        )
+    else:
+        sampled_distances = torch.randn(
+            valid_pair_mask.shape,
+            generator=generator,
+            device=boundaries.device,
+            dtype=boundaries.dtype,
+        )
+        sampled_distances = (
+            sampled_distances * normal_std + normal_mean
+        ).clamp_min(0)
+        sampled = (sampled_distances.unsqueeze(-1) > boundaries).sum(dim=-1).long()
+    upper = torch.triu(sampled, diagonal=1)
+    bins = upper + upper.transpose(1, 2)
+    bins = torch.where(valid_pair_mask, bins, torch.zeros_like(bins))
+    return bins, valid_pair_mask
 
 
 def build_affinity_distogram_bins(

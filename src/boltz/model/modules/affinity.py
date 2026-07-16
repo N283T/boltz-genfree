@@ -5,6 +5,7 @@ import boltz.model.layers.initialize as init
 from boltz.model.layers.pairformer import PairformerNoSeqModule
 from boltz.model.modules.affinity_distogram import (
     build_affinity_distogram_bins,
+    build_structure_free_affinity_distogram_bins,
     intervene_affinity_distogram_features,
     intervene_affinity_pair_features,
     uses_affinity_conditioning,
@@ -95,6 +96,7 @@ class AffinityModule(nn.Module):
         random_distance_std=4.0,
         random_pair_scope="all",
         return_distogram=False,
+        coordinate_free=False,
     ):
         distogram_mode = validate_affinity_distogram_mode(distogram_mode)
         z = self.z_linear(self.z_norm(z))
@@ -116,27 +118,36 @@ class AffinityModule(nn.Module):
         )
         lig_mask = lig_mask * pad_token_mask
 
-        token_to_rep_atom = feats["token_to_rep_atom"]
-        token_to_rep_atom = token_to_rep_atom.repeat_interleave(multiplicity, 0)
-        if len(x_pred.shape) == 4:
-            B, mult, N, _ = x_pred.shape
-            x_pred = x_pred.reshape(B * mult, N, -1)
+        if coordinate_free:
+            distogram_bins, intervened_pair_mask = (
+                build_structure_free_affinity_distogram_bins(
+                    boundaries=self.boundaries,
+                    receptor_mask=rec_mask,
+                    ligand_mask=lig_mask,
+                    mode=distogram_mode,
+                    random_seed=distogram_seed,
+                    normal_mean=random_distance_mean,
+                    normal_std=random_distance_std,
+                )
+            )
         else:
-            BM, N, _ = x_pred.shape
-            B = BM // multiplicity
-            mult = multiplicity
-        x_pred_repr = torch.bmm(token_to_rep_atom.float(), x_pred)
-        distogram_bins, intervened_pair_mask = build_affinity_distogram_bins(
-            representative_coordinates=x_pred_repr,
-            boundaries=self.boundaries,
-            receptor_mask=rec_mask,
-            ligand_mask=lig_mask,
-            mode=distogram_mode,
-            random_seed=distogram_seed,
-            normal_mean=random_distance_mean,
-            normal_std=random_distance_std,
-            random_pair_scope=random_pair_scope,
-        )
+            token_to_rep_atom = feats["token_to_rep_atom"]
+            token_to_rep_atom = token_to_rep_atom.repeat_interleave(multiplicity, 0)
+            if len(x_pred.shape) == 4:
+                batch_size, mult, num_atoms, _ = x_pred.shape
+                x_pred = x_pred.reshape(batch_size * mult, num_atoms, -1)
+            x_pred_repr = torch.bmm(token_to_rep_atom.float(), x_pred)
+            distogram_bins, intervened_pair_mask = build_affinity_distogram_bins(
+                representative_coordinates=x_pred_repr,
+                boundaries=self.boundaries,
+                receptor_mask=rec_mask,
+                ligand_mask=lig_mask,
+                mode=distogram_mode,
+                random_seed=distogram_seed,
+                normal_mean=random_distance_mean,
+                normal_std=random_distance_std,
+                random_pair_scope=random_pair_scope,
+            )
         distogram = self.dist_bin_pairwise_embed(distogram_bins)
         distogram = intervene_affinity_distogram_features(
             distogram,

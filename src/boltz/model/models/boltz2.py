@@ -112,6 +112,7 @@ class Boltz2(LightningModule):
         use_flash_attn: bool = False,
         affinity_distogram_modes: Optional[list[str]] = None,
         affinity_distogram_seed: int = 0,
+        affinity_coordinate_free: bool = False,
         affinity_random_distance_mean: float = 12.0,
         affinity_random_distance_std: float = 4.0,
         affinity_random_pair_scope: str = "all",
@@ -315,6 +316,7 @@ class Boltz2(LightningModule):
             for mode in dict.fromkeys(affinity_distogram_modes)
         )
         self.affinity_distogram_seed = affinity_distogram_seed
+        self.affinity_coordinate_free = affinity_coordinate_free
         self.affinity_random_distance_mean = affinity_random_distance_mean
         self.affinity_random_distance_std = affinity_random_distance_std
         self.affinity_random_pair_scope = affinity_random_pair_scope
@@ -430,7 +432,7 @@ class Boltz2(LightningModule):
         *,
         s_inputs: Tensor,
         z_affinity: Tensor,
-        coords_affinity: Tensor,
+        coords_affinity: Optional[Tensor],
         feats: dict[str, Tensor],
         mode: str,
     ) -> dict[str, Tensor]:
@@ -449,6 +451,7 @@ class Boltz2(LightningModule):
                 random_distance_std=self.affinity_random_distance_std,
                 random_pair_scope=self.affinity_random_pair_scope,
                 return_distogram=True,
+                coordinate_free=self.affinity_coordinate_free,
             )
             member2 = self.affinity_module2(
                 s_inputs=s_inputs,
@@ -462,6 +465,7 @@ class Boltz2(LightningModule):
                 random_distance_mean=self.affinity_random_distance_mean,
                 random_distance_std=self.affinity_random_distance_std,
                 random_pair_scope=self.affinity_random_pair_scope,
+                coordinate_free=self.affinity_coordinate_free,
             )
             probability1 = torch.nn.functional.sigmoid(
                 member1["affinity_logits_binary"]
@@ -508,6 +512,7 @@ class Boltz2(LightningModule):
             random_distance_std=self.affinity_random_distance_std,
             random_pair_scope=self.affinity_random_pair_scope,
             return_distogram=True,
+            coordinate_free=self.affinity_coordinate_free,
         )
         return {
             "affinity_pred_value": member["affinity_pred_value"],
@@ -829,7 +834,11 @@ class Boltz2(LightningModule):
         if self.affinity_prediction:
             affinity_feats = feats
             if affinity_context is None:
-                coords_affinity = self._select_affinity_coordinates(dict_out, feats)
+                coords_affinity = (
+                    None
+                    if self.affinity_coordinate_free
+                    else self._select_affinity_coordinates(dict_out, feats)
+                )
                 affinity_s_inputs = self.input_embedder(feats, affinity=True)
                 affinity_z = z
             else:
@@ -866,7 +875,11 @@ class Boltz2(LightningModule):
                 {
                     "affinity_context_s_inputs": affinity_s_inputs.detach(),
                     "affinity_context_z": z_affinity.detach(),
-                    "affinity_context_coords": coords_affinity.detach(),
+                    "affinity_context_coords": (
+                        coords_affinity.detach()
+                        if coords_affinity is not None
+                        else torch.empty(0, device=s.device)
+                    ),
                     **{
                         f"affinity_context_{key}": (
                             affinity_feats[key].detach()
