@@ -162,3 +162,33 @@ class AffinityCropper(Cropper):
 
         # Return the cropped tokens
         return replace(data, tokens=token_data, bonds=token_bonds)
+
+    @staticmethod
+    def crop_by_token_indices(data: Tokenized, token_indices: np.ndarray) -> Tokenized:
+        """Apply an explicit crop expressed in original token IDs."""
+        requested = np.asarray(token_indices, dtype=np.int64).reshape(-1)
+        if requested.size == 0:
+            msg = "Explicit affinity crop contains no token IDs."
+            raise ValueError(msg)
+        if np.unique(requested).size != requested.size:
+            msg = "Explicit affinity crop contains duplicate token IDs."
+            raise ValueError(msg)
+
+        token_data = data.tokens
+        available = {int(idx) for idx in token_data["token_idx"]}
+        missing = [int(idx) for idx in requested if int(idx) not in available]
+        if missing:
+            msg = f"Explicit affinity crop references missing token IDs: {missing[:10]}"
+            raise ValueError(msg)
+
+        # Preserve canonical token order so feature and saved-embedding axes align.
+        selected = np.isin(token_data["token_idx"], requested)
+        token_data = token_data[selected]
+        if not np.any(token_data["affinity_mask"]):
+            msg = "Explicit affinity crop does not contain the binder."
+            raise ValueError(msg)
+
+        indices = token_data["token_idx"]
+        token_bonds = data.bonds[np.isin(data.bonds["token_1"], indices)]
+        token_bonds = token_bonds[np.isin(token_bonds["token_2"], indices)]
+        return replace(data, tokens=token_data, bonds=token_bonds)

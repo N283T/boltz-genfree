@@ -552,6 +552,7 @@ class Boltz2(LightningModule):
         resume_embeddings: Optional[list[tuple[Tensor, Tensor]]] = None,
         resume_recycling_steps: Optional[int] = None,
         capture_embeddings_at_step: Optional[int] = None,
+        affinity_context: Optional[dict[str, Tensor]] = None,
     ) -> dict[str, Tensor]:
         with torch.set_grad_enabled(
             self.training and self.structure_prediction_training
@@ -826,28 +827,70 @@ class Boltz2(LightningModule):
             )
 
         if self.affinity_prediction:
-            pad_token_mask = feats["token_pad_mask"][0]
-            rec_mask = feats["mol_type"][0] == 0
+            affinity_feats = feats
+            if affinity_context is None:
+                coords_affinity = self._select_affinity_coordinates(dict_out, feats)
+                affinity_s_inputs = self.input_embedder(feats, affinity=True)
+                affinity_z = z
+            else:
+                affinity_feats = {
+                    **feats,
+                    **{
+                        key: affinity_context[key]
+                        for key in (
+                            "token_pad_mask",
+                            "mol_type",
+                            "affinity_token_mask",
+                            "token_to_rep_atom",
+                            "affinity_mw",
+                        )
+                    },
+                }
+                coords_affinity = affinity_context["coords"]
+                affinity_s_inputs = affinity_context["s_inputs"]
+                affinity_z = affinity_context["z"]
+
+            pad_token_mask = affinity_feats["token_pad_mask"][0]
+            rec_mask = affinity_feats["mol_type"][0] == 0
             rec_mask = rec_mask * pad_token_mask
-            lig_mask = feats["affinity_token_mask"][0].to(torch.bool)
+            lig_mask = affinity_feats["affinity_token_mask"][0].to(torch.bool)
             lig_mask = lig_mask * pad_token_mask
             cross_pair_mask = (
                 lig_mask[:, None] * rec_mask[None, :]
                 + rec_mask[:, None] * lig_mask[None, :]
                 + lig_mask[:, None] * lig_mask[None, :]
             )
-            z_affinity = z * cross_pair_mask[None, :, :, None]
+            z_affinity = affinity_z * cross_pair_mask[None, :, :, None]
 
-            coords_affinity = self._select_affinity_coordinates(dict_out, feats)
-            s_inputs = self.input_embedder(feats, affinity=True)
+            dict_out.update(
+                {
+                    "affinity_context_s_inputs": affinity_s_inputs.detach(),
+                    "affinity_context_z": z_affinity.detach(),
+                    "affinity_context_coords": coords_affinity.detach(),
+                    **{
+                        f"affinity_context_{key}": (
+                            affinity_feats[key].detach()
+                            if isinstance(affinity_feats[key], Tensor)
+                            else torch.as_tensor(affinity_feats[key], device=s.device)
+                        )
+                        for key in (
+                            "token_pad_mask",
+                            "mol_type",
+                            "affinity_token_mask",
+                            "token_to_rep_atom",
+                            "affinity_mw",
+                        )
+                    },
+                }
+            )
 
             with torch.autocast(autocast_device_type(s.device.type), enabled=False):
                 affinity_by_distogram_mode = {
                     mode: self._run_affinity_mode(
-                        s_inputs=s_inputs.detach(),
+                        s_inputs=affinity_s_inputs.detach(),
                         z_affinity=z_affinity.detach(),
                         coords_affinity=coords_affinity,
-                        feats=feats,
+                        feats=affinity_feats,
                         mode=mode,
                     )
                     for mode in self.affinity_distogram_modes
@@ -1197,10 +1240,13 @@ class Boltz2(LightningModule):
 
     @staticmethod
     def _resume_embedding_path(base_dir: Path, record_id: str) -> Path:
-        nested = base_dir / record_id / f"embeddings_{record_id}.npz"
-        if nested.exists():
-            return nested
-        return base_dir / f"embeddings_{record_id}.npz"
+        candidates = (
+            base_dir / record_id / f"affinity_trunk_embeddings_{record_id}.npz",
+            base_dir / f"affinity_trunk_embeddings_{record_id}.npz",
+            base_dir / record_id / f"embeddings_{record_id}.npz",
+            base_dir / f"embeddings_{record_id}.npz",
+        )
+        return next((path for path in candidates if path.exists()), candidates[0])
 
     @staticmethod
     def _normalize_resume_embedding(array: np.ndarray, name: str) -> Tensor:
@@ -1239,6 +1285,11 @@ class Boltz2(LightningModule):
                     raise ValueError(msg)
                 s = cls._normalize_resume_embedding(data["s"], "s")
                 z = cls._normalize_resume_embedding(data["z"], "z")
+                saved_token_idx = (
+                    torch.as_tensor(data["token_idx"]).long()
+                    if "token_idx" in data
+                    else None
+                )
 
             if token_indices is not None:
                 indices = token_indices[record_idx].detach().cpu().long()
@@ -1249,7 +1300,24 @@ class Boltz2(LightningModule):
                 if indices.numel() == 0:
                     msg = f"No resume token indices for {record.id}."
                     raise ValueError(msg)
-                if indices.min().item() < 0 or indices.max().item() >= s.shape[0]:
+                if saved_token_idx is not None:
+                    positions = {
+                        int(token): pos for pos, token in enumerate(saved_token_idx)
+                    }
+                    missing = [
+                        int(token) for token in indices if int(token) not in positions
+                    ]
+                    if missing:
+                        msg = (
+                            f"Resume embeddings for {record.id} do not contain "
+                            f"requested token IDs: {missing[:10]}."
+                        )
+                        raise ValueError(msg)
+                    indices = torch.tensor(
+                        [positions[int(token)] for token in indices],
+                        dtype=torch.long,
+                    )
+                elif indices.min().item() < 0 or indices.max().item() >= s.shape[0]:
                     msg = (
                         f"Resume token indices for {record.id} are outside the "
                         f"saved token range 0..{s.shape[0] - 1}."
@@ -1259,6 +1327,38 @@ class Boltz2(LightningModule):
                 z = z.index_select(0, indices).index_select(1, indices)
             embeddings.append((s, z))
         return embeddings
+
+    @classmethod
+    def _load_affinity_context(
+        cls,
+        records: list[Any],
+        base_dir: Path,
+    ) -> dict[str, Tensor]:
+        if len(records) != 1:
+            raise ValueError("Affinity head context replay requires batch size 1.")
+        record_id = records[0].id
+        candidates = (
+            base_dir / record_id / f"affinity_head_context_{record_id}.npz",
+            base_dir / f"affinity_head_context_{record_id}.npz",
+        )
+        path = next((candidate for candidate in candidates if candidate.exists()), None)
+        if path is None:
+            raise FileNotFoundError(f"Missing affinity head context: {candidates[0]}")
+        required = (
+            "s_inputs",
+            "z",
+            "coords",
+            "token_pad_mask",
+            "mol_type",
+            "affinity_token_mask",
+            "token_to_rep_atom",
+            "affinity_mw",
+        )
+        with np.load(path) as data:
+            missing = [key for key in required if key not in data]
+            if missing:
+                raise ValueError(f"Affinity head context is missing arrays: {missing}")
+            return {key: torch.as_tensor(data[key]) for key in required}
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> dict:
         try:
@@ -1271,6 +1371,17 @@ class Boltz2(LightningModule):
                     token_indices=batch.get("resume_token_idx"),
                     token_masks=batch.get("token_pad_mask"),
                 )
+            affinity_context = None
+            affinity_context_dir = self.predict_args.get("affinity_context_dir")
+            if affinity_context_dir is not None:
+                affinity_context = self._load_affinity_context(
+                    batch["record"],
+                    Path(affinity_context_dir),
+                )
+                affinity_context = {
+                    key: value.to(batch["coords"].device)
+                    for key, value in affinity_context.items()
+                }
             out = self(
                 batch,
                 recycling_steps=self.predict_args["recycling_steps"],
@@ -1285,6 +1396,7 @@ class Boltz2(LightningModule):
                 capture_embeddings_at_step=self.predict_args.get(
                     "write_embeddings_recycling_step"
                 ),
+                affinity_context=affinity_context,
             )
             pred_dict = {"exception": False}
             if "keys_dict_batch" in self.predict_args:
@@ -1295,6 +1407,9 @@ class Boltz2(LightningModule):
             pred_dict["token_masks"] = batch["token_pad_mask"]
             pred_dict["s"] = out.get("captured_s", out["s"])
             pred_dict["z"] = out.get("captured_z", out["z"])
+            for key, value in out.items():
+                if key.startswith("affinity_context_"):
+                    pred_dict[key] = value
 
             if "keys_dict_out" in self.predict_args:
                 for key in self.predict_args["keys_dict_out"]:

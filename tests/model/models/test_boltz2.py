@@ -144,3 +144,76 @@ def test_load_resume_embeddings_rejects_missing_arrays(tmp_path):
             [SimpleNamespace(id="target")],
             tmp_path,
         )
+
+
+def test_load_resume_embeddings_aligns_cropped_cache_by_token_id(tmp_path):
+    record_dir = tmp_path / "target"
+    record_dir.mkdir()
+    token_idx = np.array([2, 7, 11])
+    s = np.arange(9, dtype=np.float32).reshape(3, 3)
+    z = np.arange(18, dtype=np.float32).reshape(3, 3, 2)
+    np.savez_compressed(
+        record_dir / "affinity_trunk_embeddings_target.npz",
+        s=s,
+        z=z,
+        token_idx=token_idx,
+    )
+
+    loaded = boltz2.Boltz2._load_resume_embeddings(
+        [SimpleNamespace(id="target")],
+        tmp_path,
+        token_indices=torch.tensor([[7, 11]]),
+        token_masks=torch.tensor([[True, True]]),
+    )
+
+    loaded_s, loaded_z = loaded[0]
+    torch.testing.assert_close(loaded_s, torch.from_numpy(s[[1, 2]]))
+    torch.testing.assert_close(
+        loaded_z,
+        torch.from_numpy(z[[1, 2]][:, [1, 2]]),
+    )
+
+
+def test_load_resume_embeddings_rejects_missing_saved_token_id(tmp_path):
+    np.savez_compressed(
+        tmp_path / "affinity_trunk_embeddings_target.npz",
+        s=np.zeros((2, 3), dtype=np.float32),
+        z=np.zeros((2, 2, 4), dtype=np.float32),
+        token_idx=np.array([3, 5]),
+    )
+
+    with pytest.raises(ValueError, match="do not contain requested token IDs"):
+        boltz2.Boltz2._load_resume_embeddings(
+            [SimpleNamespace(id="target")],
+            tmp_path,
+            token_indices=torch.tensor([[3, 8]]),
+            token_masks=torch.tensor([[True, True]]),
+        )
+
+
+def test_load_affinity_context_supports_nested_layout(tmp_path):
+    record_dir = tmp_path / "target"
+    record_dir.mkdir()
+    arrays = {
+        "s_inputs": np.zeros((1, 2, 4), dtype=np.float32),
+        "z": np.zeros((1, 2, 2, 3), dtype=np.float32),
+        "coords": np.zeros((1, 1, 5, 3), dtype=np.float32),
+        "token_pad_mask": np.ones((1, 2), dtype=np.float32),
+        "mol_type": np.zeros((1, 2), dtype=np.float32),
+        "affinity_token_mask": np.array([[0, 1]], dtype=np.float32),
+        "token_to_rep_atom": np.zeros((1, 2, 5), dtype=np.float32),
+        "affinity_mw": np.array([123.4], dtype=np.float32),
+    }
+    np.savez_compressed(
+        record_dir / "affinity_head_context_target.npz",
+        **arrays,
+    )
+
+    loaded = boltz2.Boltz2._load_affinity_context(
+        [SimpleNamespace(id="target")],
+        tmp_path,
+    )
+
+    assert set(loaded) == set(arrays)
+    for key, value in arrays.items():
+        torch.testing.assert_close(loaded[key], torch.from_numpy(value))

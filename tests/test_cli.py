@@ -9,11 +9,38 @@ import pytest
 
 from boltz.main import (
     _available_cpu_count,
+    _configure_wsl_multiprocessing_tempdir,
     _resolved_input_sources,
     _resolve_affinity_max_parallel_samples,
     _validate_checkpoint_for_load,
     predict,
 )
+
+
+def test_wsl_multiprocessing_tempdir_moves_off_windows_mount(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr("boltz.main.platform.release", lambda: "microsoft-WSL2")
+    monkeypatch.setattr(
+        "boltz.main.tempfile.gettempdir",
+        lambda: "/mnt/c/Users/test/AppData/Local/Temp",
+    )
+    monkeypatch.setattr("boltz.main.tempfile.tempdir", None)
+    monkeypatch.delenv("TMPDIR", raising=False)
+
+    result = _configure_wsl_multiprocessing_tempdir(2)
+
+    assert result == Path("/tmp")
+    assert os.environ["TMPDIR"] == "/tmp"
+    assert __import__("boltz.main", fromlist=["tempfile"]).tempfile.tempdir == "/tmp"
+
+
+def test_wsl_multiprocessing_tempdir_ignores_single_process(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr("boltz.main.platform.release", lambda: "microsoft-WSL2")
+
+    assert _configure_wsl_multiprocessing_tempdir(0) is None
 
 
 def test_resolved_input_sources_accepts_expanded_input_list(tmp_path: Path):
@@ -41,7 +68,9 @@ class TestSubsampleMsaDefault:
             if param.name == "subsample_msa":
                 assert param.is_flag, "subsample_msa should be a flag"
                 # Click 8.x uses secondary_opts (list); Click 7.x uses secondary (bool)
-                secondary = getattr(param, "secondary_opts", None) or getattr(param, "secondary", None)
+                secondary = getattr(param, "secondary_opts", None) or getattr(
+                    param, "secondary", None
+                )
                 assert secondary, (
                     "subsample_msa should be a boolean flag pair "
                     "(--subsample_msa/--no_subsample_msa)"
@@ -55,6 +84,10 @@ def test_predict_exposes_embedding_resume_options():
 
     assert params["resume_embeddings_dir"].default is None
     assert params["resume_recycling_steps"].default is None
+    assert params["affinity_head_only"].is_flag
+    assert params["affinity_head_only"].default is False
+    assert params["affinity_context_dir"].default is None
+    assert params["affinity_crop_indices_dir"].default is None
 
 
 def test_predict_defaults_to_one_explicit_control_mode():
@@ -172,12 +205,15 @@ class TestDownloadBoltz2:
         (tmp_path / "boltz2_conf.ckpt").write_text("fake")
         (tmp_path / "boltz2_aff.ckpt").write_text("fake")
 
-        with patch("boltz.main._download") as mock_download, \
-             patch("tarfile.open") as mock_tarfile:
+        with (
+            patch("boltz.main._download") as mock_download,
+            patch("tarfile.open") as mock_tarfile,
+        ):
             mock_tar = mock_tarfile.return_value.__enter__.return_value
 
             def fake_extractall(path):
                 (path / "mols").mkdir(exist_ok=True)
+
             mock_tar.extractall.side_effect = fake_extractall
 
             download_boltz2(tmp_path)
@@ -309,6 +345,7 @@ class TestProcessInputSkipBadInputs:
     def _import(self):
         try:
             from boltz.main import process_input
+
             self.process_input = process_input
         except ImportError as e:
             pytest.skip(f"Cannot import boltz.main: {e}")

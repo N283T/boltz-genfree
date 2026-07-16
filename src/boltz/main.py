@@ -6,6 +6,7 @@ import pickle
 import platform
 import re
 import tarfile
+import tempfile
 import warnings
 from dataclasses import asdict, dataclass, replace
 from functools import partial
@@ -72,7 +73,9 @@ def _checkpoint_needs_download(path: Path, description: str) -> bool:
         raise RuntimeError(msg) from e
 
     if size == 0:
-        click.echo(f"Found empty {description} checkpoint at {resolved}; re-downloading.")
+        click.echo(
+            f"Found empty {description} checkpoint at {resolved}; re-downloading."
+        )
         return True
 
     return False
@@ -133,6 +136,24 @@ def _available_cpu_count() -> int:
         return len(os.sched_getaffinity(0))
     except (AttributeError, OSError):
         return os.cpu_count() or 1
+
+
+def _configure_wsl_multiprocessing_tempdir(num_workers: int) -> Optional[Path]:
+    """Keep multiprocessing Unix sockets off Windows-mounted WSL paths."""
+    if num_workers < 1 or "microsoft" not in platform.release().lower():
+        return None
+    current = Path(tempfile.gettempdir())
+    if not str(current).startswith("/mnt/"):
+        return None
+    linux_tmp = Path("/tmp")
+    if not linux_tmp.is_dir() or not os.access(linux_tmp, os.W_OK | os.X_OK):
+        return None
+    os.environ["TMPDIR"] = str(linux_tmp)
+    # gettempdir() caches its result, so update the parent process as well as
+    # the environment inherited by DataLoader workers.
+    tempfile.tempdir = str(linux_tmp)
+    click.echo(f"WSL multiprocessing temp directory: {current} -> {linux_tmp}")
+    return linux_tmp
 
 
 def _resolve_affinity_max_parallel_samples(
@@ -486,9 +507,7 @@ def filter_inputs_structure(
             record.id
             for record in manifest.records
             if record.affinity
-            and not (
-                pred_dir / record.id / f"pre_affinity_{record.id}.npz"
-            ).exists()
+            and not (pred_dir / record.id / f"pre_affinity_{record.id}.npz").exists()
         ]
         if missing:
             msg = (
@@ -526,9 +545,10 @@ def filter_inputs_structure(
         for r in manifest.records:
             if r.id not in existing:
                 keep.append(r)
-            elif r.affinity and not (
-                pred_dir / r.id / f"pre_affinity_{r.id}.npz"
-            ).exists():
+            elif (
+                r.affinity
+                and not (pred_dir / r.id / f"pre_affinity_{r.id}.npz").exists()
+            ):
                 # Prior run created the directory but failed to write
                 # the pre_affinity file needed for the affinity pass
                 keep.append(r)
@@ -625,9 +645,9 @@ def filter_inputs_affinity(
 
     # Skip records whose structure prediction failed (no pre_affinity npz)
     missing = [
-        r for r in manifest.records
-        if r.affinity
-        and not (pred_dir / r.id / f"pre_affinity_{r.id}.npz").exists()
+        r
+        for r in manifest.records
+        if r.affinity and not (pred_dir / r.id / f"pre_affinity_{r.id}.npz").exists()
     ]
     if missing:
         missing_ids = {r.id for r in missing}
@@ -767,15 +787,13 @@ def compute_msa(
     if api_key_value:
         key = api_key_header if api_key_header else "X-API-Key"
         value = api_key_value
-        auth_headers = {
-            key: value
-        }
+        auth_headers = {key: value}
         click.echo(f"Using API key authentication for MSA server (header: {key})")
     elif msa_server_username and msa_server_password:
         click.echo("Using basic authentication for MSA server")
     else:
         click.echo("No authentication provided for MSA server")
-    
+
     if len(data) > 1:
         paired_msas = run_mmseqs2(
             list(data.values()),
@@ -1043,7 +1061,7 @@ def process_inputs(
     # Validate mutually exclusive authentication methods
     has_basic_auth = msa_server_username and msa_server_password
     has_api_key = api_key_value is not None
-    
+
     if has_basic_auth and has_api_key:
         raise ValueError(
             "Cannot use both basic authentication (--msa_server_username/--msa_server_password) "
@@ -1147,7 +1165,9 @@ def process_inputs(
 
 
 @click.group()
-@click.version_option(version=_pkg_version("boltz-community"), prog_name="boltz-community")
+@click.version_option(
+    version=_pkg_version("boltz-community"), prog_name="boltz-community"
+)
 def cli() -> None:
     """Boltz."""
     return
@@ -1428,12 +1448,34 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     ),
 )
 @click.option(
+    "--affinity_head_only",
+    is_flag=True,
+    help=(
+        "Replay only the affinity head from an exact saved head context. "
+        "Implies --affinity_skip_structure and skips affinity trunk recycling."
+    ),
+)
+@click.option(
+    "--affinity_context_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Directory containing affinity_head_context_<id>.npz files.",
+)
+@click.option(
+    "--affinity_crop_indices_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help=(
+        "Directory containing affinity_crop_<id>.npz files. These explicit "
+        "token IDs replace geometry-derived affinity cropping."
+    ),
+)
+@click.option(
     "--affinity_prepared_geometry_label",
     type=str,
     default=None,
     help=(
-        "Provenance label for prepared coordinates used with "
-        "--affinity_skip_structure."
+        "Provenance label for prepared coordinates used with --affinity_skip_structure."
     ),
 )
 @click.option(
@@ -1548,6 +1590,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     affinity_random_pair_scope: str,
     affinity_output_tag: Optional[str],
     affinity_skip_structure: bool,
+    affinity_head_only: bool,
+    affinity_context_dir: Optional[Path],
+    affinity_crop_indices_dir: Optional[Path],
     affinity_prepared_geometry_label: Optional[str],
     preprocessing_threads: int,
     max_msa_seqs: int,
@@ -1560,6 +1605,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     resume_recycling_steps: Optional[int],
 ) -> None:
     """Run predictions with Boltz."""
+    _configure_wsl_multiprocessing_tempdir(num_workers)
     import torch
     from pytorch_lightning import Trainer, seed_everything
     from pytorch_lightning.strategies import DDPStrategy
@@ -1587,6 +1633,29 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "or '-', and must start with a letter or digit."
         )
 
+    if affinity_head_only:
+        if model != "boltz2":
+            raise click.UsageError("--affinity_head_only is only supported for Boltz-2.")
+        if affinity_context_dir is None:
+            raise click.UsageError(
+                "--affinity_head_only requires --affinity_context_dir."
+            )
+        affinity_skip_structure = True
+
+    if affinity_context_dir is not None:
+        affinity_context_dir = affinity_context_dir.expanduser().resolve()
+        if not affinity_context_dir.is_dir():
+            raise click.UsageError(
+                "--affinity_context_dir must be an existing directory."
+            )
+
+    if affinity_crop_indices_dir is not None:
+        affinity_crop_indices_dir = affinity_crop_indices_dir.expanduser().resolve()
+        if not affinity_crop_indices_dir.is_dir():
+            raise click.UsageError(
+                "--affinity_crop_indices_dir must be an existing directory."
+            )
+
     if resume_embeddings_dir is None and resume_recycling_steps is not None:
         raise click.UsageError(
             "--resume_recycling_steps requires --resume_embeddings_dir."
@@ -1598,10 +1667,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             )
         if resume_recycling_steps is None:
             raise click.UsageError(
-                "--resume_recycling_steps is required with "
-                "--resume_embeddings_dir."
+                "--resume_recycling_steps is required with --resume_embeddings_dir."
             )
-        if resume_recycling_steps > recycling_steps:
+        if not affinity_head_only and resume_recycling_steps > recycling_steps:
             raise click.UsageError(
                 "--resume_recycling_steps cannot exceed --recycling_steps."
             )
@@ -1685,7 +1753,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             msa_server_password = os.environ.get("BOLTZ_MSA_PASSWORD")
         if api_key_value is None:
             api_key_value = os.environ.get("MSA_API_KEY_VALUE")
-        
+
         click.echo(f"MSA server enabled: {msa_server_url}")
         if api_key_value:
             click.echo("MSA server authentication: using API key header")
@@ -1789,13 +1857,19 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         if (isinstance(devices, int) and devices > 1) or (
             isinstance(devices, list) and len(devices) > 1
         ):
-            click.echo("Warning: MPS only supports a single device, ignoring --devices.")
+            click.echo(
+                "Warning: MPS only supports a single device, ignoring --devices."
+            )
         devices = 1
         strategy = "auto"
     elif (isinstance(devices, int) and devices > 1) or (
         isinstance(devices, list) and len(devices) > 1
     ):
-        start_method = "fork" if platform.system() != "win32" and platform.system() != "Windows" else "spawn"
+        start_method = (
+            "fork"
+            if platform.system() != "win32" and platform.system() != "Windows"
+            else "spawn"
+        )
         strategy = DDPStrategy(start_method=start_method)
         device_count = len(devices) if isinstance(devices, list) else devices
         if len(filtered_manifest.records) < device_count:
@@ -2008,27 +2082,39 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "runtime_version": _pkg_version("boltz-community"),
                 "input_sources": _resolved_input_sources(data),
                 "structure_checkpoint": str(structure_checkpoint.resolve()),
-                "structure_checkpoint_sha256": _sha256_file(
-                    structure_checkpoint
-                ),
+                "structure_checkpoint_sha256": _sha256_file(structure_checkpoint),
                 "affinity_checkpoint": str(affinity_checkpoint.resolve()),
                 "affinity_checkpoint_sha256": _sha256_file(affinity_checkpoint),
                 "seed": seed,
                 "structure_recycling_steps": recycling_steps,
                 "structure_sampling_steps": sampling_steps,
                 "structure_diffusion_samples": diffusion_samples,
+                "structure_batch_size": batch_size,
+                "structure_use_potentials_flag": use_potentials,
+                "structure_fk_steering": use_potentials,
+                "structure_physical_guidance_update": use_potentials,
+                "structure_contact_guidance_update": batch_size == 1,
                 "affinity_recycling_steps": 5,
                 "affinity_sampling_steps": sampling_steps_affinity,
                 "affinity_diffusion_samples": diffusion_samples_affinity,
                 "affinity_skip_structure": affinity_skip_structure,
+                "affinity_head_only": affinity_head_only,
+                "affinity_context_dir": (
+                    str(affinity_context_dir)
+                    if affinity_context_dir is not None
+                    else None
+                ),
+                "affinity_crop_indices_dir": (
+                    str(affinity_crop_indices_dir)
+                    if affinity_crop_indices_dir is not None
+                    else None
+                ),
                 "affinity_distogram_seed": affinity_distogram_seed,
                 "affinity_random_distance_mean": affinity_random_distance_mean,
                 "affinity_random_distance_std": affinity_random_distance_std,
                 "affinity_random_pair_scope": affinity_random_pair_scope,
                 "affinity_output_tag": affinity_output_tag,
-                "affinity_prepared_geometry_label": (
-                    affinity_prepared_geometry_label
-                ),
+                "affinity_prepared_geometry_label": (affinity_prepared_geometry_label),
                 "distogram_modes": list(affinity_distogram_modes),
                 "resume_embeddings_dir": (
                     str(resume_embeddings_dir)
@@ -2037,7 +2123,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 ),
                 "resume_recycling_steps": resume_recycling_steps,
                 "written_embeddings_recycling_steps": (
-                    recycling_steps if write_embeddings else None
+                    5 if write_embeddings else None
                 ),
             },
         )
@@ -2055,6 +2141,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             extra_mols_dir=processed.extra_mols_dir,
             override_method="other",
             affinity=True,
+            affinity_crop_indices_dir=affinity_crop_indices_dir,
             pin_memory=pin_memory,
         )
 
@@ -2071,21 +2158,17 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_full_pde": False,
         }
         if write_embeddings:
-            predict_affinity_args["write_embeddings_recycling_step"] = (
-                recycling_steps
-            )
+            predict_affinity_args["write_embeddings_recycling_step"] = 5
         if resume_embeddings_dir is not None:
             if resume_recycling_steps > 5:
                 raise click.UsageError(
                     "--resume_recycling_steps cannot exceed the affinity "
                     "model's fixed 5 recycling steps."
                 )
-            predict_affinity_args["resume_embeddings_dir"] = str(
-                resume_embeddings_dir
-            )
-            predict_affinity_args["resume_recycling_steps"] = (
-                resume_recycling_steps
-            )
+            predict_affinity_args["resume_embeddings_dir"] = str(resume_embeddings_dir)
+            predict_affinity_args["resume_recycling_steps"] = resume_recycling_steps
+        if affinity_context_dir is not None:
+            predict_affinity_args["affinity_context_dir"] = str(affinity_context_dir)
 
         steering_args = BoltzSteeringParams()
         steering_args.fk_steering = False
@@ -2108,6 +2191,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             affinity_random_distance_mean=affinity_random_distance_mean,
             affinity_random_distance_std=affinity_random_distance_std,
             affinity_random_pair_scope=affinity_random_pair_scope,
+            run_trunk_and_structure=not affinity_head_only,
             skip_run_structure=affinity_skip_structure,
         )
         model_module.eval()

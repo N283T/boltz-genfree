@@ -352,11 +352,16 @@ class BoltzWriter(BasePredictionWriter):
                     s = prediction["s"][record_idx].float().cpu().numpy()
                     z = prediction["z"][record_idx].float().cpu().numpy()
 
-                path = (
-                    struct_dir
-                    / f"embeddings_{record.id}.npz"
+                # Keep structure-stage embeddings separate from the cropped
+                # affinity-stage cache.  The old shared filename allowed the
+                # affinity writer to silently overwrite full-token tensors.
+                path = struct_dir / f"structure_trunk_embeddings_{record.id}.npz"
+                np.savez_compressed(
+                    path,
+                    s=s,
+                    z=z,
+                    embedding_stage=np.asarray("structure_trunk"),
                 )
-                np.savez_compressed(path, s=s, z=z)
 
     def on_predict_epoch_end(
         self,
@@ -496,10 +501,53 @@ class BoltzAffinityWriter(BasePredictionWriter):
             )
 
         if self.write_embeddings and "s" in prediction and "z" in prediction:
+            token_mask = batch["token_pad_mask"][0].detach().cpu().bool()
+            token_idx = batch["resume_token_idx"][0].detach().cpu()[token_mask]
+            s = prediction["s"].float().cpu()
+            z = prediction["z"].float().cpu()
+            if s.ndim == 3:
+                s = s[0]
+            if z.ndim == 4:
+                z = z[0]
+            s = s[token_mask]
+            z = z[token_mask][:, token_mask]
             np.savez_compressed(
-                struct_dir / f"embeddings_{record.id}.npz",
-                s=prediction["s"].float().cpu().numpy(),
-                z=prediction["z"].float().cpu().numpy(),
+                struct_dir / f"affinity_trunk_embeddings_{record.id}.npz",
+                s=s.numpy(),
+                z=z.numpy(),
+                token_idx=token_idx.numpy(),
+                embedding_stage=np.asarray("affinity_trunk_cropped"),
+            )
+            np.savez_compressed(
+                struct_dir / f"affinity_crop_{record.id}.npz",
+                token_idx=token_idx.numpy(),
+                crop_source=np.asarray(
+                    "explicit_token_indices"
+                    if self.experiment_metadata.get("affinity_crop_indices_dir")
+                    else "prepared_geometry"
+                ),
+            )
+            context_keys = (
+                "s_inputs",
+                "z",
+                "coords",
+                "token_pad_mask",
+                "mol_type",
+                "affinity_token_mask",
+                "token_to_rep_atom",
+                "affinity_mw",
+            )
+            np.savez_compressed(
+                struct_dir / f"affinity_head_context_{record.id}.npz",
+                **{
+                    key: prediction[f"affinity_context_{key}"]
+                    .detach()
+                    .float()
+                    .cpu()
+                    .numpy()
+                    for key in context_keys
+                },
+                context_stage=np.asarray("affinity_head_input"),
             )
 
     def on_predict_epoch_end(

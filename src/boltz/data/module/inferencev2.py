@@ -168,6 +168,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         extra_mols_dir: Optional[Path] = None,
         override_method: Optional[str] = None,
         affinity: bool = False,
+        affinity_crop_indices_dir: Optional[Path] = None,
     ) -> None:
         """Initialize the training dataset.
 
@@ -201,8 +202,28 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.extra_mols_dir = extra_mols_dir
         self.override_method = override_method
         self.affinity = affinity
+        self.affinity_crop_indices_dir = affinity_crop_indices_dir
         if self.affinity:
             self.cropper = AffinityCropper()
+
+    def _load_affinity_crop_indices(self, record_id: str) -> Optional[np.ndarray]:
+        if self.affinity_crop_indices_dir is None:
+            return None
+        candidates = (
+            self.affinity_crop_indices_dir
+            / record_id
+            / f"affinity_crop_{record_id}.npz",
+            self.affinity_crop_indices_dir / f"affinity_crop_{record_id}.npz",
+        )
+        path = next((candidate for candidate in candidates if candidate.exists()), None)
+        if path is None:
+            msg = f"Missing explicit affinity crop for {record_id}: {candidates[0]}"
+            raise FileNotFoundError(msg)
+        with np.load(path) as data:
+            if "token_idx" not in data:
+                msg = f"Affinity crop must contain token_idx: {path}"
+                raise ValueError(msg)
+            return data["token_idx"].copy()
 
     def __getitem__(self, idx: int) -> dict:
         """Get an item from the dataset.
@@ -238,11 +259,18 @@ class PredictionDataset(torch.utils.data.Dataset):
         tokenized = self.tokenizer.tokenize(input_data)
 
         if self.affinity:
-            tokenized = self.cropper.crop(
-                tokenized,
-                max_tokens=256,
-                max_atoms=2048,
-            )
+            crop_indices = self._load_affinity_crop_indices(record.id)
+            if crop_indices is None:
+                tokenized = self.cropper.crop(
+                    tokenized,
+                    max_tokens=256,
+                    max_atoms=2048,
+                )
+            else:
+                tokenized = self.cropper.crop_by_token_indices(
+                    tokenized,
+                    crop_indices,
+                )
             resume_token_idx = torch.from_numpy(
                 tokenized.tokens["token_idx"].copy()
             ).long()
@@ -326,6 +354,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         extra_mols_dir: Optional[Path] = None,
         override_method: Optional[str] = None,
         affinity: bool = False,
+        affinity_crop_indices_dir: Optional[Path] = None,
         pin_memory: bool = True,
     ) -> None:
         """Initialize the DataModule.
@@ -370,6 +399,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         self.extra_mols_dir = extra_mols_dir
         self.override_method = override_method
         self.affinity = affinity
+        self.affinity_crop_indices_dir = affinity_crop_indices_dir
         self.pin_memory = pin_memory
 
     def predict_dataloader(self) -> DataLoader:
@@ -391,6 +421,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             extra_mols_dir=self.extra_mols_dir,
             override_method=self.override_method,
             affinity=self.affinity,
+            affinity_crop_indices_dir=self.affinity_crop_indices_dir,
         )
         return DataLoader(
             dataset,

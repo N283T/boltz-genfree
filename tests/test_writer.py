@@ -258,7 +258,9 @@ def test_boltz_writer_preserves_single_record_embedding_shape(tmp_path: Path):
         dataloader_idx=0,
     )
 
-    embeddings = np.load(out_dir / "record_a" / "embeddings_record_a.npz")
+    embeddings = np.load(
+        out_dir / "record_a" / "structure_trunk_embeddings_record_a.npz"
+    )
     assert embeddings["s"].shape == (1, 2, 3)
     assert embeddings["z"].shape == (1, 1, 2, 2)
 
