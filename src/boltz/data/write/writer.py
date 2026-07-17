@@ -557,6 +557,12 @@ class BoltzAffinityWriter(BasePredictionWriter):
                         -1,
                     )
                 ),
+                structure_free_crop_label=np.asarray(
+                    self.experiment_metadata.get(
+                        "affinity_structure_free_crop_label",
+                        "",
+                    )
+                ),
             )
             context_keys = (
                 "s_inputs",

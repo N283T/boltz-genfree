@@ -266,12 +266,19 @@ class PredictionDataset(torch.utils.data.Dataset):
 
         if self.affinity:
             if self.affinity_structure_free:
-                tokenized = self.cropper.crop_sequence_window(
-                    tokenized,
-                    protein_start=self.affinity_sequence_window_start,
-                    max_tokens=256,
-                    max_atoms=2048,
-                )
+                crop_indices = self._load_affinity_crop_indices(record.id)
+                if crop_indices is None:
+                    tokenized = self.cropper.crop_sequence_window(
+                        tokenized,
+                        protein_start=self.affinity_sequence_window_start,
+                        max_tokens=256,
+                        max_atoms=2048,
+                    )
+                else:
+                    tokenized = self.cropper.crop_by_token_indices(
+                        tokenized,
+                        crop_indices,
+                    )
             else:
                 crop_indices = self._load_affinity_crop_indices(record.id)
                 if crop_indices is None:

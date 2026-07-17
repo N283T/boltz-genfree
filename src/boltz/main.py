@@ -1503,6 +1503,15 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     ),
 )
 @click.option(
+    "--affinity_structure_free_crop_label",
+    type=str,
+    default=None,
+    help=(
+        "Required provenance label when explicit token indices are used with "
+        "--affinity_structure_free."
+    ),
+)
+@click.option(
     "--affinity_prepared_geometry_label",
     type=str,
     default=None,
@@ -1627,6 +1636,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     affinity_head_only: bool,
     affinity_context_dir: Optional[Path],
     affinity_crop_indices_dir: Optional[Path],
+    affinity_structure_free_crop_label: Optional[str],
     affinity_prepared_geometry_label: Optional[str],
     preprocessing_threads: int,
     max_msa_seqs: int,
@@ -1686,9 +1696,24 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "--affinity_structure_free cannot use affinity head replay context."
             )
         if affinity_crop_indices_dir is not None:
+            if affinity_structure_free_crop_label is None:
+                raise click.UsageError(
+                    "Structure-free explicit token indices require "
+                    "--affinity_structure_free_crop_label."
+                )
+            if not re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9_.-]*",
+                affinity_structure_free_crop_label,
+            ):
+                raise click.UsageError(
+                    "--affinity_structure_free_crop_label must contain only "
+                    "letters, digits, '.', '_', or '-', and must start with a "
+                    "letter or digit."
+                )
+        elif affinity_structure_free_crop_label is not None:
             raise click.UsageError(
-                "--affinity_structure_free uses its built-in sequence crop and "
-                "cannot use --affinity_crop_indices_dir."
+                "--affinity_structure_free_crop_label requires "
+                "--affinity_crop_indices_dir."
             )
         if affinity_prepared_geometry_label is not None:
             raise click.UsageError(
@@ -1720,6 +1745,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     elif affinity_sequence_window_start != 0:
         raise click.UsageError(
             "--affinity_sequence_window_start requires --affinity_structure_free."
+        )
+    elif affinity_structure_free_crop_label is not None:
+        raise click.UsageError(
+            "--affinity_structure_free_crop_label requires "
+            "--affinity_structure_free and --affinity_crop_indices_dir."
         )
 
     if affinity_context_dir is not None:
@@ -2192,9 +2222,13 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 ),
                 "affinity_crop_mode": (
                     (
-                        "sequence_prefix"
-                        if affinity_sequence_window_start == 0
-                        else "sequence_window"
+                        "explicit_structure_free_token_indices"
+                        if affinity_crop_indices_dir is not None
+                        else (
+                            "sequence_prefix"
+                            if affinity_sequence_window_start == 0
+                            else "sequence_window"
+                        )
                     )
                     if affinity_structure_free
                     else (
@@ -2213,10 +2247,14 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "affinity_sequence_window_start": (
                     affinity_sequence_window_start
                     if affinity_structure_free
+                    and affinity_crop_indices_dir is None
                     else None
                 ),
                 "affinity_sequence_window_size": (
-                    200 if affinity_structure_free else None
+                    200
+                    if affinity_structure_free
+                    and affinity_crop_indices_dir is None
+                    else None
                 ),
                 "affinity_head_coordinate_source": (
                     "none"
@@ -2237,6 +2275,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                     str(affinity_crop_indices_dir)
                     if affinity_crop_indices_dir is not None
                     else None
+                ),
+                "affinity_structure_free_crop_label": (
+                    affinity_structure_free_crop_label
                 ),
                 "affinity_distogram_seed": affinity_distogram_seed,
                 "affinity_random_distance_mean": affinity_random_distance_mean,

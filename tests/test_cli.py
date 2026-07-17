@@ -88,6 +88,7 @@ def test_predict_exposes_embedding_resume_options():
     assert params["affinity_head_only"].default is False
     assert params["affinity_context_dir"].default is None
     assert params["affinity_crop_indices_dir"].default is None
+    assert params["affinity_structure_free_crop_label"].default is None
     assert params["affinity_structure_free"].is_flag
     assert params["affinity_structure_free"].default is False
     assert params["affinity_sequence_window_start"].default == 0
@@ -110,6 +111,66 @@ def test_predict_exposes_affinity_structure_skip():
     assert params["affinity_random_distance_std"].default == 4.0
     assert params["affinity_random_pair_scope"].default == "all"
     assert params["affinity_output_tag"].default is None
+
+
+class TestStructureFreeExplicitCropProvenance:
+    """Explicit structure-free crops must carry an auditable label."""
+
+    @staticmethod
+    def _input(tmp_path: Path) -> Path:
+        path = tmp_path / "input.yaml"
+        path.write_text("version: 1\nsequences: []\n")
+        return path
+
+    def test_rejects_crop_directory_without_label(self, tmp_path: Path):
+        with pytest.raises(
+            click.UsageError,
+            match="Structure-free explicit token indices require",
+        ):
+            predict.main(
+                args=[
+                    str(self._input(tmp_path)),
+                    "--affinity_structure_free",
+                    "--affinity_crop_indices_dir",
+                    str(tmp_path),
+                ],
+                prog_name="predict",
+                standalone_mode=False,
+            )
+
+    def test_rejects_label_without_crop_directory(self, tmp_path: Path):
+        with pytest.raises(
+            click.UsageError,
+            match="affinity_structure_free_crop_label requires",
+        ):
+            predict.main(
+                args=[
+                    str(self._input(tmp_path)),
+                    "--affinity_structure_free",
+                    "--affinity_structure_free_crop_label",
+                    "fixed-pocket",
+                ],
+                prog_name="predict",
+                standalone_mode=False,
+            )
+
+    def test_rejects_unsafe_label(self, tmp_path: Path):
+        with pytest.raises(
+            click.UsageError,
+            match="must contain only letters",
+        ):
+            predict.main(
+                args=[
+                    str(self._input(tmp_path)),
+                    "--affinity_structure_free",
+                    "--affinity_crop_indices_dir",
+                    str(tmp_path),
+                    "--affinity_structure_free_crop_label",
+                    "not safe",
+                ],
+                prog_name="predict",
+                standalone_mode=False,
+            )
 
 
 class TestBatchSizeOption:
