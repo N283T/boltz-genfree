@@ -92,6 +92,7 @@ def test_predict_exposes_embedding_resume_options():
     assert params["affinity_structure_free"].is_flag
     assert params["affinity_structure_free"].default is False
     assert params["affinity_sequence_window_start"].default == 0
+    assert params["affinity_recycling_steps"].default == 5
 
 
 def test_predict_defaults_to_one_explicit_control_mode():

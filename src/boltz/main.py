@@ -1526,6 +1526,12 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     default=200,
 )
 @click.option(
+    "--affinity_recycling_steps",
+    type=click.IntRange(min=1, max=5),
+    help="The number of Boltz-2 affinity trunk recycling steps.",
+    default=5,
+)
+@click.option(
     "--diffusion_samples_affinity",
     type=int,
     help="The number of diffusion samples to use for affinity prediction.",
@@ -1602,6 +1608,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     sampling_steps: int,
     diffusion_samples: int,
     sampling_steps_affinity: int,
+    affinity_recycling_steps: int,
     diffusion_samples_affinity: int,
     max_parallel_samples: Optional[int],
     step_scale: Optional[float],
@@ -2206,7 +2213,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "structure_fk_steering": use_potentials,
                 "structure_physical_guidance_update": use_potentials,
                 "structure_contact_guidance_update": batch_size == 1,
-                "affinity_recycling_steps": 5,
+                "affinity_recycling_steps": affinity_recycling_steps,
                 "affinity_sampling_steps": sampling_steps_affinity,
                 "affinity_diffusion_samples": diffusion_samples_affinity,
                 "affinity_skip_structure": affinity_skip_structure,
@@ -2293,7 +2300,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 ),
                 "resume_recycling_steps": resume_recycling_steps,
                 "written_embeddings_recycling_steps": (
-                    5 if write_embeddings else None
+                    affinity_recycling_steps if write_embeddings else None
                 ),
             },
         )
@@ -2322,7 +2329,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         )
 
         predict_affinity_args = {
-            "recycling_steps": 5,
+            "recycling_steps": affinity_recycling_steps,
             "sampling_steps": sampling_steps_affinity,
             "diffusion_samples": diffusion_samples_affinity,
             "max_parallel_samples": _resolve_affinity_max_parallel_samples(
@@ -2334,12 +2341,13 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             "write_full_pde": False,
         }
         if write_embeddings:
-            predict_affinity_args["write_embeddings_recycling_step"] = 5
+            predict_affinity_args["write_embeddings_recycling_step"] = (
+                affinity_recycling_steps
+            )
         if resume_embeddings_dir is not None:
-            if resume_recycling_steps > 5:
+            if resume_recycling_steps > affinity_recycling_steps:
                 raise click.UsageError(
-                    "--resume_recycling_steps cannot exceed the affinity "
-                    "model's fixed 5 recycling steps."
+                    "--resume_recycling_steps cannot exceed --affinity_recycling_steps."
                 )
             predict_affinity_args["resume_embeddings_dir"] = str(resume_embeddings_dir)
             predict_affinity_args["resume_recycling_steps"] = resume_recycling_steps
