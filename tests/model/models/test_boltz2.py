@@ -13,10 +13,44 @@ class _DummyModule(nn.Module):
         super().__init__()
 
 
+class _ReturnFeature(nn.Module):
+    def forward(self, feats):
+        return feats["s_inputs"]
+
+
+class _ZeroPairFeature(nn.Module):
+    def forward(self, feats):
+        return feats["z_feature"]
+
+
+class _CountingMsa(nn.Module):
+    subsample_msa = False
+
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def forward(self, z, *args, **kwargs):
+        self.calls += 1
+        return torch.zeros_like(z)
+
+
+class _CountingPairformer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.calls = 0
+
+    def forward(self, s, z, **kwargs):
+        self.calls += 1
+        return s, z
+
+
 def _minimal_boltz2(
     validate_structure,
     affinity_distogram_modes=None,
     skip_run_structure=False,
+    confidence_prediction=False,
+    skip_confidence_forward=False,
 ):
     return boltz2.Boltz2(
         atom_s=2,
@@ -40,11 +74,13 @@ def _minimal_boltz2(
         },
         diffusion_process_args={},
         diffusion_loss_args={},
-        confidence_prediction=False,
+        confidence_model_args={},
+        confidence_prediction=confidence_prediction,
         validate_structure=validate_structure,
         validators=[],
         affinity_distogram_modes=affinity_distogram_modes,
         skip_run_structure=skip_run_structure,
+        skip_confidence_forward=skip_confidence_forward,
     )
 
 
@@ -68,6 +104,86 @@ def test_boltz2_stores_validate_structure(monkeypatch):
 
     model = _minimal_boltz2(False, ["constant_far"])
     assert model.affinity_distogram_modes == ("constant_far",)
+
+
+@pytest.mark.parametrize(("recycling_steps", "expected_passes"), [(0, 1), (1, 2)])
+def test_forward_recycling_count_includes_initial_trunk_pass(
+    monkeypatch,
+    recycling_steps,
+    expected_passes,
+):
+    for module_name in [
+        "InputEmbedder",
+        "RelativePositionEncoder",
+        "ContactConditioning",
+        "MSAModule",
+        "PairformerModule",
+        "DiffusionConditioning",
+        "AtomDiffusion",
+        "DistogramModule",
+    ]:
+        monkeypatch.setattr(boltz2, module_name, _DummyModule)
+
+    model = _minimal_boltz2(False, skip_run_structure=True)
+    model.input_embedder = _ReturnFeature()
+    model.rel_pos = _ZeroPairFeature()
+    model.contact_conditioning = _ZeroPairFeature()
+    model.msa_module = _CountingMsa()
+    model.pairformer_module = _CountingPairformer()
+    model.distogram_module = nn.Identity()
+    model.eval()
+    feats = {
+        "s_inputs": torch.zeros(1, 3, 2),
+        "z_feature": torch.zeros(1, 3, 3, 2),
+        "token_bonds": torch.zeros(1, 3, 3, 1),
+        "token_pad_mask": torch.ones(1, 3),
+    }
+
+    model(feats, recycling_steps=recycling_steps)
+
+    assert model.msa_module.calls == expected_passes
+    assert model.pairformer_module.calls == expected_passes
+
+
+def test_forward_can_skip_unused_confidence_computation(monkeypatch):
+    for module_name in [
+        "InputEmbedder",
+        "RelativePositionEncoder",
+        "ContactConditioning",
+        "MSAModule",
+        "PairformerModule",
+        "DiffusionConditioning",
+        "AtomDiffusion",
+        "DistogramModule",
+        "ConfidenceModule",
+    ]:
+        monkeypatch.setattr(boltz2, module_name, _DummyModule)
+
+    model = _minimal_boltz2(
+        False,
+        skip_run_structure=True,
+        confidence_prediction=True,
+        skip_confidence_forward=True,
+    )
+    model.input_embedder = _ReturnFeature()
+    model.rel_pos = _ZeroPairFeature()
+    model.contact_conditioning = _ZeroPairFeature()
+    model.msa_module = _CountingMsa()
+    model.pairformer_module = _CountingPairformer()
+    model.distogram_module = nn.Identity()
+    model.confidence_module = nn.Identity()
+    model.eval()
+    feats = {
+        "s_inputs": torch.zeros(1, 3, 2),
+        "z_feature": torch.zeros(1, 3, 3, 2),
+        "token_bonds": torch.zeros(1, 3, 3, 1),
+        "token_pad_mask": torch.ones(1, 3),
+        "coords": torch.zeros(1, 1, 4, 3),
+    }
+
+    out = model(feats, recycling_steps=0)
+
+    assert "pdistogram" in out
 
 
 def test_select_affinity_coordinates_can_reuse_prepared_geometry(monkeypatch):

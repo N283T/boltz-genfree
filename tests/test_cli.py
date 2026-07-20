@@ -91,8 +91,14 @@ def test_predict_exposes_embedding_resume_options():
     assert params["affinity_structure_free_crop_label"].default is None
     assert params["affinity_structure_free"].is_flag
     assert params["affinity_structure_free"].default is False
+    assert params["affinity_structure_free_fast"].is_flag
+    assert params["affinity_structure_free_fast"].default is False
+    assert params["affinity_screening_minimal_output"].is_flag
+    assert params["affinity_screening_minimal_output"].default is False
     assert params["affinity_sequence_window_start"].default == 0
     assert params["affinity_recycling_steps"].default == 5
+    assert params["affinity_recycling_steps"].type.min == 0
+    assert params["affinity_recycling_steps"].type.max == 5
 
 
 def test_predict_defaults_to_one_explicit_control_mode():
@@ -168,6 +174,46 @@ class TestStructureFreeExplicitCropProvenance:
                     str(tmp_path),
                     "--affinity_structure_free_crop_label",
                     "not safe",
+                ],
+                prog_name="predict",
+                standalone_mode=False,
+            )
+
+
+class TestAffinityScreeningMinimalOutput:
+    """Minimal screening output is explicit and structure-free only."""
+
+    @staticmethod
+    def _input(tmp_path: Path) -> Path:
+        path = tmp_path / "input.yaml"
+        path.write_text("version: 1\nsequences: []\n")
+        return path
+
+    def test_requires_structure_free(self, tmp_path: Path):
+        with pytest.raises(
+            click.UsageError,
+            match="requires --affinity_structure_free",
+        ):
+            predict.main(
+                args=[
+                    str(self._input(tmp_path)),
+                    "--affinity_screening_minimal_output",
+                ],
+                prog_name="predict",
+                standalone_mode=False,
+            )
+
+    def test_rejects_saved_embeddings(self, tmp_path: Path):
+        with pytest.raises(
+            click.UsageError,
+            match="cannot be combined with --write_embeddings",
+        ):
+            predict.main(
+                args=[
+                    str(self._input(tmp_path)),
+                    "--affinity_structure_free",
+                    "--affinity_screening_minimal_output",
+                    "--write_embeddings",
                 ],
                 prog_name="predict",
                 standalone_mode=False,

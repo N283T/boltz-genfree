@@ -365,3 +365,84 @@ def test_affinity_writer_writes_mode_outputs_and_distogram_artifact(
     assert summary["experiment"] == {"seed": 7}
     assert artifact["bins"].dtype == np.uint8
     assert artifact["intervened_pair_mask"].sum() == 2
+
+
+def test_affinity_writer_minimal_screening_output_deduplicates_run_metadata(
+    tmp_path: Path,
+):
+    input_a = tmp_path / "inputs" / "record_a.yaml"
+    input_b = tmp_path / "inputs" / "record_b.yaml"
+    writer = BoltzAffinityWriter(
+        data_dir=str(tmp_path / "data"),
+        output_dir=str(tmp_path / "out"),
+        experiment_metadata={
+            "seed": 7,
+            "use_kernels": True,
+            "input_sources": [str(input_a), str(input_b)],
+        },
+        output_tag="minimal",
+        screening_minimal_output=True,
+    )
+    record = _make_record(
+        "record_a",
+        affinity=AffinityInfo(
+            chain_id=0,
+            mw=123.4,
+            chain_name="L2",
+            output_id="record_a_L2",
+        ),
+    )
+    mode_prediction = {
+        "affinity_pred_value": torch.tensor(1.25),
+        "affinity_probability_binary": torch.tensor(0.75),
+        "affinity_distogram_bins": torch.zeros((1, 2, 2), dtype=torch.long),
+        "affinity_distogram_intervened_pair_mask": torch.ones(
+            (1, 2, 2), dtype=torch.bool
+        ),
+    }
+    prediction = {
+        "exception": False,
+        "affinity_pred_value": torch.tensor(1.25),
+        "affinity_probability_binary": torch.tensor(0.75),
+        "affinity_by_distogram_mode": {
+            "zero_distogram_features": mode_prediction
+        },
+    }
+
+    writer.write_on_batch_end(
+        trainer=None,
+        pl_module=None,
+        prediction=prediction,
+        batch_indices=[],
+        batch={"record": [record]},
+        batch_idx=0,
+        dataloader_idx=0,
+    )
+
+    import json
+
+    out_dir = tmp_path / "out"
+    record_dir = out_dir / "record_a"
+    mode_path = record_dir / (
+        "affinity_record_a_L2__distogram_zero_distogram_features"
+        "__run_minimal.json"
+    )
+    summary = json.loads(mode_path.read_text())
+    run_metadata = json.loads(
+        (out_dir / "affinity_run_metadata__run_minimal.json").read_text()
+    )
+
+    assert sorted(path.name for path in record_dir.iterdir()) == [mode_path.name]
+    assert summary["experiment"]["input_source"] == str(input_a)
+    assert "input_sources" not in summary["experiment"]
+    assert "effective_distogram" not in summary
+    assert summary["experiment"]["output_layout"] == (
+        "affinity_screening_minimal_v1"
+    )
+    assert summary["experiment"]["run_metadata_file"] == (
+        "../affinity_run_metadata__run_minimal.json"
+    )
+    assert run_metadata["experiment"]["input_sources"] == [
+        str(input_a),
+        str(input_b),
+    ]

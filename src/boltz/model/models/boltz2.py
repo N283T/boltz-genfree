@@ -116,6 +116,7 @@ class Boltz2(LightningModule):
         affinity_random_distance_mean: float = 12.0,
         affinity_random_distance_std: float = 4.0,
         affinity_random_pair_scope: str = "all",
+        skip_confidence_forward: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -320,6 +321,7 @@ class Boltz2(LightningModule):
         self.affinity_random_distance_mean = affinity_random_distance_mean
         self.affinity_random_distance_std = affinity_random_distance_std
         self.affinity_random_pair_scope = affinity_random_pair_scope
+        self.skip_confidence_forward = skip_confidence_forward
         self.run_trunk_and_structure = run_trunk_and_structure
         self.skip_run_structure = skip_run_structure
         self.token_level_confidence = token_level_confidence
@@ -807,7 +809,7 @@ class Boltz2(LightningModule):
                 feats["coords"] = feats["coords"].squeeze(1)
                 assert len(feats["coords"].shape) == 3
 
-        if self.confidence_prediction:
+        if self.confidence_prediction and not self.skip_confidence_forward:
             _detach = self.training
             dict_out.update(
                 self.confidence_module(
@@ -1431,7 +1433,7 @@ class Boltz2(LightningModule):
                 "sample_atom_coords",
                 batch["coords"].squeeze(1),
             )
-            if self.confidence_prediction:
+            if self.confidence_prediction and not self.skip_confidence_forward:
                 # pred_dict["confidence"] = out.get("ablation_confidence", None)
                 if self.predict_args.get("write_full_pde", True):
                     pred_dict["pde"] = out["pde"]

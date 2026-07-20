@@ -1470,6 +1470,23 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     ),
 )
 @click.option(
+    "--affinity_structure_free_fast",
+    is_flag=True,
+    help=(
+        "Skip unused confidence-head computation during structure-free affinity "
+        "prediction. This does not skip the affinity trunk or affinity heads."
+    ),
+)
+@click.option(
+    "--affinity_screening_minimal_output",
+    is_flag=True,
+    help=(
+        "Write one score JSON per structure-free affinity record and one shared "
+        "run-metadata JSON. Suppresses legacy summary JSON, distogram NPZ, and "
+        "Lightning logs. Intended for recoverable large-scale screening."
+    ),
+)
+@click.option(
     "--affinity_sequence_window_start",
     type=click.IntRange(min=0),
     default=0,
@@ -1527,7 +1544,7 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
 )
 @click.option(
     "--affinity_recycling_steps",
-    type=click.IntRange(min=1, max=5),
+    type=click.IntRange(min=0, max=5),
     help="The number of Boltz-2 affinity trunk recycling steps.",
     default=5,
 )
@@ -1639,6 +1656,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     affinity_output_tag: Optional[str],
     affinity_skip_structure: bool,
     affinity_structure_free: bool,
+    affinity_structure_free_fast: bool,
+    affinity_screening_minimal_output: bool,
     affinity_sequence_window_start: int,
     affinity_head_only: bool,
     affinity_context_dir: Optional[Path],
@@ -1693,6 +1712,20 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             )
         affinity_skip_structure = True
 
+    if affinity_structure_free_fast and not affinity_structure_free:
+        raise click.UsageError(
+            "--affinity_structure_free_fast requires --affinity_structure_free."
+        )
+    if affinity_screening_minimal_output and not affinity_structure_free:
+        raise click.UsageError(
+            "--affinity_screening_minimal_output requires "
+            "--affinity_structure_free."
+        )
+    if affinity_screening_minimal_output and write_embeddings:
+        raise click.UsageError(
+            "--affinity_screening_minimal_output cannot be combined with "
+            "--write_embeddings."
+        )
     if affinity_structure_free:
         if model != "boltz2":
             raise click.UsageError(
@@ -2044,6 +2077,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         accelerator=accelerator,
         devices=devices,
         precision=precision,
+        logger=False if affinity_screening_minimal_output else True,
     )
 
     if accelerator == "cpu":
@@ -2196,6 +2230,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             output_dir=out_dir / "predictions",
             write_embeddings=write_embeddings,
             output_tag=affinity_output_tag,
+            screening_minimal_output=affinity_screening_minimal_output,
             experiment_metadata={
                 "runtime": "boltz-community",
                 "runtime_version": _pkg_version("boltz-community"),
@@ -2213,9 +2248,22 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "structure_fk_steering": use_potentials,
                 "structure_physical_guidance_update": use_potentials,
                 "structure_contact_guidance_update": batch_size == 1,
+                "structure_sampling_active": not affinity_skip_structure,
                 "affinity_recycling_steps": affinity_recycling_steps,
                 "affinity_sampling_steps": sampling_steps_affinity,
                 "affinity_diffusion_samples": diffusion_samples_affinity,
+                "affinity_structure_sampling_active": not affinity_skip_structure,
+                "use_kernels": not no_kernels,
+                "subsample_msa": subsample_msa,
+                "num_subsampled_msa": num_subsampled_msa,
+                "affinity_structure_free_fast": affinity_structure_free_fast,
+                "affinity_screening_minimal_output": (
+                    affinity_screening_minimal_output
+                ),
+                "affinity_confidence_forward_active": not (
+                    affinity_structure_free_fast
+                ),
+                "affinity_pdistogram_forward_active": True,
                 "affinity_skip_structure": affinity_skip_structure,
                 "affinity_structure_free": affinity_structure_free,
                 "affinity_input_source": (
@@ -2376,6 +2424,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             affinity_random_distance_mean=affinity_random_distance_mean,
             affinity_random_distance_std=affinity_random_distance_std,
             affinity_random_pair_scope=affinity_random_pair_scope,
+            use_kernels=not no_kernels,
+            skip_confidence_forward=affinity_structure_free_fast,
             run_trunk_and_structure=not affinity_head_only,
             skip_run_structure=affinity_skip_structure,
         )

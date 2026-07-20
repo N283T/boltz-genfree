@@ -383,6 +383,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
         experiment_metadata: Optional[dict[str, object]] = None,
         write_embeddings: bool = False,
         output_tag: Optional[str] = None,
+        screening_minimal_output: bool = False,
     ) -> None:
         """Initialize the writer.
 
@@ -400,6 +401,40 @@ class BoltzAffinityWriter(BasePredictionWriter):
         self.experiment_metadata = experiment_metadata or {}
         self.write_embeddings = write_embeddings
         self.output_tag = output_tag
+        self.screening_minimal_output = screening_minimal_output
+        self.run_metadata_path: Optional[Path] = None
+        if self.screening_minimal_output:
+            tag_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
+            self.run_metadata_path = (
+                self.output_dir / f"affinity_run_metadata{tag_suffix}.json"
+            )
+            payload = {
+                "schema_version": 1,
+                "output_layout": "affinity_screening_minimal_v1",
+                "experiment": self.experiment_metadata,
+            }
+            with self.run_metadata_path.open("w") as handle:
+                handle.write(json.dumps(payload, indent=4))
+
+    def _record_experiment_metadata(self, record: Record) -> dict[str, object]:
+        """Return compact per-record metadata with shared run metadata reference."""
+        if not self.screening_minimal_output:
+            return self.experiment_metadata
+        metadata: dict[str, object] = {
+            "output_layout": "affinity_screening_minimal_v1",
+        }
+        input_sources = self.experiment_metadata.get("input_sources", [])
+        if isinstance(input_sources, list):
+            matching_sources = [
+                source
+                for source in input_sources
+                if isinstance(source, str) and Path(source).stem == record.id
+            ]
+            if len(matching_sources) == 1:
+                metadata["input_source"] = matching_sources[0]
+        if self.run_metadata_path is not None:
+            metadata["run_metadata_file"] = f"../{self.run_metadata_path.name}"
+        return metadata
 
     @staticmethod
     def _summary(
@@ -453,52 +488,59 @@ class BoltzAffinityWriter(BasePredictionWriter):
         struct_dir.mkdir(exist_ok=True)
         output_id = get_affinity_output_id(record)
 
-        # Preserve the original output for compatibility. It represents the
-        # first requested distogram mode.
         affinity_summary = self._summary(prediction, record)
         legacy_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
-        path = struct_dir / f"affinity_{output_id}{legacy_suffix}.json"
-        with path.open("w") as f:
-            f.write(json.dumps(affinity_summary, indent=4))
+        if not self.screening_minimal_output:
+            # Preserve the original output for compatibility. It represents the
+            # first requested distogram mode.
+            path = struct_dir / f"affinity_{output_id}{legacy_suffix}.json"
+            with path.open("w") as f:
+                f.write(json.dumps(affinity_summary, indent=4))
 
         for mode, mode_prediction in prediction.get(
             "affinity_by_distogram_mode",
             {},
         ).items():
-            bins = mode_prediction["affinity_distogram_bins"].detach().cpu()
-            pair_mask = mode_prediction[
-                "affinity_distogram_intervened_pair_mask"
-            ].detach().cpu()
-            num_bins = int(bins.max().item()) + 1
-            num_bins = max(num_bins, 64)
-            histogram = torch.bincount(
-                bins.reshape(-1),
-                minlength=num_bins,
-            ).tolist()
             mode_summary = self._summary(mode_prediction, record)
             mode_summary.update(
                 {
                     "distogram_intervention": mode,
                     "conditioner_added": mode != "zero_conditioning",
-                    "effective_distogram": {
-                        "shape": list(bins.shape),
-                        "min_bin": int(bins.min().item()),
-                        "max_bin": int(bins.max().item()),
-                        "intervened_pair_count": int(pair_mask.sum().item()),
-                        "bin_histogram": histogram,
-                    },
-                    "experiment": self.experiment_metadata,
+                    "experiment": self._record_experiment_metadata(record),
                 }
             )
+            bins = None
+            pair_mask = None
+            if not self.screening_minimal_output:
+                bins = mode_prediction["affinity_distogram_bins"].detach().cpu()
+                pair_mask = mode_prediction[
+                    "affinity_distogram_intervened_pair_mask"
+                ].detach().cpu()
+                num_bins = int(bins.max().item()) + 1
+                num_bins = max(num_bins, 64)
+                histogram = torch.bincount(
+                    bins.reshape(-1),
+                    minlength=num_bins,
+                ).tolist()
+                mode_summary["effective_distogram"] = {
+                    "shape": list(bins.shape),
+                    "min_bin": int(bins.min().item()),
+                    "max_bin": int(bins.max().item()),
+                    "intervened_pair_count": int(pair_mask.sum().item()),
+                    "bin_histogram": histogram,
+                }
             tag_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
             mode_stem = f"affinity_{output_id}__distogram_{mode}{tag_suffix}"
             with (struct_dir / f"{mode_stem}.json").open("w") as f:
                 f.write(json.dumps(mode_summary, indent=4))
-            np.savez_compressed(
-                struct_dir / f"{mode_stem}.npz",
-                bins=bins.numpy().astype(np.uint8),
-                intervened_pair_mask=pair_mask.numpy().astype(bool),
-            )
+            if not self.screening_minimal_output:
+                assert bins is not None
+                assert pair_mask is not None
+                np.savez_compressed(
+                    struct_dir / f"{mode_stem}.npz",
+                    bins=bins.numpy().astype(np.uint8),
+                    intervened_pair_mask=pair_mask.numpy().astype(bool),
+                )
 
         if self.write_embeddings and "s" in prediction and "z" in prediction:
             token_mask = batch["token_pad_mask"][0].detach().cpu().bool()
