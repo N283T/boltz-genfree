@@ -1652,6 +1652,14 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     help="Whether to dump the s and z embeddings into a npz file.",
 )
 @click.option(
+    "--write_affinity_representations",
+    is_flag=True,
+    help=(
+        "Write pooled affinity representations before/after conditioning and "
+        "the affinity PairFormer."
+    ),
+)
+@click.option(
     "--resume_embeddings_dir",
     type=click.Path(path_type=Path),
     default=None,
@@ -1729,6 +1737,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     no_kernels: bool,
     flash_attn: bool,
     write_embeddings: bool,
+    write_affinity_representations: bool,
     resume_embeddings_dir: Optional[Path],
     resume_recycling_steps: Optional[int],
 ) -> None:
@@ -1820,9 +1829,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             raise click.UsageError(
                 "--affinity_structure_free is only supported for Boltz-2."
             )
-        if affinity_head_only or affinity_context_dir is not None:
+        if affinity_context_dir is not None and not affinity_head_only:
             raise click.UsageError(
-                "--affinity_structure_free cannot use affinity head replay context."
+                "--affinity_structure_free can only use affinity head replay "
+                "context together with --affinity_head_only."
             )
         if affinity_crop_indices_dir is not None:
             if affinity_structure_free_crop_label is None:
@@ -2322,6 +2332,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             data_dir=processed.targets_dir,
             output_dir=out_dir / "predictions",
             write_embeddings=write_embeddings,
+            write_affinity_representations=write_affinity_representations,
             output_tag=affinity_output_tag,
             screening_minimal_output=affinity_screening_minimal_output,
             experiment_metadata={
@@ -2362,6 +2373,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "affinity_batch_size": affinity_batch_size,
                 "affinity_screening_minimal_output": (
                     affinity_screening_minimal_output
+                ),
+                "write_affinity_representations": (
+                    write_affinity_representations
                 ),
                 "affinity_confidence_forward_active": not (
                     affinity_structure_free_fast
@@ -2540,6 +2554,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             skip_confidence_forward=affinity_structure_free_fast,
             skip_pdistogram_forward=affinity_structure_free_extreme_fast,
             skip_msa_forward=affinity_structure_free_skip_msa,
+            capture_affinity_representations=write_affinity_representations,
             run_trunk_and_structure=not affinity_head_only,
             skip_run_structure=affinity_skip_structure,
         )

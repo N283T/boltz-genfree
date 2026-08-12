@@ -367,6 +367,65 @@ def test_affinity_writer_writes_mode_outputs_and_distogram_artifact(
     assert artifact["intervened_pair_mask"].sum() == 2
 
 
+def test_affinity_writer_writes_pooled_representations(tmp_path: Path):
+    writer = BoltzAffinityWriter(
+        data_dir=str(tmp_path / "data"),
+        output_dir=str(tmp_path / "out"),
+        write_affinity_representations=True,
+    )
+    record = _make_record(
+        "record_a",
+        affinity=AffinityInfo(
+            chain_id=0,
+            mw=123.4,
+            chain_name="L2",
+            output_id="record_a_L2",
+        ),
+    )
+    mode_prediction = {
+        "affinity_pred_value": torch.tensor([1.25]),
+        "affinity_probability_binary": torch.tensor([0.75]),
+        "affinity_distogram_bins": torch.zeros(1, 2, 2, dtype=torch.long),
+        "affinity_distogram_intervened_pair_mask": torch.zeros(
+            1, 2, 2, dtype=torch.bool
+        ),
+        "affinity_representation_member1_pooled_conditioned": torch.tensor(
+            [[1.0, 2.0]]
+        ),
+        "affinity_representation_member2_pooled_conditioned": torch.tensor(
+            [[3.0, 4.0]]
+        ),
+    }
+    prediction = {
+        "exception": False,
+        "affinity_pred_value": torch.tensor([1.25]),
+        "affinity_probability_binary": torch.tensor([0.75]),
+        "affinity_by_distogram_mode": {"control": mode_prediction},
+    }
+
+    writer.write_on_batch_end(
+        trainer=None,
+        pl_module=None,
+        prediction=prediction,
+        batch_indices=[],
+        batch={"record": [record]},
+        batch_idx=0,
+        dataloader_idx=0,
+    )
+
+    path = (
+        tmp_path
+        / "out"
+        / "record_a"
+        / "affinity_record_a_L2__distogram_control__pooled_representations.npz"
+    )
+    with np.load(path) as data:
+        np.testing.assert_array_equal(
+            data["member1_pooled_conditioned"], np.asarray([1.0, 2.0])
+        )
+        assert data["representation_stage"] == "affinity_cross_pair_mean"
+
+
 def test_affinity_writer_minimal_screening_output_deduplicates_run_metadata(
     tmp_path: Path,
 ):

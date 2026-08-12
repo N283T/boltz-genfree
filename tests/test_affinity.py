@@ -3,6 +3,7 @@ from dataclasses import replace
 
 import click
 import pytest
+import torch
 
 from boltz.data import const
 from boltz.data.types import AffinityInfo, ChainInfo, Manifest, Record, StructureInfo
@@ -12,6 +13,7 @@ from boltz.main import (
     filter_inputs_structure,
 )
 from boltz.data.write.writer import BoltzAffinityWriter
+from boltz.model.modules.affinity import pool_affinity_pairs
 
 
 def _make_affinity_record(record_id: str = "target") -> Record:
@@ -255,3 +257,17 @@ def test_affinity_writer_accepts_output_tag(tmp_path: Path):
     )
 
     assert writer.output_tag == "seed17"
+
+
+def test_pool_affinity_pairs_matches_cross_pair_head_pooling():
+    z = torch.arange(18, dtype=torch.float32).reshape(1, 3, 3, 2)
+    feats = {
+        "token_pad_mask": torch.ones(1, 3),
+        "mol_type": torch.tensor([[0, 0, 3]]),
+        "affinity_token_mask": torch.tensor([[False, False, True]]),
+    }
+
+    pooled = pool_affinity_pairs(z, feats)
+    expected = z[0, [0, 1, 2, 2], [2, 2, 0, 1]].mean(dim=0).unsqueeze(0)
+
+    torch.testing.assert_close(pooled, expected)

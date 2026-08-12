@@ -119,6 +119,7 @@ class Boltz2(LightningModule):
         skip_confidence_forward: bool = False,
         skip_pdistogram_forward: bool = False,
         skip_msa_forward: bool = False,
+        capture_affinity_representations: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -326,6 +327,7 @@ class Boltz2(LightningModule):
         self.skip_confidence_forward = skip_confidence_forward
         self.skip_pdistogram_forward = skip_pdistogram_forward
         self.skip_msa_forward = skip_msa_forward
+        self.capture_affinity_representations = capture_affinity_representations
         self.run_trunk_and_structure = run_trunk_and_structure
         self.skip_run_structure = skip_run_structure
         self.token_level_confidence = token_level_confidence
@@ -458,6 +460,7 @@ class Boltz2(LightningModule):
                 random_pair_scope=self.affinity_random_pair_scope,
                 return_distogram=True,
                 coordinate_free=self.affinity_coordinate_free,
+                capture_representations=self.capture_affinity_representations,
             )
             member2 = self.affinity_module2(
                 s_inputs=s_inputs,
@@ -472,6 +475,7 @@ class Boltz2(LightningModule):
                 random_distance_std=self.affinity_random_distance_std,
                 random_pair_scope=self.affinity_random_pair_scope,
                 coordinate_free=self.affinity_coordinate_free,
+                capture_representations=self.capture_affinity_representations,
             )
             probability1 = torch.nn.functional.sigmoid(
                 member1["affinity_logits_binary"]
@@ -495,6 +499,20 @@ class Boltz2(LightningModule):
                     "affinity_distogram_intervened_pair_mask"
                 ],
             }
+            if self.capture_affinity_representations:
+                for stage in (
+                    "pooled_processed",
+                    "pooled_conditioner_update",
+                    "pooled_conditioned",
+                    "pooled_pairformer",
+                    "pooled_hidden",
+                ):
+                    output[f"affinity_representation_member1_{stage}"] = member1[
+                        stage
+                    ]
+                    output[f"affinity_representation_member2_{stage}"] = member2[
+                        stage
+                    ]
             if self.affinity_mw_correction:
                 model_coef = 1.03525938
                 mw_coef = -0.59992683
@@ -529,8 +547,9 @@ class Boltz2(LightningModule):
             random_pair_scope=self.affinity_random_pair_scope,
             return_distogram=True,
             coordinate_free=self.affinity_coordinate_free,
+            capture_representations=self.capture_affinity_representations,
         )
-        return {
+        output = {
             "affinity_pred_value": member["affinity_pred_value"],
             "affinity_probability_binary": torch.nn.functional.sigmoid(
                 member["affinity_logits_binary"]
@@ -540,6 +559,16 @@ class Boltz2(LightningModule):
                 "affinity_distogram_intervened_pair_mask"
             ],
         }
+        if self.capture_affinity_representations:
+            for stage in (
+                "pooled_processed",
+                "pooled_conditioner_update",
+                "pooled_conditioned",
+                "pooled_pairformer",
+                "pooled_hidden",
+            ):
+                output[f"affinity_representation_{stage}"] = member[stage]
+        return output
 
     def _select_affinity_coordinates(
         self,
