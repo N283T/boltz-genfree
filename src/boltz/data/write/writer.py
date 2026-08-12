@@ -382,6 +382,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
         output_dir: str,
         experiment_metadata: Optional[dict[str, object]] = None,
         write_embeddings: bool = False,
+        write_affinity_representations: bool = False,
         output_tag: Optional[str] = None,
         screening_minimal_output: bool = False,
     ) -> None:
@@ -400,6 +401,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.experiment_metadata = experiment_metadata or {}
         self.write_embeddings = write_embeddings
+        self.write_affinity_representations = write_affinity_representations
         self.output_tag = output_tag
         self.screening_minimal_output = screening_minimal_output
         self.run_metadata_path: Optional[Path] = None
@@ -541,6 +543,25 @@ class BoltzAffinityWriter(BasePredictionWriter):
                         struct_dir / f"{mode_stem}.npz",
                         bins=bins.numpy().astype(np.uint8),
                         intervened_pair_mask=pair_mask.numpy().astype(bool),
+                    )
+                if self.write_affinity_representations:
+                    representations = {
+                        key.removeprefix("affinity_representation_"): value[
+                            record_idx
+                        ]
+                        .detach()
+                        .float()
+                        .cpu()
+                        .numpy()
+                        for key, value in mode_prediction.items()
+                        if key.startswith("affinity_representation_")
+                    }
+                    np.savez_compressed(
+                        struct_dir / f"{mode_stem}__pooled_representations.npz",
+                        **representations,
+                        representation_stage=np.asarray(
+                            "affinity_cross_pair_mean"
+                        ),
                     )
 
         if self.write_embeddings and "s" in prediction and "z" in prediction:

@@ -99,6 +99,8 @@ def test_predict_exposes_embedding_resume_options():
     assert params["affinity_structure_free_single_sequence"].default is False
     assert params["affinity_structure_free_skip_msa"].is_flag
     assert params["affinity_structure_free_skip_msa"].default is False
+    assert params["write_affinity_representations"].is_flag
+    assert params["write_affinity_representations"].default is False
     assert params["affinity_batch_size"].default == 1
     assert params["affinity_ligand_ref_pos_mode"].default == "etkdg"
     assert params["affinity_screening_minimal_output"].is_flag

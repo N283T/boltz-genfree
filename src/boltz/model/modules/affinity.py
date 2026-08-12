@@ -39,6 +39,35 @@ class GaussianSmearing(torch.nn.Module):
         )
 
 
+def pool_affinity_pairs(z, feats, multiplicity=1):
+    """Apply the exact cross-pair mean pooling used by the affinity heads."""
+    pad_token_mask = (
+        feats["token_pad_mask"].repeat_interleave(multiplicity, 0).unsqueeze(-1)
+    )
+    rec_mask = (
+        (feats["mol_type"] == 0).repeat_interleave(multiplicity, 0).unsqueeze(-1)
+    ) * pad_token_mask
+    lig_mask = (
+        feats["affinity_token_mask"]
+        .repeat_interleave(multiplicity, 0)
+        .to(torch.bool)
+        .unsqueeze(-1)
+    ) * pad_token_mask
+    cross_pair_mask = (
+        lig_mask[:, :, None] * rec_mask[:, None, :]
+        + rec_mask[:, :, None] * lig_mask[:, None, :]
+        + lig_mask[:, :, None] * lig_mask[:, None, :]
+    ) * (
+        1
+        - torch.eye(lig_mask.shape[1], device=lig_mask.device)
+        .unsqueeze(-1)
+        .unsqueeze(0)
+    )
+    return torch.sum(z * cross_pair_mask, dim=(1, 2)) / (
+        torch.sum(cross_pair_mask, dim=(1, 2)) + 1e-7
+    )
+
+
 class AffinityModule(nn.Module):
     """Algorithm 31"""
 
@@ -97,6 +126,7 @@ class AffinityModule(nn.Module):
         random_pair_scope="all",
         return_distogram=False,
         coordinate_free=False,
+        capture_representations=False,
     ):
         distogram_mode = validate_affinity_distogram_mode(distogram_mode)
         z = self.z_linear(self.z_norm(z))
@@ -107,6 +137,11 @@ class AffinityModule(nn.Module):
             + self.s_to_z_prod_in1(s_inputs)[:, :, None, :]
             + self.s_to_z_prod_in2(s_inputs)[:, None, :, :]
         )
+        representation_output = {}
+        if capture_representations:
+            representation_output["pooled_processed"] = pool_affinity_pairs(
+                z, feats, multiplicity
+            )
 
         pad_token_mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
         rec_mask = (feats["mol_type"] == 0).repeat_interleave(multiplicity, 0)
@@ -157,9 +192,19 @@ class AffinityModule(nn.Module):
         z, conditioner_z = intervene_affinity_pair_features(z, distogram_mode)
 
         if uses_affinity_conditioning(distogram_mode):
-            z = z + self.pairwise_conditioner(
+            conditioner_update = self.pairwise_conditioner(
                 z_trunk=conditioner_z,
                 token_rel_pos_feats=distogram,
+            )
+            z = z + conditioner_update
+        else:
+            conditioner_update = torch.zeros_like(z)
+        if capture_representations:
+            representation_output["pooled_conditioner_update"] = (
+                pool_affinity_pairs(conditioner_update, feats, multiplicity)
+            )
+            representation_output["pooled_conditioned"] = pool_affinity_pairs(
+                z, feats, multiplicity
             )
 
         cross_pair_mask = (
@@ -177,8 +222,14 @@ class AffinityModule(nn.Module):
 
         # affinity heads
         out_dict.update(
-            self.affinity_heads(z=z, feats=feats, multiplicity=multiplicity)
+            self.affinity_heads(
+                z=z,
+                feats=feats,
+                multiplicity=multiplicity,
+                capture_representations=capture_representations,
+            )
         )
+        out_dict.update(representation_output)
         if return_distogram:
             out_dict["affinity_distogram_bins"] = distogram_bins
             out_dict["affinity_distogram_intervened_pair_mask"] = (
@@ -229,36 +280,10 @@ class AffinityHeadsTransformer(nn.Module):
         z,
         feats,
         multiplicity=1,
+        capture_representations=False,
     ):
-        pad_token_mask = (
-            feats["token_pad_mask"].repeat_interleave(multiplicity, 0).unsqueeze(-1)
-        )
-        rec_mask = (
-            (feats["mol_type"] == 0).repeat_interleave(multiplicity, 0).unsqueeze(-1)
-        )
-        rec_mask = rec_mask * pad_token_mask
-        lig_mask = (
-            feats["affinity_token_mask"]
-            .repeat_interleave(multiplicity, 0)
-            .to(torch.bool)
-            .unsqueeze(-1)
-        ) * pad_token_mask
-        cross_pair_mask = (
-            lig_mask[:, :, None] * rec_mask[:, None, :]
-            + rec_mask[:, :, None] * lig_mask[:, None, :]
-            + (lig_mask[:, :, None] * lig_mask[:, None, :])
-        ) * (
-            1
-            - torch.eye(lig_mask.shape[1], device=lig_mask.device)
-            .unsqueeze(-1)
-            .unsqueeze(0)
-        )
-
-        g = torch.sum(z * cross_pair_mask, dim=(1, 2)) / (
-            torch.sum(cross_pair_mask, dim=(1, 2)) + 1e-7
-        )
-
-        g = self.affinity_out_mlp(g)
+        pooled_pairformer = pool_affinity_pairs(z, feats, multiplicity)
+        g = self.affinity_out_mlp(pooled_pairformer)
 
         affinity_pred_value = self.to_affinity_pred_value(g).reshape(-1, 1)
         affinity_pred_score = self.to_affinity_pred_score(g).reshape(-1, 1)
@@ -269,4 +294,7 @@ class AffinityHeadsTransformer(nn.Module):
             "affinity_pred_value": affinity_pred_value,
             "affinity_logits_binary": affinity_logits_binary,
         }
+        if capture_representations:
+            out_dict["pooled_pairformer"] = pooled_pairformer
+            out_dict["pooled_hidden"] = g
         return out_dict
