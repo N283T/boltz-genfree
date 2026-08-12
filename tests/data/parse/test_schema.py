@@ -12,7 +12,11 @@ from rdkit.Chem import AllChem
 from boltz.data.types import StructureV2
 
 
-def _parse_ligand_smiles(smiles: str) -> StructureV2:
+def _parse_ligand_smiles(
+    smiles: str,
+    *,
+    skip_ligand_conformer_generation: bool = False,
+) -> StructureV2:
     """Run a SMILES string through the full production parse path."""
     from boltz.data.parse.schema import parse_boltz_schema
 
@@ -22,7 +26,13 @@ def _parse_ligand_smiles(smiles: str) -> StructureV2:
             {"ligand": {"id": "L1", "smiles": smiles}},
         ],
     }
-    target = parse_boltz_schema(Path("test.yaml"), schema, ccd={}, boltz_2=True)
+    target = parse_boltz_schema(
+        Path("test.yaml"),
+        schema,
+        ccd={},
+        boltz_2=True,
+        skip_ligand_conformer_generation=skip_ligand_conformer_generation,
+    )
     return target.structure
 
 
@@ -157,6 +167,20 @@ class TestAtomNaming:
         for atom in structure.atoms:
             name = str(atom["name"])
             assert 2 <= len(name) <= 4, f"Name '{name}' has invalid length"
+
+    def test_structure_free_fast_path_skips_3d_conformer(self, monkeypatch):
+        """The extreme-fast parser should construct only zero coordinates."""
+        monkeypatch.setattr(
+            "boltz.data.parse.schema.compute_3d_conformer",
+            lambda _mol: pytest.fail("3D conformer generation should be skipped"),
+        )
+
+        structure = _parse_ligand_smiles(
+            "CC(=O)Oc1ccccc1C(=O)O",
+            skip_ligand_conformer_generation=True,
+        )
+
+        assert not structure.coords["coords"].any()
 
     def test_chlorine_in_large_molecule(self):
         """2-char elements don't overflow in large molecules."""

@@ -885,6 +885,7 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
     structure_dir: Path,
     records_dir: Path,
     skip_bad_inputs: bool = False,
+    skip_ligand_conformer_generation: bool = False,
 ) -> Optional[str]:
     try:
         # Parse data
@@ -895,7 +896,15 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
         elif path.suffix.lower() in (".yml", ".yaml"):
             from boltz.data.parse.yaml import parse_yaml
 
-            target = parse_yaml(path, ccd, mol_dir, boltz2)
+            target = parse_yaml(
+                path,
+                ccd,
+                mol_dir,
+                boltz2,
+                skip_ligand_conformer_generation=(
+                    skip_ligand_conformer_generation
+                ),
+            )
         elif path.is_dir():
             msg = f"Found directory {path} instead of .fasta or .yaml, skipping."
             raise RuntimeError(msg)  # noqa: TRY301
@@ -1033,6 +1042,7 @@ def process_inputs(
     boltz2: bool = False,
     preprocessing_threads: int = 1,
     skip_bad_inputs: bool = False,
+    skip_ligand_conformer_generation: bool = False,
 ) -> Manifest:
     """Process the input data and output directory.
 
@@ -1144,6 +1154,7 @@ def process_inputs(
         api_key_header=api_key_header,
         api_key_value=api_key_value,
         max_msa_seqs=max_msa_seqs,
+        skip_ligand_conformer_generation=skip_ligand_conformer_generation,
         processed_msa_dir=processed_msa_dir,
         processed_constraints_dir=processed_constraints_dir,
         processed_templates_dir=processed_templates_dir,
@@ -1478,6 +1489,38 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     ),
 )
 @click.option(
+    "--affinity_structure_free_extreme_fast",
+    is_flag=True,
+    help=(
+        "Enable the experimental maximum-throughput structure-free route: "
+        "skip confidence and global pdistogram heads, use all-zero ligand "
+        "reference positions, and write minimal screening output."
+    ),
+)
+@click.option(
+    "--affinity_structure_free_single_sequence",
+    is_flag=True,
+    help=(
+        "Ignore supplied MSAs in the structure-free affinity pass and use "
+        "the query sequence only."
+    ),
+)
+@click.option(
+    "--affinity_structure_free_skip_msa",
+    is_flag=True,
+    help=(
+        "Skip the MSA module entirely in the structure-free affinity trunk. "
+        "This removes its pair-representation update."
+    ),
+)
+@click.option(
+    "--affinity_batch_size",
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    help="Number of structure-free affinity records per GPU batch.",
+)
+@click.option(
     "--affinity_screening_minimal_output",
     is_flag=True,
     help=(
@@ -1526,6 +1569,16 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     help=(
         "Required provenance label when explicit token indices are used with "
         "--affinity_structure_free."
+    ),
+)
+@click.option(
+    "--affinity_ligand_ref_pos_mode",
+    type=click.Choice(["etkdg", "rdkit_2d", "all_zero"]),
+    default="etkdg",
+    show_default=True,
+    help=(
+        "Ligand-local reference coordinates used by Boltz-2 input encoders in "
+        "both structure and affinity passes."
     ),
 )
 @click.option(
@@ -1657,12 +1710,17 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     affinity_skip_structure: bool,
     affinity_structure_free: bool,
     affinity_structure_free_fast: bool,
+    affinity_structure_free_extreme_fast: bool,
+    affinity_structure_free_single_sequence: bool,
+    affinity_structure_free_skip_msa: bool,
+    affinity_batch_size: int,
     affinity_screening_minimal_output: bool,
     affinity_sequence_window_start: int,
     affinity_head_only: bool,
     affinity_context_dir: Optional[Path],
     affinity_crop_indices_dir: Optional[Path],
     affinity_structure_free_crop_label: Optional[str],
+    affinity_ligand_ref_pos_mode: str,
     affinity_prepared_geometry_label: Optional[str],
     preprocessing_threads: int,
     max_msa_seqs: int,
@@ -1712,9 +1770,32 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             )
         affinity_skip_structure = True
 
+    if affinity_structure_free_extreme_fast:
+        if not affinity_structure_free:
+            raise click.UsageError(
+                "--affinity_structure_free_extreme_fast requires "
+                "--affinity_structure_free."
+            )
+        affinity_structure_free_fast = True
+        affinity_screening_minimal_output = True
+        affinity_ligand_ref_pos_mode = "all_zero"
+
+    if affinity_structure_free_skip_msa:
+        affinity_structure_free_single_sequence = True
+
     if affinity_structure_free_fast and not affinity_structure_free:
         raise click.UsageError(
             "--affinity_structure_free_fast requires --affinity_structure_free."
+        )
+    if affinity_structure_free_single_sequence and not affinity_structure_free:
+        raise click.UsageError(
+            "--affinity_structure_free_single_sequence requires "
+            "--affinity_structure_free."
+        )
+    if affinity_structure_free_skip_msa and not affinity_structure_free:
+        raise click.UsageError(
+            "--affinity_structure_free_skip_msa requires "
+            "--affinity_structure_free."
         )
     if affinity_screening_minimal_output and not affinity_structure_free:
         raise click.UsageError(
@@ -1725,6 +1806,14 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         raise click.UsageError(
             "--affinity_screening_minimal_output cannot be combined with "
             "--write_embeddings."
+        )
+    if affinity_batch_size > 1 and not (
+        affinity_structure_free_fast and affinity_screening_minimal_output
+    ):
+        raise click.UsageError(
+            "--affinity_batch_size > 1 requires "
+            "--affinity_structure_free_fast and "
+            "--affinity_screening_minimal_output."
         )
     if affinity_structure_free:
         if model != "boltz2":
@@ -1959,6 +2048,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         preprocessing_threads=preprocessing_threads,
         max_msa_seqs=max_msa_seqs,
         skip_bad_inputs=skip_bad_inputs,
+        skip_ligand_conformer_generation=(
+            affinity_structure_free_extreme_fast
+        ),
     )
 
     # Load manifest
@@ -2107,6 +2199,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 template_dir=processed.template_dir,
                 extra_mols_dir=processed.extra_mols_dir,
                 override_method=method,
+                affinity_ligand_ref_pos_mode=affinity_ligand_ref_pos_mode,
                 pin_memory=pin_memory,
             )
         else:
@@ -2257,13 +2350,25 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "subsample_msa": subsample_msa,
                 "num_subsampled_msa": num_subsampled_msa,
                 "affinity_structure_free_fast": affinity_structure_free_fast,
+                "affinity_structure_free_extreme_fast": (
+                    affinity_structure_free_extreme_fast
+                ),
+                "affinity_structure_free_single_sequence": (
+                    affinity_structure_free_single_sequence
+                ),
+                "affinity_structure_free_skip_msa": (
+                    affinity_structure_free_skip_msa
+                ),
+                "affinity_batch_size": affinity_batch_size,
                 "affinity_screening_minimal_output": (
                     affinity_screening_minimal_output
                 ),
                 "affinity_confidence_forward_active": not (
                     affinity_structure_free_fast
                 ),
-                "affinity_pdistogram_forward_active": True,
+                "affinity_pdistogram_forward_active": not (
+                    affinity_structure_free_extreme_fast
+                ),
                 "affinity_skip_structure": affinity_skip_structure,
                 "affinity_structure_free": affinity_structure_free,
                 "affinity_input_source": (
@@ -2334,6 +2439,10 @@ def predict(  # noqa: C901, PLR0915, PLR0912
                 "affinity_structure_free_crop_label": (
                     affinity_structure_free_crop_label
                 ),
+                "affinity_ligand_ref_pos_mode": affinity_ligand_ref_pos_mode,
+                "input_ligand_conformer_generation_active": not (
+                    affinity_structure_free_extreme_fast
+                ),
                 "affinity_distogram_seed": affinity_distogram_seed,
                 "affinity_random_distance_mean": affinity_random_distance_mean,
                 "affinity_random_distance_std": affinity_random_distance_std,
@@ -2363,8 +2472,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             msa_dir=processed.msa_dir,
             mol_dir=mol_dir,
             num_workers=num_workers,
-            # Keep affinity single-record until the batched affinity path is audited.
-            batch_size=1,
+            batch_size=affinity_batch_size,
             constraints_dir=processed.constraints_dir,
             template_dir=processed.template_dir,
             extra_mols_dir=processed.extra_mols_dir,
@@ -2372,7 +2480,11 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             affinity=True,
             affinity_crop_indices_dir=affinity_crop_indices_dir,
             affinity_structure_free=affinity_structure_free,
+            affinity_structure_free_single_sequence=(
+                affinity_structure_free_single_sequence
+            ),
             affinity_sequence_window_start=affinity_sequence_window_start,
+            affinity_ligand_ref_pos_mode=affinity_ligand_ref_pos_mode,
             pin_memory=pin_memory,
         )
 
@@ -2426,6 +2538,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             affinity_random_pair_scope=affinity_random_pair_scope,
             use_kernels=not no_kernels,
             skip_confidence_forward=affinity_structure_free_fast,
+            skip_pdistogram_forward=affinity_structure_free_extreme_fast,
+            skip_msa_forward=affinity_structure_free_skip_msa,
             run_trunk_and_structure=not affinity_head_only,
             skip_run_structure=affinity_skip_structure,
         )

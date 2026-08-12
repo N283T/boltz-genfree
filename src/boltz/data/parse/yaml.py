@@ -12,6 +12,7 @@ def parse_yaml(
     ccd: dict[str, Mol],
     mol_dir: Path,
     boltz2: bool = False,
+    skip_ligand_conformer_generation: bool = False,
 ) -> Target:
     """Parse a Boltz input yaml / json.
 
@@ -64,4 +65,11 @@ def parse_yaml(
     with path.open("r") as file:
         data = yaml.safe_load(file)
 
-    return parse_boltz_schema(path, data, ccd, mol_dir, boltz2)
+    return parse_boltz_schema(
+        path,
+        data,
+        ccd,
+        mol_dir,
+        boltz2,
+        skip_ligand_conformer_generation=skip_ligand_conformer_generation,
+    )

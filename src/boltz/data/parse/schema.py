@@ -1044,6 +1044,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     ccd: Mapping[str, Mol],
     mol_dir: Optional[Path] = None,
     boltz_2: bool = False,
+    skip_ligand_conformer_generation: bool = False,
 ) -> Target:
     """Parse a Boltz input yaml / json.
 
@@ -1373,10 +1374,16 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                     raise ValueError(msg)
                 atom.SetProp("name", atom_name)
 
-            success = compute_3d_conformer(mol)
-            if not success:
-                msg = f"Failed to compute 3D conformer for {seq}"
-                raise ValueError(msg)
+            if skip_ligand_conformer_generation:
+                conformer = Conformer(mol.GetNumAtoms())
+                conformer.Set3D(False)
+                conformer.SetProp("coord_generation", "all_zero_structure_free")
+                mol.AddConformer(conformer, assignId=True)
+            else:
+                success = compute_3d_conformer(mol)
+                if not success:
+                    msg = f"Failed to compute 3D conformer for {seq}"
+                    raise ValueError(msg)
 
             mol_no_h = AllChem.RemoveHs(mol, sanitize=False)
 

@@ -5,6 +5,8 @@ from typing import Optional
 import numpy as np
 import pytorch_lightning as pl
 import torch
+from rdkit import Chem
+from rdkit.Chem import rdDepictor
 from torch import Tensor
 from torch.utils.data import DataLoader
 
@@ -21,7 +23,56 @@ from boltz.data.types import (
     Record,
     ResidueConstraints,
     StructureV2,
+    Tokenized,
 )
+
+
+def prepare_ligand_reference_conformers(
+    molecules: dict,
+    tokenized: Tokenized,
+    mode: str,
+) -> dict:
+    """Prepare ligand-local conformers used by the atom input encoder."""
+    if mode in {"etkdg", "all_zero"}:
+        return molecules
+    if mode != "rdkit_2d":
+        msg = f"Unsupported ligand reference conformer mode: {mode}"
+        raise ValueError(msg)
+
+    ligand_names = set(
+        tokenized.tokens[
+            tokenized.tokens["mol_type"] == const.chain_type_ids["NONPOLYMER"]
+        ]["res_name"].tolist()
+    )
+    prepared = dict(molecules)
+    for name in ligand_names:
+        mol = Chem.Mol(molecules[name])
+        mol.RemoveAllConformers()
+        rdDepictor.Compute2DCoords(mol)
+        prepared[name] = mol
+    return prepared
+
+
+def apply_ligand_reference_position_intervention(
+    features: dict[str, Tensor],
+    mode: str,
+) -> dict[str, Tensor]:
+    """Apply an exact post-featurization intervention to ligand ref_pos."""
+    if mode in {"etkdg", "rdkit_2d"}:
+        return features
+    if mode != "all_zero":
+        msg = f"Unsupported ligand reference conformer mode: {mode}"
+        raise ValueError(msg)
+
+    atom_to_token = features["atom_to_token"].bool()
+    affinity_token_mask = features["affinity_token_mask"].bool()
+    ligand_atom_mask = torch.any(
+        atom_to_token & affinity_token_mask.unsqueeze(0),
+        dim=1,
+    )
+    ref_pos = features["ref_pos"].clone()
+    ref_pos[ligand_atom_mask] = 0.0
+    return {**features, "ref_pos": ref_pos}
 
 
 def load_input(
@@ -33,6 +84,7 @@ def load_input(
     extra_mols_dir: Optional[Path] = None,
     affinity: bool = False,
     affinity_structure_free: bool = False,
+    load_msa: bool = True,
 ) -> Input:
     """Load the given input data.
 
@@ -68,12 +120,13 @@ def load_input(
         structure = StructureV2.load(target_dir / f"{record.id}.npz")
 
     msas = {}
-    for chain in record.chains:
-        msa_id = chain.msa_id
-        # Load the MSA for this chain, if any
-        if msa_id != -1:
-            msa = MSA.load(msa_dir / f"{msa_id}.npz")
-            msas[chain.chain_id] = msa
+    if load_msa:
+        for chain in record.chains:
+            msa_id = chain.msa_id
+            # Load the MSA for this chain, if any
+            if msa_id != -1:
+                msa = MSA.load(msa_dir / f"{msa_id}.npz")
+                msas[chain.chain_id] = msa
 
     # Load templates
     templates = None
@@ -171,7 +224,9 @@ class PredictionDataset(torch.utils.data.Dataset):
         affinity: bool = False,
         affinity_crop_indices_dir: Optional[Path] = None,
         affinity_structure_free: bool = False,
+        affinity_structure_free_single_sequence: bool = False,
         affinity_sequence_window_start: int = 0,
+        affinity_ligand_ref_pos_mode: str = "etkdg",
     ) -> None:
         """Initialize the training dataset.
 
@@ -207,7 +262,11 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.affinity = affinity
         self.affinity_crop_indices_dir = affinity_crop_indices_dir
         self.affinity_structure_free = affinity_structure_free
+        self.affinity_structure_free_single_sequence = (
+            affinity_structure_free_single_sequence
+        )
         self.affinity_sequence_window_start = affinity_sequence_window_start
+        self.affinity_ligand_ref_pos_mode = affinity_ligand_ref_pos_mode
         if self.affinity:
             self.cropper = AffinityCropper()
 
@@ -259,6 +318,7 @@ class PredictionDataset(torch.utils.data.Dataset):
             extra_mols_dir=self.extra_mols_dir,
             affinity=self.affinity,
             affinity_structure_free=self.affinity_structure_free,
+            load_msa=not self.affinity_structure_free_single_sequence,
         )
 
         # Tokenize structure
@@ -306,6 +366,12 @@ class PredictionDataset(torch.utils.data.Dataset):
         if uncached:
             self._mol_cache.update(load_molecules(self.mol_dir, uncached))
         molecules.update({k: self._mol_cache[k] for k in mol_names})
+        if self.affinity_ligand_ref_pos_mode != "etkdg":
+            molecules = prepare_ligand_reference_conformers(
+                molecules,
+                tokenized,
+                self.affinity_ligand_ref_pos_mode,
+            )
 
         # Inference specific options
         options = record.inference_options
@@ -340,6 +406,10 @@ class PredictionDataset(torch.utils.data.Dataset):
             compute_affinity=self.affinity,
             compute_distogram_target=not self.affinity_structure_free,
             use_structure_coordinates=not self.affinity_structure_free,
+        )
+        features = apply_ligand_reference_position_intervention(
+            features,
+            self.affinity_ligand_ref_pos_mode,
         )
 
         if self.affinity:
@@ -379,7 +449,9 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         affinity: bool = False,
         affinity_crop_indices_dir: Optional[Path] = None,
         affinity_structure_free: bool = False,
+        affinity_structure_free_single_sequence: bool = False,
         affinity_sequence_window_start: int = 0,
+        affinity_ligand_ref_pos_mode: str = "etkdg",
         pin_memory: bool = True,
     ) -> None:
         """Initialize the DataModule.
@@ -411,8 +483,9 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
 
         """
         super().__init__()
-        if affinity and batch_size != 1:
-            raise ValueError("Affinity inference only supports batch_size=1.")
+        if affinity and batch_size != 1 and not affinity_structure_free:
+            msg = "Batched affinity inference requires affinity_structure_free."
+            raise ValueError(msg)
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.manifest = manifest
@@ -426,7 +499,11 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         self.affinity = affinity
         self.affinity_crop_indices_dir = affinity_crop_indices_dir
         self.affinity_structure_free = affinity_structure_free
+        self.affinity_structure_free_single_sequence = (
+            affinity_structure_free_single_sequence
+        )
         self.affinity_sequence_window_start = affinity_sequence_window_start
+        self.affinity_ligand_ref_pos_mode = affinity_ligand_ref_pos_mode
         self.pin_memory = pin_memory
 
     def predict_dataloader(self) -> DataLoader:
@@ -450,7 +527,11 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             affinity=self.affinity,
             affinity_crop_indices_dir=self.affinity_crop_indices_dir,
             affinity_structure_free=self.affinity_structure_free,
+            affinity_structure_free_single_sequence=(
+                self.affinity_structure_free_single_sequence
+            ),
             affinity_sequence_window_start=self.affinity_sequence_window_start,
+            affinity_ligand_ref_pos_mode=self.affinity_ligand_ref_pos_mode,
         )
         return DataLoader(
             dataset,

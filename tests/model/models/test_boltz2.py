@@ -51,6 +51,8 @@ def _minimal_boltz2(
     skip_run_structure=False,
     confidence_prediction=False,
     skip_confidence_forward=False,
+    skip_pdistogram_forward=False,
+    skip_msa_forward=False,
 ):
     return boltz2.Boltz2(
         atom_s=2,
@@ -81,6 +83,8 @@ def _minimal_boltz2(
         affinity_distogram_modes=affinity_distogram_modes,
         skip_run_structure=skip_run_structure,
         skip_confidence_forward=skip_confidence_forward,
+        skip_pdistogram_forward=skip_pdistogram_forward,
+        skip_msa_forward=skip_msa_forward,
     )
 
 
@@ -145,6 +149,44 @@ def test_forward_recycling_count_includes_initial_trunk_pass(
     assert model.pairformer_module.calls == expected_passes
 
 
+def test_forward_can_skip_msa_module_without_skipping_pairformer(monkeypatch):
+    for module_name in [
+        "InputEmbedder",
+        "RelativePositionEncoder",
+        "ContactConditioning",
+        "MSAModule",
+        "PairformerModule",
+        "DiffusionConditioning",
+        "AtomDiffusion",
+        "DistogramModule",
+    ]:
+        monkeypatch.setattr(boltz2, module_name, _DummyModule)
+
+    model = _minimal_boltz2(
+        False,
+        skip_run_structure=True,
+        skip_msa_forward=True,
+    )
+    model.input_embedder = _ReturnFeature()
+    model.rel_pos = _ZeroPairFeature()
+    model.contact_conditioning = _ZeroPairFeature()
+    model.msa_module = _CountingMsa()
+    model.pairformer_module = _CountingPairformer()
+    model.distogram_module = nn.Identity()
+    model.eval()
+    feats = {
+        "s_inputs": torch.zeros(1, 3, 2),
+        "z_feature": torch.zeros(1, 3, 3, 2),
+        "token_bonds": torch.zeros(1, 3, 3, 1),
+        "token_pad_mask": torch.ones(1, 3),
+    }
+
+    model(feats, recycling_steps=1)
+
+    assert model.msa_module.calls == 0
+    assert model.pairformer_module.calls == 2
+
+
 def test_forward_can_skip_unused_confidence_computation(monkeypatch):
     for module_name in [
         "InputEmbedder",
@@ -184,6 +226,44 @@ def test_forward_can_skip_unused_confidence_computation(monkeypatch):
     out = model(feats, recycling_steps=0)
 
     assert "pdistogram" in out
+
+
+def test_forward_can_skip_unused_pdistogram_computation(monkeypatch):
+    for module_name in [
+        "InputEmbedder",
+        "RelativePositionEncoder",
+        "ContactConditioning",
+        "MSAModule",
+        "PairformerModule",
+        "DiffusionConditioning",
+        "AtomDiffusion",
+        "DistogramModule",
+    ]:
+        monkeypatch.setattr(boltz2, module_name, _DummyModule)
+
+    model = _minimal_boltz2(
+        False,
+        skip_run_structure=True,
+        skip_confidence_forward=True,
+        skip_pdistogram_forward=True,
+    )
+    model.input_embedder = _ReturnFeature()
+    model.rel_pos = _ZeroPairFeature()
+    model.contact_conditioning = _ZeroPairFeature()
+    model.msa_module = _CountingMsa()
+    model.pairformer_module = _CountingPairformer()
+    model.distogram_module = nn.Identity()
+    model.eval()
+    feats = {
+        "s_inputs": torch.zeros(1, 3, 2),
+        "z_feature": torch.zeros(1, 3, 3, 2),
+        "token_bonds": torch.zeros(1, 3, 3, 1),
+        "token_pad_mask": torch.ones(1, 3),
+    }
+
+    out = model(feats, recycling_steps=0)
+
+    assert "pdistogram" not in out
 
 
 def test_select_affinity_coordinates_can_reuse_prepared_geometry(monkeypatch):

@@ -117,6 +117,8 @@ class Boltz2(LightningModule):
         affinity_random_distance_std: float = 4.0,
         affinity_random_pair_scope: str = "all",
         skip_confidence_forward: bool = False,
+        skip_pdistogram_forward: bool = False,
+        skip_msa_forward: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
@@ -322,6 +324,8 @@ class Boltz2(LightningModule):
         self.affinity_random_distance_std = affinity_random_distance_std
         self.affinity_random_pair_scope = affinity_random_pair_scope
         self.skip_confidence_forward = skip_confidence_forward
+        self.skip_pdistogram_forward = skip_pdistogram_forward
+        self.skip_msa_forward = skip_msa_forward
         self.run_trunk_and_structure = run_trunk_and_structure
         self.skip_run_structure = skip_run_structure
         self.token_level_confidence = token_level_confidence
@@ -495,7 +499,17 @@ class Boltz2(LightningModule):
                 model_coef = 1.03525938
                 mw_coef = -0.59992683
                 bias = 2.83288489
-                mw = feats["affinity_mw"][0] ** 0.3
+                affinity_mw = feats["affinity_mw"]
+                if isinstance(affinity_mw, list):
+                    mw = torch.stack(
+                        [torch.as_tensor(value).reshape(()) for value in affinity_mw]
+                    ).to(device=output["affinity_pred_value"].device)
+                    mw = mw.reshape(-1, 1)
+                else:
+                    mw = affinity_mw.to(
+                        device=output["affinity_pred_value"].device
+                    ).reshape(-1, 1)
+                mw = mw**0.3
                 output["affinity_pred_value"] = (
                     model_coef * output["affinity_pred_value"] + mw_coef * mw + bias
                 )
@@ -642,7 +656,7 @@ class Boltz2(LightningModule):
                     if self.is_msa_compiled and not self.training
                     else self.msa_module
                 )
-                if msa_module.subsample_msa:
+                if not self.skip_msa_forward and msa_module.subsample_msa:
                     msa_depth = feats["msa"].shape[1]
                     for _ in range(first_recycling_step):
                         torch.randperm(msa_depth)
@@ -682,16 +696,17 @@ class Boltz2(LightningModule):
                                 use_flash_attn=self.use_flash_attn,
                             )
 
-                        if self.is_msa_compiled and not self.training:
-                            msa_module = self.msa_module._orig_mod  # noqa: SLF001
-                        else:
-                            msa_module = self.msa_module
+                        if not self.skip_msa_forward:
+                            if self.is_msa_compiled and not self.training:
+                                msa_module = self.msa_module._orig_mod  # noqa: SLF001
+                            else:
+                                msa_module = self.msa_module
 
-                        z = z + msa_module(
-                            z, s_inputs, feats,
-                            use_kernels=self.use_kernels,
-                            use_flash_attn=self.use_flash_attn,
-                        )
+                            z = z + msa_module(
+                                z, s_inputs, feats,
+                                use_kernels=self.use_kernels,
+                                use_flash_attn=self.use_flash_attn,
+                            )
 
                         # Revert to uncompiled version for validation
                         if self.is_pairformer_compiled and not self.training:
@@ -712,12 +727,9 @@ class Boltz2(LightningModule):
                             captured_s = s.detach().clone()
                             captured_z = z.detach().clone()
 
-            pdistogram = self.distogram_module(z)
-            dict_out = {
-                "pdistogram": pdistogram,
-                "s": s,
-                "z": z,
-            }
+            dict_out = {"s": s, "z": z}
+            if not self.skip_pdistogram_forward:
+                dict_out["pdistogram"] = self.distogram_module(z)
             if captured_s is not None and captured_z is not None:
                 dict_out["captured_s"] = captured_s
                 dict_out["captured_z"] = captured_z
@@ -861,17 +873,17 @@ class Boltz2(LightningModule):
                 affinity_s_inputs = affinity_context["s_inputs"]
                 affinity_z = affinity_context["z"]
 
-            pad_token_mask = affinity_feats["token_pad_mask"][0]
-            rec_mask = affinity_feats["mol_type"][0] == 0
+            pad_token_mask = affinity_feats["token_pad_mask"]
+            rec_mask = affinity_feats["mol_type"] == 0
             rec_mask = rec_mask * pad_token_mask
-            lig_mask = affinity_feats["affinity_token_mask"][0].to(torch.bool)
+            lig_mask = affinity_feats["affinity_token_mask"].to(torch.bool)
             lig_mask = lig_mask * pad_token_mask
             cross_pair_mask = (
-                lig_mask[:, None] * rec_mask[None, :]
-                + rec_mask[:, None] * lig_mask[None, :]
-                + lig_mask[:, None] * lig_mask[None, :]
+                lig_mask[:, :, None] * rec_mask[:, None, :]
+                + rec_mask[:, :, None] * lig_mask[:, None, :]
+                + lig_mask[:, :, None] * lig_mask[:, None, :]
             )
-            z_affinity = affinity_z * cross_pair_mask[None, :, :, None]
+            z_affinity = affinity_z * cross_pair_mask[:, :, :, None]
 
             dict_out.update(
                 {

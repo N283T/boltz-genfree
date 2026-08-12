@@ -440,31 +440,31 @@ class BoltzAffinityWriter(BasePredictionWriter):
     def _summary(
         prediction: dict[str, Tensor],
         record: Record,
+        record_idx: int = 0,
     ) -> dict[str, object]:
         """Build the legacy scalar affinity summary for one prediction."""
+        def scalar(key: str) -> float:
+            return prediction[key].reshape(-1)[record_idx].item()
+
         summary: dict[str, object] = {
-            "affinity_pred_value": prediction["affinity_pred_value"].item(),
-            "affinity_probability_binary": prediction[
+            "affinity_pred_value": scalar("affinity_pred_value"),
+            "affinity_probability_binary": scalar(
                 "affinity_probability_binary"
-            ].item(),
+            ),
         }
         if record.affinity and record.affinity.chain_name:
             summary["binder_chain"] = record.affinity.chain_name
         if "affinity_pred_value1" in prediction:
             summary.update(
                 {
-                    "affinity_pred_value1": prediction[
-                        "affinity_pred_value1"
-                    ].item(),
-                    "affinity_probability_binary1": prediction[
+                    "affinity_pred_value1": scalar("affinity_pred_value1"),
+                    "affinity_probability_binary1": scalar(
                         "affinity_probability_binary1"
-                    ].item(),
-                    "affinity_pred_value2": prediction[
-                        "affinity_pred_value2"
-                    ].item(),
-                    "affinity_probability_binary2": prediction[
+                    ),
+                    "affinity_pred_value2": scalar("affinity_pred_value2"),
+                    "affinity_probability_binary2": scalar(
                         "affinity_probability_binary2"
-                    ].item(),
+                    ),
                 }
             )
         return summary
@@ -483,64 +483,65 @@ class BoltzAffinityWriter(BasePredictionWriter):
         if prediction["exception"]:
             self.failed += 1
             return
-        record = batch["record"][0]
-        struct_dir = self.output_dir / record.id
-        struct_dir.mkdir(exist_ok=True)
-        output_id = get_affinity_output_id(record)
+        for record_idx, record in enumerate(batch["record"]):
+            struct_dir = self.output_dir / record.id
+            struct_dir.mkdir(exist_ok=True)
+            output_id = get_affinity_output_id(record)
 
-        affinity_summary = self._summary(prediction, record)
-        legacy_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
-        if not self.screening_minimal_output:
-            # Preserve the original output for compatibility. It represents the
-            # first requested distogram mode.
-            path = struct_dir / f"affinity_{output_id}{legacy_suffix}.json"
-            with path.open("w") as f:
-                f.write(json.dumps(affinity_summary, indent=4))
+            affinity_summary = self._summary(prediction, record, record_idx)
+            legacy_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
+            if not self.screening_minimal_output:
+                # Preserve the original output for compatibility. It represents
+                # the first requested distogram mode.
+                path = struct_dir / f"affinity_{output_id}{legacy_suffix}.json"
+                with path.open("w") as f:
+                    f.write(json.dumps(affinity_summary, indent=4))
 
-        for mode, mode_prediction in prediction.get(
-            "affinity_by_distogram_mode",
-            {},
-        ).items():
-            mode_summary = self._summary(mode_prediction, record)
-            mode_summary.update(
-                {
-                    "distogram_intervention": mode,
-                    "conditioner_added": mode != "zero_conditioning",
-                    "experiment": self._record_experiment_metadata(record),
-                }
-            )
-            bins = None
-            pair_mask = None
-            if not self.screening_minimal_output:
-                bins = mode_prediction["affinity_distogram_bins"].detach().cpu()
-                pair_mask = mode_prediction[
-                    "affinity_distogram_intervened_pair_mask"
-                ].detach().cpu()
-                num_bins = int(bins.max().item()) + 1
-                num_bins = max(num_bins, 64)
-                histogram = torch.bincount(
-                    bins.reshape(-1),
-                    minlength=num_bins,
-                ).tolist()
-                mode_summary["effective_distogram"] = {
-                    "shape": list(bins.shape),
-                    "min_bin": int(bins.min().item()),
-                    "max_bin": int(bins.max().item()),
-                    "intervened_pair_count": int(pair_mask.sum().item()),
-                    "bin_histogram": histogram,
-                }
-            tag_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
-            mode_stem = f"affinity_{output_id}__distogram_{mode}{tag_suffix}"
-            with (struct_dir / f"{mode_stem}.json").open("w") as f:
-                f.write(json.dumps(mode_summary, indent=4))
-            if not self.screening_minimal_output:
-                assert bins is not None
-                assert pair_mask is not None
-                np.savez_compressed(
-                    struct_dir / f"{mode_stem}.npz",
-                    bins=bins.numpy().astype(np.uint8),
-                    intervened_pair_mask=pair_mask.numpy().astype(bool),
+            for mode, mode_prediction in prediction.get(
+                "affinity_by_distogram_mode",
+                {},
+            ).items():
+                mode_summary = self._summary(mode_prediction, record, record_idx)
+                mode_summary.update(
+                    {
+                        "distogram_intervention": mode,
+                        "conditioner_added": mode != "zero_conditioning",
+                        "experiment": self._record_experiment_metadata(record),
+                    }
                 )
+                bins = None
+                pair_mask = None
+                if not self.screening_minimal_output:
+                    bins = mode_prediction["affinity_distogram_bins"][
+                        record_idx : record_idx + 1
+                    ].detach().cpu()
+                    pair_mask = mode_prediction[
+                        "affinity_distogram_intervened_pair_mask"
+                    ][record_idx : record_idx + 1].detach().cpu()
+                    num_bins = max(int(bins.max().item()) + 1, 64)
+                    histogram = torch.bincount(
+                        bins.reshape(-1),
+                        minlength=num_bins,
+                    ).tolist()
+                    mode_summary["effective_distogram"] = {
+                        "shape": list(bins.shape),
+                        "min_bin": int(bins.min().item()),
+                        "max_bin": int(bins.max().item()),
+                        "intervened_pair_count": int(pair_mask.sum().item()),
+                        "bin_histogram": histogram,
+                    }
+                tag_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
+                mode_stem = f"affinity_{output_id}__distogram_{mode}{tag_suffix}"
+                with (struct_dir / f"{mode_stem}.json").open("w") as f:
+                    f.write(json.dumps(mode_summary, indent=4))
+                if not self.screening_minimal_output:
+                    assert bins is not None
+                    assert pair_mask is not None
+                    np.savez_compressed(
+                        struct_dir / f"{mode_stem}.npz",
+                        bins=bins.numpy().astype(np.uint8),
+                        intervened_pair_mask=pair_mask.numpy().astype(bool),
+                    )
 
         if self.write_embeddings and "s" in prediction and "z" in prediction:
             token_mask = batch["token_pad_mask"][0].detach().cpu().bool()

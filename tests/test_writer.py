@@ -446,3 +446,73 @@ def test_affinity_writer_minimal_screening_output_deduplicates_run_metadata(
         str(input_a),
         str(input_b),
     ]
+
+
+def test_affinity_writer_minimal_output_supports_batches(tmp_path: Path):
+    writer = BoltzAffinityWriter(
+        data_dir=str(tmp_path / "data"),
+        output_dir=str(tmp_path / "out"),
+        output_tag="batch",
+        screening_minimal_output=True,
+    )
+    records = [
+        _make_record(
+            f"record_{suffix}",
+            affinity=AffinityInfo(
+                chain_id=0,
+                mw=123.4,
+                chain_name="L2",
+                output_id=f"record_{suffix}_L2",
+            ),
+        )
+        for suffix in ("a", "b")
+    ]
+    mode_prediction = {
+        "affinity_pred_value": torch.tensor([[1.25], [2.5]]),
+        "affinity_probability_binary": torch.tensor([[0.75], [0.5]]),
+        "affinity_distogram_bins": torch.zeros((2, 2, 2), dtype=torch.long),
+        "affinity_distogram_intervened_pair_mask": torch.ones(
+            (2, 2, 2), dtype=torch.bool
+        ),
+    }
+    prediction = {
+        "exception": False,
+        **{
+            key: mode_prediction[key]
+            for key in ("affinity_pred_value", "affinity_probability_binary")
+        },
+        "affinity_by_distogram_mode": {
+            "zero_distogram_features": mode_prediction
+        },
+    }
+
+    writer.write_on_batch_end(
+        trainer=None,
+        pl_module=None,
+        prediction=prediction,
+        batch_indices=[],
+        batch={"record": records},
+        batch_idx=0,
+        dataloader_idx=0,
+    )
+
+    import json
+
+    summaries = []
+    for record in records:
+        path = (
+            tmp_path
+            / "out"
+            / record.id
+            / (
+                f"affinity_{record.affinity.output_id}"
+                "__distogram_zero_distogram_features__run_batch.json"
+            )
+        )
+        summaries.append(json.loads(path.read_text()))
+
+    assert [row["affinity_pred_value"] for row in summaries] == [1.25, 2.5]
+    assert [row["affinity_probability_binary"] for row in summaries] == [
+        0.75,
+        0.5,
+    ]

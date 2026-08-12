@@ -93,6 +93,14 @@ def test_predict_exposes_embedding_resume_options():
     assert params["affinity_structure_free"].default is False
     assert params["affinity_structure_free_fast"].is_flag
     assert params["affinity_structure_free_fast"].default is False
+    assert params["affinity_structure_free_extreme_fast"].is_flag
+    assert params["affinity_structure_free_extreme_fast"].default is False
+    assert params["affinity_structure_free_single_sequence"].is_flag
+    assert params["affinity_structure_free_single_sequence"].default is False
+    assert params["affinity_structure_free_skip_msa"].is_flag
+    assert params["affinity_structure_free_skip_msa"].default is False
+    assert params["affinity_batch_size"].default == 1
+    assert params["affinity_ligand_ref_pos_mode"].default == "etkdg"
     assert params["affinity_screening_minimal_output"].is_flag
     assert params["affinity_screening_minimal_output"].default is False
     assert params["affinity_sequence_window_start"].default == 0
@@ -214,6 +222,36 @@ class TestAffinityScreeningMinimalOutput:
                     "--affinity_structure_free",
                     "--affinity_screening_minimal_output",
                     "--write_embeddings",
+                ],
+                prog_name="predict",
+                standalone_mode=False,
+            )
+
+    def test_batched_route_requires_fast_minimal_output(self, tmp_path: Path):
+        with pytest.raises(
+            click.UsageError,
+            match="--affinity_batch_size > 1 requires",
+        ):
+            predict.main(
+                args=[
+                    str(self._input(tmp_path)),
+                    "--affinity_structure_free",
+                    "--affinity_batch_size",
+                    "4",
+                ],
+                prog_name="predict",
+                standalone_mode=False,
+            )
+
+    def test_extreme_fast_requires_structure_free(self, tmp_path: Path):
+        with pytest.raises(
+            click.UsageError,
+            match="extreme_fast requires --affinity_structure_free",
+        ):
+            predict.main(
+                args=[
+                    str(self._input(tmp_path)),
+                    "--affinity_structure_free_extreme_fast",
                 ],
                 prog_name="predict",
                 standalone_mode=False,
