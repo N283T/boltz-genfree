@@ -350,17 +350,9 @@ def download_boltz1(cache: Path) -> None:
                 continue
 
 
-@rank_zero_only
-def download_boltz2(cache: Path) -> None:
-    """Download all the required data.
-
-    Parameters
-    ----------
-    cache : Path
-        The cache directory.
-
-    """
-    # Download CCD
+def download_boltz2_ccd(cache: Path) -> None:
+    """Download and extract the Boltz-2 CCD component cache."""
+    cache.mkdir(parents=True, exist_ok=True)
     mols = cache / "mols"
     tar_mols = cache / "mols.tar"
     if not mols.exists():
@@ -378,6 +370,19 @@ def download_boltz2(cache: Path) -> None:
         )
         with tarfile.open(str(tar_mols), "r") as tar:
             tar.extractall(cache)  # noqa: S202
+
+
+@rank_zero_only
+def download_boltz2(cache: Path) -> None:
+    """Download all the required data.
+
+    Parameters
+    ----------
+    cache : Path
+        The cache directory.
+
+    """
+    download_boltz2_ccd(cache)
 
     # Download model
     model = cache / "boltz2_conf.ckpt"
@@ -2580,6 +2585,68 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             datamodule=data_module,
             return_predictions=False,
         )
+
+
+@cli.command(context_settings={"show_default": True})
+@click.argument(
+    "config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--prepare-only",
+    is_flag=True,
+    help="Validate the config and generate chunked Boltz inputs without inference.",
+)
+@click.pass_context
+def screen(ctx: click.Context, config: Path, prepare_only: bool) -> None:
+    """Screen one protein target against a ligand library."""
+    from boltz.screen import (
+        build_predict_options,
+        collect_screen_scores,
+        ensure_auto_msa,
+        prepare_screen,
+    )
+
+    prepared = prepare_screen(
+        config,
+        ensure_ccd_cache=None if prepare_only else download_boltz2_ccd,
+    )
+    predict_options = build_predict_options(
+        prepared.options,
+        predict_command=predict,
+        config_dir=prepared.config_path.parent,
+        parent_context=ctx,
+    )
+    click.echo(
+        f"Prepared {len(prepared.chunk_dirs)} chunk(s) in "
+        f"{prepared.output_dir}."
+    )
+    if prepare_only:
+        click.echo(f"Manifest: {prepared.manifest_path}")
+        return
+
+    if prepared.auto_msa_path is not None:
+        click.echo("Preparing one shared target MSA for all screen chunks.")
+        ensure_auto_msa(
+            prepared,
+            predict_options=predict_options,
+            compute_msa_fn=compute_msa,
+        )
+        predict_options["use_msa_server"] = False
+
+    for index, chunk_dir in enumerate(prepared.chunk_dirs, start=1):
+        click.echo(
+            f"Running screen chunk {index}/{len(prepared.chunk_dirs)}: "
+            f"{chunk_dir.name}"
+        )
+        ctx.invoke(
+            predict,
+            data=str(chunk_dir),
+            out_dir=str(prepared.runs_dir),
+            **predict_options,
+        )
+    scores_path = collect_screen_scores(prepared)
+    click.echo(f"Screen complete: {scores_path}")
 
 
 if __name__ == "__main__":

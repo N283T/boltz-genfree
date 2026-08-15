@@ -1,0 +1,451 @@
+"""Tests for the screen-first configuration and library workflow."""
+
+from __future__ import annotations
+
+import csv
+import json
+import pickle
+from pathlib import Path
+
+import click
+import pytest
+import yaml
+from click.testing import CliRunner
+from rdkit import Chem
+
+from boltz.main import cli, predict
+from boltz.screen import (
+    build_predict_options,
+    collect_screen_scores,
+    ensure_auto_msa,
+    prepare_screen,
+)
+
+SEQUENCE = "QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEI"
+
+
+def _write_config(
+    tmp_path: Path,
+    ligands: dict[str, object],
+    *,
+    options: dict[str, object] | None = None,
+    chunk_size: int = 1000,
+    sequence: str = SEQUENCE,
+) -> Path:
+    config = {
+        "version": 1,
+        "target": {"sequence": sequence, "msa": "empty"},
+        "ligands": ligands,
+        "output_dir": "./output",
+        "chunk_size": chunk_size,
+        "options": options or {},
+    }
+    path = tmp_path / "screen.yaml"
+    path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    return path
+
+
+def _write_ccd_cache(tmp_path: Path, molecules: dict[str, str]) -> Path:
+    cache = tmp_path / "cache"
+    mol_dir = cache / "mols"
+    mol_dir.mkdir(parents=True)
+    for code, smiles in molecules.items():
+        molecule = Chem.MolFromSmiles(smiles)
+        assert molecule is not None
+        with (mol_dir / f"{code}.pkl").open("wb") as handle:
+            pickle.dump(molecule, handle)
+    return cache
+
+
+def test_prepare_inline_smiles_chunks_and_is_idempotent(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {
+            "smiles": [
+                {"id": "compound one", "smiles": "CCO"},
+                {"id": "compound/two", "smiles": "CCN"},
+            ]
+        },
+        chunk_size=1,
+    )
+
+    prepared = prepare_screen(config_path)
+    repeated = prepare_screen(config_path)
+
+    assert prepared == repeated
+    assert [path.name for path in prepared.chunk_dirs] == [
+        "chunk_00000",
+        "chunk_00001",
+    ]
+    generated = sorted(prepared.output_dir.glob(".boltz-stfree/inputs/chunk_*/*.yaml"))
+    assert [path.stem for path in generated] == [
+        "000001_compound_one",
+        "000002_compound_two",
+    ]
+    first = yaml.safe_load(generated[0].read_text(encoding="utf-8"))
+    assert first["sequences"][0]["protein"]["msa"] == "empty"
+    assert first["sequences"][1]["ligand"] == {"id": "B", "smiles": "CCO"}
+    assert first["properties"] == [{"affinity": {"binder": "B"}}]
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    assert [record["ligand_tokens"] for record in manifest["records"]] == [3, 3]
+
+
+def test_prepare_csv_library_resolves_config_relative_path(tmp_path: Path) -> None:
+    library_path = tmp_path / "library.csv"
+    library_path.write_text("compound,canonical\na,CCO\nb,CCN\n", encoding="utf-8")
+    config_path = _write_config(
+        tmp_path,
+        {
+            "csv": "./library.csv",
+            "id_column": "compound",
+            "smiles_column": "canonical",
+        },
+    )
+
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+
+    assert [record["ligand_id"] for record in manifest["records"]] == ["a", "b"]
+    assert manifest["ligand_source"]["path"] == str(library_path.resolve())
+    assert len(manifest["ligand_source"]["sha256"]) == 64
+
+
+def test_prepare_sdf_library_uses_molecule_names(tmp_path: Path) -> None:
+    sdf_path = tmp_path / "library.sdf"
+    writer = Chem.SDWriter(str(sdf_path))
+    for name, smiles in (("ethanol", "CCO"), ("ethylamine", "CCN")):
+        molecule = Chem.MolFromSmiles(smiles)
+        molecule.SetProp("_Name", name)
+        writer.write(molecule)
+    writer.close()
+    config_path = _write_config(tmp_path, {"sdf": "./library.sdf"})
+
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+
+    assert [record["ligand_id"] for record in manifest["records"]] == [
+        "ethanol",
+        "ethylamine",
+    ]
+    assert all(record["ligand_kind"] == "smiles" for record in manifest["records"])
+
+
+def test_prepare_ccd_library(tmp_path: Path) -> None:
+    _write_ccd_cache(tmp_path, {"ATP": "CCO", "ADP": "CCN"})
+    config_path = _write_config(
+        tmp_path,
+        {"ccd": ["ATP", {"id": "adp-reference", "ccd": "ADP"}]},
+        options={"cache": "./cache"},
+    )
+
+    prepared = prepare_screen(config_path)
+    generated = sorted(prepared.output_dir.glob(".boltz-stfree/inputs/chunk_*/*.yaml"))
+    payloads = [yaml.safe_load(path.read_text(encoding="utf-8")) for path in generated]
+
+    assert payloads[0]["sequences"][1]["ligand"]["ccd"] == "ATP"
+    assert payloads[1]["sequences"][1]["ligand"]["ccd"] == "ADP"
+
+
+def test_prepare_ccd_library_can_populate_missing_cache(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"ccd": ["ATP"]},
+        options={"cache": "./cache"},
+    )
+    calls: list[Path] = []
+
+    def ensure_cache(cache: Path) -> None:
+        calls.append(cache)
+        _write_ccd_cache(tmp_path, {"ATP": "CCO"})
+
+    prepared = prepare_screen(config_path, ensure_ccd_cache=ensure_cache)
+
+    assert calls == [tmp_path / "cache"]
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["records"][0]["ligand_tokens"] == 3
+
+
+def test_auto_msa_enables_server_by_default(tmp_path: Path) -> None:
+    config = {
+        "version": 1,
+        "target": {"sequence": SEQUENCE},
+        "ligands": {"smiles": ["CCO"]},
+        "output_dir": "./output",
+    }
+    path = tmp_path / "auto.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    prepared = prepare_screen(path)
+
+    assert prepared.options["use_msa_server"] is True
+    assert prepared.auto_msa_path == (tmp_path / "output/.boltz-stfree/msa/target.csv")
+    generated = next(prepared.output_dir.glob(".boltz-stfree/inputs/chunk_*/*.yaml"))
+    payload = yaml.safe_load(generated.read_text(encoding="utf-8"))
+    assert payload["sequences"][0]["protein"]["msa"] == str(prepared.auto_msa_path)
+
+
+def test_auto_msa_is_generated_once_and_verified(tmp_path: Path) -> None:
+    config = {
+        "version": 1,
+        "target": {"sequence": SEQUENCE},
+        "ligands": {"smiles": ["CCO"]},
+        "output_dir": "./output",
+    }
+    path = tmp_path / "auto.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    prepared = prepare_screen(path)
+    calls: list[dict[str, object]] = []
+
+    def fake_compute_msa(**kwargs: object) -> None:
+        calls.append(kwargs)
+        msa_dir = Path(str(kwargs["msa_dir"]))
+        msa_dir.mkdir(parents=True, exist_ok=True)
+        (msa_dir / "target.csv").write_text(
+            "key,sequence\n-1," + SEQUENCE + "\n",
+            encoding="utf-8",
+        )
+
+    options = {
+        "msa_server_url": "https://msa.example.test",
+        "msa_pairing_strategy": "greedy",
+    }
+    ensure_auto_msa(
+        prepared,
+        predict_options=options,
+        compute_msa_fn=fake_compute_msa,
+    )
+    ensure_auto_msa(
+        prepared,
+        predict_options=options,
+        compute_msa_fn=fake_compute_msa,
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["data"] == {"target": SEQUENCE}
+    assert prepared.auto_msa_path is not None
+    metadata_path = prepared.auto_msa_path.with_suffix(".metadata.json")
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert metadata["server_url"] == "https://msa.example.test"
+
+
+def test_custom_msa_is_hashed_in_manifest(tmp_path: Path) -> None:
+    msa_path = tmp_path / "target.a3m"
+    msa_path.write_text(">query\nAAAA\n", encoding="utf-8")
+    config = {
+        "version": 1,
+        "target": {"sequence": SEQUENCE, "msa": "./target.a3m"},
+        "ligands": {"smiles": ["CCO"]},
+        "output_dir": "./output",
+    }
+    path = tmp_path / "custom-msa.yaml"
+    path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    prepared = prepare_screen(path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["target"]["msa"]["mode"] == "file"
+    assert manifest["target"]["msa"]["path"] == str(msa_path.resolve())
+    assert len(manifest["target"]["msa"]["sha256"]) == 64
+
+
+def test_full_screen_rejects_target_above_200_tokens(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        sequence="A" * 201,
+    )
+
+    with pytest.raises(click.UsageError, match="target_tokens=201 exceeds"):
+        prepare_screen(config_path)
+
+
+def test_full_screen_rejects_ligand_above_128_tokens(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": [{"id": "too-large", "smiles": "C" * 129}]},
+    )
+
+    with pytest.raises(click.UsageError, match="too-large: ligand_tokens=129"):
+        prepare_screen(config_path)
+
+
+def test_full_screen_rejects_target_ligand_total_above_256(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": [{"id": "does-not-fit", "smiles": "C" * 57}]},
+        sequence="A" * 200,
+    )
+
+    with pytest.raises(click.UsageError, match=r"200 \+ ligand_tokens=57 = 257"):
+        prepare_screen(config_path)
+
+
+def test_full_screen_warns_above_training_ligand_limit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": [{"id": "large-but-valid", "smiles": "C" * 57}]},
+    )
+
+    prepare_screen(config_path)
+
+    assert "large-but-valid=57" in capsys.readouterr().err
+
+
+def test_screen_rejects_explicit_crop_options(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        options={
+            "affinity_crop_indices_dir": "./crops",
+            "affinity_structure_free_crop_label": "known-pocket-v1",
+        },
+    )
+
+    with pytest.raises(click.UsageError, match="full-screen-only"):
+        prepare_screen(config_path)
+
+
+def test_predict_options_are_yaml_driven_but_route_is_managed(tmp_path: Path) -> None:
+    parent_context = click.Context(cli)
+    options = build_predict_options(
+        {
+            "devices": 1,
+            "num_workers": 4,
+            "cache": "./cache",
+            "affinity_recycling_steps": 3,
+        },
+        predict_command=predict,
+        config_dir=tmp_path,
+        parent_context=parent_context,
+    )
+
+    assert options["devices"] == 1
+    assert options["num_workers"] == 4
+    assert options["cache"] == str((tmp_path / "cache").resolve())
+    assert options["affinity_recycling_steps"] == 3
+    assert options["affinity_structure_free"] is True
+    assert options["affinity_distogram_modes"] == ("zero_distogram_features",)
+    assert options["affinity_screening_minimal_output"] is True
+
+
+def test_predict_options_reject_managed_route_override(tmp_path: Path) -> None:
+    with pytest.raises(click.UsageError, match="managed by screen"):
+        build_predict_options(
+            {"affinity_distogram_modes": ["control"]},
+            predict_command=predict,
+            config_dir=tmp_path,
+            parent_context=click.Context(cli),
+        )
+
+
+def test_screen_cli_prepare_only_never_runs_inference(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, {"smiles": ["CCO", "CCN"]})
+
+    result = CliRunner().invoke(cli, ["screen", str(config_path), "--prepare-only"])
+
+    assert result.exit_code == 0, result.output
+    assert "Prepared 1 chunk(s)" in result.output
+    assert "Manifest:" in result.output
+
+
+def test_screen_cli_prepare_only_validates_predict_options(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        options={"not_a_predict_option": True},
+    )
+
+    result = CliRunner().invoke(cli, ["screen", str(config_path), "--prepare-only"])
+
+    assert result.exit_code != 0
+    assert "Unknown or reserved predict option" in result.output
+
+
+def test_screen_cli_runs_chunks_with_managed_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO", "CCN"]},
+        options={"num_workers": 3},
+        chunk_size=1,
+    )
+    calls: list[dict[str, object]] = []
+
+    def fake_predict(**kwargs: object) -> None:
+        calls.append(kwargs)
+        assert kwargs["affinity_structure_free"] is True
+        assert kwargs["affinity_structure_free_fast"] is True
+        assert kwargs["affinity_screening_minimal_output"] is True
+        assert kwargs["affinity_distogram_modes"] == ("zero_distogram_features",)
+        data_dir = Path(str(kwargs["data"]))
+        prediction_root = (
+            Path(str(kwargs["out_dir"]))
+            / f"boltz_results_{data_dir.stem}"
+            / "predictions"
+        )
+        for input_path in data_dir.glob("*.yaml"):
+            record_dir = prediction_root / input_path.stem
+            record_dir.mkdir(parents=True)
+            score_path = (
+                record_dir / "affinity_B__distogram_zero_distogram_features.json"
+            )
+            score_path.write_text(
+                json.dumps(
+                    {
+                        "affinity_pred_value": 1.0,
+                        "affinity_probability_binary": 0.5,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(predict, "callback", fake_predict)
+
+    result = CliRunner().invoke(cli, ["screen", str(config_path)])
+
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 2
+    assert all(call["num_workers"] == 3 for call in calls)
+    assert (tmp_path / "output/scores.csv").is_file()
+    assert "Screen complete" in result.output
+
+
+def test_collect_screen_scores_preserves_library_identity(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": [{"id": "first", "smiles": "CCO"}, "CCN"]},
+        chunk_size=1,
+    )
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    for index, record in enumerate(manifest["records"], start=1):
+        prediction_dir = (
+            prepared.runs_dir
+            / f"boltz_results_{record['chunk']}"
+            / "predictions"
+            / record["record_id"]
+        )
+        prediction_dir.mkdir(parents=True)
+        payload = {
+            "affinity_pred_value": float(index),
+            "affinity_probability_binary": index / 10,
+        }
+        score_path = (
+            prediction_dir / "affinity_B__distogram_zero_distogram_features.json"
+        )
+        score_path.write_text(
+            json.dumps(payload),
+            encoding="utf-8",
+        )
+
+    scores_path = collect_screen_scores(prepared)
+
+    with scores_path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [row["ligand_id"] for row in rows] == ["first", "ligand_000002"]
+    assert [row["affinity_pred_value"] for row in rows] == ["1.0", "2.0"]
