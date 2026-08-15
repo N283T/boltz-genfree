@@ -1603,7 +1603,7 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
 )
 @click.option(
     "--affinity_ligand_ref_pos_mode",
-    type=click.Choice(["etkdg", "rdkit_2d", "all_zero"]),
+    type=click.Choice(["skip", "etkdg", "rdkit_2d"]),
     default="etkdg",
     show_default=True,
     help=(
@@ -1817,7 +1817,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             )
         affinity_structure_free_fast = True
         affinity_screening_minimal_output = True
-        affinity_ligand_ref_pos_mode = "all_zero"
+        affinity_ligand_ref_pos_mode = "skip"
 
     if affinity_structure_free_skip_msa:
         affinity_structure_free_single_sequence = True

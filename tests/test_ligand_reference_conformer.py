@@ -66,7 +66,56 @@ def test_default_mode_reuses_original_molecules() -> None:
     )
 
 
-def test_all_zero_is_applied_after_featurization_to_ligand_only() -> None:
+def test_skip_mode_reuses_original_molecules() -> None:
+    molecules = {
+        "ALA": _molecule_with_3d_conformer(),
+        "LIG": _molecule_with_3d_conformer(),
+    }
+
+    assert (
+        prepare_ligand_reference_conformers(molecules, _Tokenized(), "skip")
+        is molecules
+    )
+
+
+def test_seeded_etkdg_is_deterministic_and_replaces_only_ligand() -> None:
+    molecules = {
+        "ALA": _molecule_with_3d_conformer(),
+        "LIG": _molecule_with_3d_conformer(),
+    }
+
+    first = prepare_ligand_reference_conformers(
+        molecules,
+        _Tokenized(),
+        "etkdg",
+        etkdg_seed=17,
+    )
+    second = prepare_ligand_reference_conformers(
+        molecules,
+        _Tokenized(),
+        "etkdg",
+        etkdg_seed=17,
+    )
+    different_seed = prepare_ligand_reference_conformers(
+        molecules,
+        _Tokenized(),
+        "etkdg",
+        etkdg_seed=18,
+    )
+
+    assert first["ALA"] is molecules["ALA"]
+    assert first["LIG"] is not molecules["LIG"]
+    assert np.allclose(
+        first["LIG"].GetConformer().GetPositions(),
+        second["LIG"].GetConformer().GetPositions(),
+    )
+    assert not np.allclose(
+        first["LIG"].GetConformer().GetPositions(),
+        different_seed["LIG"].GetConformer().GetPositions(),
+    )
+
+
+def test_skip_is_applied_after_featurization_to_ligand_only() -> None:
     features = {
         "ref_pos": torch.tensor(
             [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
@@ -78,7 +127,7 @@ def test_all_zero_is_applied_after_featurization_to_ligand_only() -> None:
         "affinity_token_mask": torch.tensor([0, 1], dtype=torch.bool),
     }
 
-    intervened = apply_ligand_reference_position_intervention(features, "all_zero")
+    intervened = apply_ligand_reference_position_intervention(features, "skip")
 
     assert torch.equal(intervened["ref_pos"][0], features["ref_pos"][0])
     assert torch.count_nonzero(intervened["ref_pos"][1:]) == 0

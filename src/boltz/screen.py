@@ -63,6 +63,8 @@ _SCREEN_OPTION_KEYS = {
     "flash_attn",
     "affinity_mw_correction",
     "affinity_recycling_steps",
+    "ligand_reference_conformer",
+    "etkdg_seed",
     "msa_server_url",
     "msa_pairing_strategy",
     "msa_server_username",
@@ -998,6 +1000,14 @@ def build_screen_options(
     seed = raw_options.get("seed")
     if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool)):
         raise click.UsageError("options.seed must be an integer or null.")
+    ligand_reference_conformer = raw_options.get(
+        "ligand_reference_conformer",
+        "skip",
+    )
+    if ligand_reference_conformer not in {"skip", "etkdg"}:
+        raise click.UsageError(
+            "options.ligand_reference_conformer must be skip or etkdg."
+        )
 
     runtime = StFreeRuntimeOptions(
         cache=cache,
@@ -1039,6 +1049,14 @@ def build_screen_options(
             0,
             minimum=0,
             maximum=5,
+        ),
+        ligand_reference_conformer=ligand_reference_conformer,
+        etkdg_seed=_integer_option(
+            raw_options,
+            "etkdg_seed",
+            42,
+            minimum=0,
+            maximum=2_147_483_647,
         ),
     )
     server_url = raw_options.get("msa_server_url", "https://api.colabfold.com")

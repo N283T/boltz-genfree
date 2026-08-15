@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 
 _DISTOGRAM_MODE = "zero_distogram_features"
+_LIGAND_CONFORMER_MODES = {"skip", "etkdg"}
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,8 @@ class StFreeRuntimeOptions:
     flash_attn: bool = False
     affinity_mw_correction: bool = False
     affinity_recycling_steps: int = 0
+    ligand_reference_conformer: str = "skip"
+    etkdg_seed: int = 42
 
 
 def _patch_torch_checkpoint_loading(torch: object) -> None:
@@ -178,7 +181,19 @@ def _run_provenance(
             "input_contract": "one_protein_one_ligand",
             "receptor_selection": receptor_selection,
             "distogram_mode": _DISTOGRAM_MODE,
-            "ligand_reference_conformer": "etkdg",
+            "ligand_reference_conformer": {
+                "mode": options.ligand_reference_conformer,
+                "reference_positions": (
+                    "zero"
+                    if options.ligand_reference_conformer == "skip"
+                    else "etkdg_v3_uff"
+                ),
+                "etkdg_seed": (
+                    options.etkdg_seed
+                    if options.ligand_reference_conformer == "etkdg"
+                    else None
+                ),
+            },
             "structure_generation_active": False,
             "affinity_recycling_steps": options.affinity_recycling_steps,
             "affinity_mw_correction": options.affinity_mw_correction,
@@ -374,6 +389,11 @@ def run_stfree_chunk(
 
     _configure_wsl_multiprocessing_tempdir(options.num_workers)
     _patch_torch_checkpoint_loading(torch)
+    if options.ligand_reference_conformer not in _LIGAND_CONFORMER_MODES:
+        choices = ", ".join(sorted(_LIGAND_CONFORMER_MODES))
+        raise click.UsageError(
+            f"ligand_reference_conformer must be one of: {choices}."
+        )
     if options.accelerator == "cpu":
         click.echo("Running on CPU; affinity scoring will be slow.")
     if options.accelerator == "mps" and not torch.backends.mps.is_available():
@@ -423,7 +443,10 @@ def run_stfree_chunk(
         preprocessing_threads=options.preprocessing_threads,
         max_msa_seqs=options.max_msa_seqs,
         skip_bad_inputs=False,
-        skip_ligand_conformer_generation=False,
+        # StFree never needs a ligand conformer during parsing. The optional
+        # deterministic ETKDG conformer is generated immediately before
+        # featurization instead.
+        skip_ligand_conformer_generation=True,
     )
 
     processed_dir = run_dir / "processed"
@@ -456,7 +479,9 @@ def run_stfree_chunk(
         "generated_crop_active": receptor_crop_indices_dir is not None,
         "coordinate_derived_distogram_active": False,
         "distogram_modes": [_DISTOGRAM_MODE],
-        "ligand_reference_conformer": "etkdg",
+        "ligand_reference_conformer": provenance["method"][
+            "ligand_reference_conformer"
+        ],
         "affinity_recycling_steps": options.affinity_recycling_steps,
         "affinity_sampling_steps": 1,
         "affinity_diffusion_samples": 1,
@@ -544,7 +569,12 @@ def run_stfree_chunk(
         affinity_structure_free=True,
         affinity_structure_free_single_sequence=False,
         affinity_sequence_window_start=0,
-        affinity_ligand_ref_pos_mode="etkdg",
+        affinity_ligand_ref_pos_mode=options.ligand_reference_conformer,
+        affinity_ligand_ref_pos_seed=(
+            options.etkdg_seed
+            if options.ligand_reference_conformer == "etkdg"
+            else None
+        ),
         affinity_require_full_input=receptor_crop_indices_dir is None,
         pin_memory=options.accelerator not in ("cpu", "mps"),
     )
