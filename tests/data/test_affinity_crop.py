@@ -47,6 +47,24 @@ def test_explicit_affinity_crop_rejects_unknown_token_id():
         AffinityCropper.crop_by_token_indices(_tokenized(), np.array([3, 9]))
 
 
+def test_receptor_crop_unions_complete_binder_and_checks_budget():
+    cropped = AffinityCropper(max_tokens_protein=2).crop_by_receptor_token_indices(
+        _sequence_tokenized(),
+        np.array([1, 2]),
+        max_tokens=5,
+        max_atoms=20,
+    )
+
+    assert cropped.tokens["token_idx"].tolist() == [1, 2, 4, 5, 6]
+
+    with pytest.raises(ValueError, match="exceeds 4 total tokens"):
+        AffinityCropper(max_tokens_protein=2).crop_by_receptor_token_indices(
+            _sequence_tokenized(),
+            np.array([1, 2]),
+            max_tokens=4,
+        )
+
+
 def test_sequence_prefix_crop_keeps_all_binder_and_prefix_receptor_tokens():
     cropper = AffinityCropper(max_tokens_protein=2)
 
