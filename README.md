@@ -2,9 +2,138 @@
 
 Community-maintained fork of [Boltz](https://github.com/jwohlwend/boltz) with bug fixes, broader compatibility, and CI.
 
-This private branch also contains the repository-owned affinity distogram
-intervention and embedding-resume hooks described in
-[docs/distogram_interventions.md](docs/distogram_interventions.md).
+This repository also contains the structure-free affinity-screening route and
+the research interventions described below.
+
+## Repository provenance and license
+
+The provenance chain has three levels:
+
+1. The `official` remote is
+   `https://github.com/jwohlwend/boltz.git`, the official Boltz repository.
+2. The `upstream` remote is
+   `https://github.com/Novel-Therapeutics/boltz-community.git`, which branches
+   from the official repository.
+3. This repository branches from **boltz-community**, not directly from the
+   official Boltz repository.
+
+At the manuscript screening revision `c4d6a9a`, the research fork contained
+ten fork-specific commits and changed 18 files relative to its boltz-community
+branch point (+3,174/-235 lines). Those are the provenance values associated
+with the measured screening route below.
+
+The runtime base used for release preparation, `0461ad9`, also contains two
+later research commits and their merge commit. Before this documentation-only
+change, Git reports 13 fork-unique commits and a 23-file triple-dot diff
+(+3,977/-306) against the current `upstream/main`; boltz-community has also
+added three commits since the shared branch point. Consequently,
+`official/main..upstream/main` is now 154 rather than approximately 151 at the
+branch point, and the count from `official/main` to this runtime base is 164
+rather than the earlier measured 161. These updated counts are recorded
+explicitly so the newer runtime is not misrepresented as the ten-commit
+snapshot.
+
+The code remains under the inherited [MIT License](LICENSE). The upstream
+copyright notice—Copyright (c) 2024 Jeremy Wohlwend, Gabriele Corso, and Saro
+Passaro—is retained intact.
+
+## Structure-free affinity screening
+
+Structure-free screening is the supported tool interface added by this fork.
+It runs the Boltz-2 affinity trunk and heads from processed inputs while
+skipping complex structure generation entirely. The route consists of:
+
+- `--affinity_structure_free`: skip structure generation and use processed
+  inputs directly;
+- `--affinity_structure_free_fast`: additionally skip the unused confidence
+  forward pass;
+- `--affinity_screening_minimal_output`: write compact per-compound scores and
+  shared run metadata instead of the full prediction artifact set;
+- `--affinity_crop_indices_dir`: optionally supply an external receptor crop;
+- `--affinity_recycling_steps`: set affinity-trunk recycling from 0 to 5; use
+  0 for the measured screening route.
+
+The CLI validates the combinations with `click.UsageError`. Structure-free
+screening is Boltz-2-only. The fast and minimal-output flags require
+`--affinity_structure_free`; minimal output cannot be combined with
+`--write_embeddings`. An external crop directory must exist and must be paired
+with a filename-safe `--affinity_structure_free_crop_label`; that label is
+invalid without the external crop. Structure-free runs accept only
+coordinate-independent distogram modes, so the supported zero-distogram route
+must explicitly pass `--affinity_distogram_mode zero_distogram_features`.
+
+Install the tagged fork itself to obtain this interface (replace the placeholder
+with the release tag once assigned):
+
+```bash
+git clone --branch <release-tag> \
+  https://github.com/N283T/boltz-distogramless-boltz.git
+cd boltz-distogramless-boltz
+uv venv
+uv pip install ".[cuda]"
+```
+
+The unqualified `pip install boltz-community` command documented later installs
+the upstream community package and does not select this research fork.
+
+### Worked screening example
+
+The measured ALR screen used 50 deterministic input chunks of at most 1,000
+compounds. Each chunk was run into its own recoverable output directory using
+the following command shape (with the chunk number substituted in both paths):
+
+```bash
+boltz predict inputs/chunk_00000 \
+  --out_dir outputs/chunk_00000 \
+  --affinity_structure_free \
+  --affinity_structure_free_fast \
+  --affinity_screening_minimal_output \
+  --affinity_distogram_mode zero_distogram_features \
+  --affinity_recycling_steps 0 \
+  --seed 20260718 \
+  --num_workers 2 \
+  --sampling_steps_affinity 1 \
+  --diffusion_samples_affinity 1
+```
+
+CUDA kernels were enabled (the default; `--no_kernels` was not passed), the
+affinity batch size was 1, two data workers were used, and embeddings were not
+written. Across all 49,980 compounds, this measured route took 18,290.09
+seconds (5 h 04 min 50 s), or 2.733 compounds/s and 0.366 s/compound. It wrote
+51.9 MB, compared with 28.6 GB for the earlier one-recycle route.
+
+In a matched 16-compound benchmark, the same route took 29.27 seconds versus
+324.35 seconds for the fully default generated-pose route, an observed
+11.08-fold end-to-end difference. On the complete ALR assay it obtained AUROC
+0.6127 and average precision 0.04439, with 17 true actives among the top 50
+ranked compounds. These are measured results for this hardware, dataset, and
+configuration, not general performance guarantees.
+
+## Research interventions
+
+The other affinity options reproduce manuscript ablations. They remain in the
+same repository because the supported tool and reproducibility artifact are a
+single software release, but they are **research code rather than a supported
+interface**. The hooks are reproducible and retained intentionally; their CLI
+and artifact formats may evolve.
+
+This group includes the distogram mode/seed and random-distribution controls,
+exact affinity-head replay, prior-free sequence windows, prepared-geometry
+scoring, trunk-embedding resume, output tagging, and explicit crop provenance:
+
+```text
+--affinity_distogram_mode / --affinity_distogram_seed
+--affinity_random_distance_mean / --affinity_random_distance_std
+--affinity_random_pair_scope
+--affinity_head_only / --affinity_context_dir
+--affinity_sequence_window_start
+--affinity_skip_structure / --affinity_prepared_geometry_label
+--resume_embeddings_dir / --resume_recycling_steps
+--affinity_output_tag / --affinity_structure_free_crop_label
+```
+
+See [docs/distogram_interventions.md](docs/distogram_interventions.md) for the
+purpose, constraints, and artifacts of these research-only options.
 
 ## What's different from upstream?
 
