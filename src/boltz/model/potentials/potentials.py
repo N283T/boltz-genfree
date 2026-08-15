@@ -1,15 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, Set, List, Union
+from typing import Dict, Optional, Union
 
 import torch
-import numpy as np
+
 from boltz.data import const
 from boltz.model.potentials.schedules import (
     ParameterSchedule,
     ExponentialInterpolation,
     PiecewiseStepFunction,
 )
-from boltz.model.loss.diffusionv2 import weighted_rigid_align
 
 
 def _normalize_union_index(
@@ -309,28 +308,6 @@ class FlatBottomPotential(Potential):
         return energy, dEnergy
 
 
-class ReferencePotential(Potential):
-    def compute_variable(
-        self, coords, index, ref_coords, ref_mask, compute_gradient=False
-    ):
-        aligned_ref_coords = weighted_rigid_align(
-            ref_coords.float(),
-            coords[:, index].float(),
-            ref_mask,
-            ref_mask,
-        )
-
-        r = coords[:, index] - aligned_ref_coords
-        r_norm = torch.linalg.norm(r, dim=-1)
-
-        if not compute_gradient:
-            return r_norm
-
-        r_hat = r / r_norm.unsqueeze(-1)
-        grad = (r_hat * ref_mask.unsqueeze(-1)).unsqueeze(1)
-        return r_norm, grad
-
-
 class DistancePotential(Potential):
     def compute_variable(
         self, coords, index, ref_coords=None, ref_mask=None, compute_gradient=False
@@ -626,60 +603,6 @@ class PlanarBondPotential(FlatBottomPotential, AbsDihedralPotential):
         return improper_index, (k, lower_bounds, upper_bounds), None, None, None
 
 
-class TemplateReferencePotential(FlatBottomPotential, ReferencePotential):
-    def compute_args(self, feats, parameters):
-        if "template_mask_cb" not in feats or "template_force" not in feats:
-            return torch.empty([1, 0]), None, None, None, None
-
-        template_mask = feats["template_mask_cb"][feats["template_force"]]
-        if template_mask.shape[0] == 0:
-            return torch.empty([1, 0]), None, None, None, None
-
-        ref_coords = feats["template_cb"][feats["template_force"]].clone()
-        ref_mask = feats["template_mask_cb"][feats["template_force"]].clone()
-        ref_atom_index = (
-            torch.bmm(
-                feats["token_to_rep_atom"].float(),
-                torch.arange(
-                    feats["atom_pad_mask"].shape[1],
-                    device=feats["atom_pad_mask"].device,
-                    dtype=torch.float32,
-                )[None, :, None],
-            )
-            .squeeze(-1)
-            .long()
-        )[0]
-        ref_token_index = (
-            torch.bmm(
-                feats["atom_to_token"].float(),
-                feats["token_index"].unsqueeze(-1).float(),
-            )
-            .squeeze(-1)
-            .long()
-        )[0]
-
-        index = torch.arange(
-            template_mask.shape[-1], dtype=torch.long, device=template_mask.device
-        )[None]
-        upper_bounds = torch.full(
-            template_mask.shape, float("inf"), device=index.device, dtype=torch.float32
-        )
-        ref_idxs = torch.argwhere(template_mask).T
-        upper_bounds[ref_idxs.unbind()] = feats["template_force_threshold"][
-            feats["template_force"]
-        ][ref_idxs[0]]
-
-        lower_bounds = None
-        k = torch.ones_like(upper_bounds)
-        return (
-            index,
-            (k, lower_bounds, upper_bounds),
-            None,
-            (ref_coords, ref_mask, ref_atom_index, ref_token_index),
-            None,
-        )
-
-
 class ContactPotentital(FlatBottomPotential, DistancePotential):
     def compute_args(self, feats, parameters):
         index = feats["contact_pair_index"][0]
@@ -785,33 +708,22 @@ def get_potentials(steering_args, boltz2=False):
     if boltz2 and (
         steering_args["fk_steering"] or steering_args["contact_guidance_update"]
     ):
-        potentials.extend(
-            [
-                ContactPotentital(
-                    parameters={
-                        "guidance_interval": 4,
-                        "guidance_weight": (
-                            PiecewiseStepFunction(
-                                thresholds=[0.25, 0.75], values=[0.0, 0.5, 1.0]
-                            )
-                            if steering_args["contact_guidance_update"]
-                            else 0.0
-                        ),
-                        "resampling_weight": 1.0,
-                        "union_lambda": ExponentialInterpolation(
-                            start=8.0, end=0.0, alpha=-2.0
-                        ),
-                    }
-                ),
-                TemplateReferencePotential(
-                    parameters={
-                        "guidance_interval": 2,
-                        "guidance_weight": 0.1
+        potentials.append(
+            ContactPotentital(
+                parameters={
+                    "guidance_interval": 4,
+                    "guidance_weight": (
+                        PiecewiseStepFunction(
+                            thresholds=[0.25, 0.75], values=[0.0, 0.5, 1.0]
+                        )
                         if steering_args["contact_guidance_update"]
-                        else 0.0,
-                        "resampling_weight": 1.0,
-                    }
-                ),
-            ]
+                        else 0.0
+                    ),
+                    "resampling_weight": 1.0,
+                    "union_lambda": ExponentialInterpolation(
+                        start=8.0, end=0.0, alpha=-2.0
+                    ),
+                }
+            )
         )
     return potentials

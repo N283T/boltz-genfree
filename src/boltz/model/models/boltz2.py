@@ -35,8 +35,6 @@ from boltz.model.modules.trunkv2 import (
     DistogramModule,
     InputEmbedder,
     MSAModule,
-    TemplateModule,
-    TemplateV2Module,
 )
 from boltz.model.optim.ema import EMA
 from boltz.model.optim.scheduler import AlphaFoldLRScheduler
@@ -67,7 +65,6 @@ class Boltz2(LightningModule):
         validators: Any = None,
         num_val_datasets: int = 1,
         atom_feature_dim: int = 128,
-        template_args: Optional[dict] = None,
         confidence_prediction: bool = True,
         affinity_prediction: bool = False,
         affinity_ensemble: bool = False,
@@ -102,12 +99,9 @@ class Boltz2(LightningModule):
         conditioning_cutoff_min: float = 4.0,
         conditioning_cutoff_max: float = 20.0,
         steering_args: Optional[dict] = None,
-        use_templates: bool = False,
-        compile_templates: bool = False,
         predict_bfactor: bool = False,
         log_loss_every_steps: int = 50,
         checkpoint_diffusion_conditioning: bool = False,
-        use_templates_v2: bool = False,
         use_kernels: bool = False,
         use_flash_attn: bool = False,
         affinity_distogram_modes: Optional[list[str]] = None,
@@ -174,7 +168,6 @@ class Boltz2(LightningModule):
         # Trunk
         self.is_pairformer_compiled = False
         self.is_msa_compiled = False
-        self.is_template_compiled = False
 
         # Kernels / GPU acceleration
         self.use_kernels = use_kernels
@@ -231,20 +224,6 @@ class Boltz2(LightningModule):
         torch._dynamo.config.accumulated_cache_size_limit = 512  # noqa: SLF001
 
         # Pairwise stack
-        self.use_templates = use_templates
-        if use_templates:
-            if use_templates_v2:
-                self.template_module = TemplateV2Module(token_z, **template_args)
-            else:
-                self.template_module = TemplateModule(token_z, **template_args)
-            if compile_templates:
-                self.is_template_compiled = True
-                self.template_module = torch.compile(
-                    self.template_module,
-                    dynamic=False,
-                    fullgraph=False,
-                )
-
         self.msa_module = MSAModule(
             token_z=token_z,
             token_s=token_s,
@@ -713,18 +692,6 @@ class Boltz2(LightningModule):
                         z = z_init + self.z_recycle(self.z_norm(z))
 
                         # Compute pairwise stack
-                        if self.use_templates:
-                            if self.is_template_compiled and not self.training:
-                                template_module = self.template_module._orig_mod  # noqa: SLF001
-                            else:
-                                template_module = self.template_module
-
-                            z = z + template_module(
-                                z, feats, pair_mask,
-                                use_kernels=self.use_kernels,
-                                use_flash_attn=self.use_flash_attn,
-                            )
-
                         if not self.skip_msa_forward:
                             if self.is_msa_compiled and not self.training:
                                 msa_module = self.msa_module._orig_mod  # noqa: SLF001
