@@ -1,8 +1,6 @@
 """Shared test fixtures for Boltz-StFree tests."""
 
 import gzip
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -274,53 +272,6 @@ def expected_sample_chunk_sizes():
         return per_step * num_steps
 
     return _expected_sample_chunk_sizes
-
-
-@pytest.fixture
-def v1_atom_diffusion_factory():
-    """Build a lightweight Boltz-1 diffusion module that records sampled batch sizes."""
-    from boltz.model.modules.diffusion import AtomDiffusion
-
-    def _make_v1_atom_diffusion(call_sizes: list[int]):
-        class RecordingV1ScoreModel(torch.nn.Module):
-            def __init__(self, token_s: int):
-                super().__init__()
-                self.coord_proj = torch.nn.Linear(3, 3, bias=False)
-                self.token_proj = torch.nn.Linear(1, 2 * token_s, bias=False)
-                torch.nn.init.zeros_(self.coord_proj.weight)
-                torch.nn.init.zeros_(self.token_proj.weight)
-
-            def forward(self, r_noisy, times, **network_condition_kwargs):
-                assert network_condition_kwargs["multiplicity"] == r_noisy.shape[0]
-                call_sizes.append(r_noisy.shape[0])
-                num_tokens = network_condition_kwargs["feats"]["token_index"].shape[1]
-                token_a = self.token_proj(times.to(r_noisy.dtype).unsqueeze(-1))
-                token_a = token_a.unsqueeze(1).expand(-1, num_tokens, -1)
-                return {
-                    "r_update": self.coord_proj(r_noisy),
-                    "token_a": token_a,
-                }
-
-        diffusion = AtomDiffusion.__new__(AtomDiffusion)
-        torch.nn.Module.__init__(diffusion)
-        diffusion.token_s = 2
-        diffusion.score_model = RecordingV1ScoreModel(diffusion.token_s)
-        diffusion.sigma_min = 0.5
-        diffusion.sigma_max = 1.0
-        diffusion.sigma_data = 1.0
-        diffusion.rho = 1.0
-        diffusion.num_sampling_steps = 2
-        diffusion.gamma_0 = 0.0
-        diffusion.gamma_min = 999.0
-        diffusion.noise_scale = 1.0
-        diffusion.step_scale = 1.0
-        diffusion.use_inference_model_cache = False
-        diffusion.accumulate_token_repr = False
-        diffusion.alignment_reverse_diff = False
-        diffusion.eval()
-        return diffusion
-
-    return _make_v1_atom_diffusion
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@ import torch
 from torch import nn
 
 from boltz.data import const
-from boltz.model.layers.confidence_utils import compute_frame_pred, tm_function
+from boltz.model.layers.confidence_utils import compute_frame_pred
 from boltz.model.modules.utils import autocast_device_type
 
 

@@ -283,7 +283,7 @@ builds and validates artifacts manually but cannot upload them to PyPI.
 Run the CPU-focused tests with:
 
 ```bash
-pytest -m "not slow and not regression" -q
+pytest -q
 ```
 
 Generic structure prediction, training, and intervention workflows are outside
