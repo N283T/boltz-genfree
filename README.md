@@ -16,10 +16,15 @@ artifacts.
 
 ## Status
 
-Boltz-StFree currently exposes the measured structure-free route through the
-`boltz-stfree predict` command and explicit options. A shorter screening-first
-command is planned. Until the first tagged release, install from a pinned Git
-commit and expect the interface to evolve.
+`boltz-stfree screen` is the primary interface. It accepts one protein target,
+a ligand library, output and chunking settings, and prediction options in one
+YAML file. It generates ordinary Boltz affinity inputs, runs recoverable
+structure-free chunks, and aggregates the compact JSON results into one
+`scores.csv`. The lower-level `predict` command remains available for runtime
+compatibility and research interventions.
+
+Until the first tagged release, install from a pinned Git commit and expect the
+interface to evolve.
 
 The method requires a relevant receptor context. When the receptor does not fit
 inside one affinity crop, provide a validated external crop. A structure-free
@@ -40,45 +45,116 @@ uv pip install ".[cuda]"
 This distribution installs `boltz-stfree`, not the upstream `boltz` command,
 so the runtime used for a screen is explicit.
 
-## Run the measured structure-free route
+## Screen a ligand library
 
-Input files use the normal Boltz YAML format and must request the affinity
-property. For example:
+Create a screen config containing one protein and one ligand source:
 
 ```yaml
 version: 1
-sequences:
-  - protein:
-      id: A
-      sequence: YOUR_PROTEIN_SEQUENCE
-  - ligand:
-      id: B
-      smiles: YOUR_LIGAND_SMILES
-properties:
-  - affinity:
-      binder: B
+
+target:
+  sequence: YOUR_PROTEIN_SEQUENCE
+  msa: ./target.a3m  # or auto / empty
+
+ligands:
+  csv: ./library.csv
+  id_column: id
+  smiles_column: smiles
+
+output_dir: ./screen-output
+chunk_size: 1000
+
+options:
+  seed: 20260718
+  num_workers: 2
+  affinity_recycling_steps: 0
+  affinity_batch_size: 1
 ```
 
-Run one file or a directory of inputs:
+Then run:
 
 ```bash
-boltz-stfree predict inputs/ \
-  --out_dir results/ \
-  --affinity_structure_free \
-  --affinity_structure_free_fast \
-  --affinity_screening_minimal_output \
-  --affinity_distogram_mode zero_distogram_features \
-  --affinity_recycling_steps 0 \
-  --sampling_steps_affinity 1 \
-  --diffusion_samples_affinity 1 \
-  --num_workers 2
+boltz-stfree screen screen.yaml
 ```
 
-CUDA kernels are enabled by default. The paper's complete 49,980-compound ALR
-screen used this route with batch size 1, the MSA enabled, ETKDG ligand
-reference coordinates retained, and a fixed experimental seed. The affinity
-sampling counts in the example are inert because structure sampling is skipped;
-they make the recorded run configuration unambiguous.
+Use `--prepare-only` to validate the config and inspect the generated Boltz YAML
+chunks without loading checkpoints or running inference:
+
+```bash
+boltz-stfree screen screen.yaml --prepare-only
+```
+
+The generated inputs and immutable manifest live under
+`<output_dir>/.boltz-stfree/`; per-chunk runtime artifacts live under
+`<output_dir>/runs/`. Re-running the same config resumes through the existing
+Boltz output checks. A changed config or ligand source is rejected rather than
+mixed into existing screen state.
+
+With `target.msa: auto`, `screen` calls the configured MSA server exactly once
+for the target and records a checksum beside the shared MSA. Every ligand and
+chunk then references that same file; automatic MSA generation is never
+repeated per compound. `--prepare-only` does not make the network request.
+
+### Ligand sources
+
+`ligands` must contain exactly one of the following sources.
+
+Inline SMILES:
+
+```yaml
+ligands:
+  smiles:
+    - id: compound-1
+      smiles: CCO
+    - id: compound-2
+      smiles: CCN
+```
+
+An SDF library, using the molecule title or an explicit property as its ID:
+
+```yaml
+ligands:
+  sdf: ./library.sdf
+  id_property: compound_id
+```
+
+CCD components:
+
+```yaml
+ligands:
+  ccd:
+    - ATP
+    - id: adp-reference
+      ccd: ADP
+```
+
+CSV and TSV libraries accept configurable `id_column`, `smiles_column`, and
+one-character `delimiter` fields. All source paths are resolved relative to the
+screen config.
+
+### Prediction options
+
+Keys below `options` may use `snake_case` or CLI-style hyphenated names and are
+validated against the existing `predict` command. Relative path options are
+also resolved from the screen config directory.
+
+The `screen` command manages these route-defining values and rejects different
+overrides:
+
+```text
+model = boltz2
+affinity_structure_free = true
+affinity_structure_free_fast = true
+affinity_screening_minimal_output = true
+affinity_distogram_mode = zero_distogram_features
+sampling_steps_affinity = 1
+diffusion_samples_affinity = 1
+```
+
+Affinity recycling defaults to 0 but remains configurable from 0 through 5.
+CUDA kernels remain enabled unless `options.no_kernels` is true. The paper's
+complete 49,980-compound ALR screen used batch size 1, an MSA, ETKDG ligand
+reference coordinates, and the other managed settings above.
 
 Minimal output writes one score JSON per record plus shared run metadata. It
 suppresses structure files, full distogram artifacts, and Lightning logs.
@@ -90,17 +166,14 @@ tokens and at most 200 receptor tokens. If the complete receptor fits, the
 default sequence-prefix crop can retain it. For longer receptors, supply
 validated receptor-token indices and a provenance label:
 
-```bash
-boltz-stfree predict inputs/ \
-  --out_dir results/ \
-  --affinity_structure_free \
-  --affinity_structure_free_fast \
-  --affinity_screening_minimal_output \
-  --affinity_distogram_mode zero_distogram_features \
-  --affinity_recycling_steps 0 \
-  --affinity_crop_indices_dir crops/ \
-  --affinity_structure_free_crop_label known-pocket-v1
+```yaml
+options:
+  affinity_crop_indices_dir: ./crops
+  affinity_structure_free_crop_label: known-pocket-v1
 ```
+
+`screen` rejects targets longer than 200 residues unless this external crop is
+configured. Crop files must follow the existing per-record runtime format.
 
 Do not interpret an arbitrary sequence-prefix crop as pocket discovery. The
 paper found that moving the receptor crop away from the relevant site can

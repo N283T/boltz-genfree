@@ -1,0 +1,667 @@
+"""Screen-first configuration, ligand loading, and result aggregation."""
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import click
+import yaml
+from rdkit import Chem
+
+_TOP_LEVEL_KEYS = {
+    "version",
+    "target",
+    "ligands",
+    "output_dir",
+    "chunk_size",
+    "options",
+}
+_TARGET_KEYS = {"id", "sequence", "msa"}
+_LIGAND_SOURCE_KEYS = {"smiles", "csv", "sdf", "ccd"}
+_MAX_SEQUENCE_PREFIX_TOKENS = 200
+_MANAGED_PREDICT_OPTIONS: dict[str, object] = {
+    "model": "boltz2",
+    "affinity_structure_free": True,
+    "affinity_structure_free_fast": True,
+    "affinity_screening_minimal_output": True,
+    "affinity_distogram_modes": ("zero_distogram_features",),
+    "sampling_steps_affinity": 1,
+    "diffusion_samples_affinity": 1,
+}
+_OPTION_ALIASES = {
+    "affinity_distogram_mode": "affinity_distogram_modes",
+}
+
+
+@dataclass(frozen=True)
+class LigandSpec:
+    """One ligand in a screen library."""
+
+    identifier: str
+    kind: str
+    value: str
+
+
+@dataclass(frozen=True)
+class PreparedScreen:
+    """Prepared chunks and normalized runtime settings."""
+
+    config_path: Path
+    output_dir: Path
+    runs_dir: Path
+    manifest_path: Path
+    chunk_dirs: tuple[Path, ...]
+    options: dict[str, Any]
+    target_sequence: str
+    auto_msa_path: Path | None
+
+
+def _mapping(value: object, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise click.UsageError(f"{label} must be a YAML mapping.")
+    return value
+
+
+def _normalize_option_name(name: object) -> str:
+    if not isinstance(name, str) or not name.strip():
+        raise click.UsageError("Every options key must be a non-empty string.")
+    normalized = name.strip().lstrip("-").replace("-", "_")
+    return _OPTION_ALIASES.get(normalized, normalized)
+
+
+def _resolve_path(value: object, base_dir: Path, label: str) -> Path:
+    if not isinstance(value, (str, Path)) or not str(value).strip():
+        raise click.UsageError(f"{label} must be a non-empty path.")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = base_dir / path
+    return path.resolve()
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _safe_record_id(identifier: str, index: int) -> str:
+    suffix = re.sub(r"[^A-Za-z0-9_.-]+", "_", identifier).strip("._-")
+    if not suffix:
+        suffix = "ligand"
+    return f"{index:06d}_{suffix[:80]}"
+
+
+def _inline_smiles(value: object) -> list[LigandSpec]:
+    if not isinstance(value, list) or not value:
+        raise click.UsageError("ligands.smiles must be a non-empty list.")
+    ligands: list[LigandSpec] = []
+    for index, item in enumerate(value):
+        if isinstance(item, str):
+            identifier = f"ligand_{index + 1:06d}"
+            smiles = item
+        elif isinstance(item, dict):
+            smiles = item.get("smiles")
+            identifier = item.get("id", f"ligand_{index + 1:06d}")
+        else:
+            raise click.UsageError(
+                f"ligands.smiles[{index}] must be a SMILES string or mapping."
+            )
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise click.UsageError(f"ligands.smiles[{index}].id is invalid.")
+        if not isinstance(smiles, str) or not smiles.strip():
+            raise click.UsageError(f"ligands.smiles[{index}].smiles is invalid.")
+        ligands.append(LigandSpec(identifier.strip(), "smiles", smiles.strip()))
+    return ligands
+
+
+def _inline_ccd(value: object) -> list[LigandSpec]:
+    if not isinstance(value, list) or not value:
+        raise click.UsageError("ligands.ccd must be a non-empty list.")
+    ligands: list[LigandSpec] = []
+    for index, item in enumerate(value):
+        if isinstance(item, str):
+            code = item
+            identifier = item
+        elif isinstance(item, dict):
+            code = item.get("ccd", item.get("code"))
+            identifier = item.get("id", code)
+        else:
+            raise click.UsageError(
+                f"ligands.ccd[{index}] must be a CCD code or mapping."
+            )
+        if not isinstance(code, str) or not code.strip():
+            raise click.UsageError(f"ligands.ccd[{index}].ccd is invalid.")
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise click.UsageError(f"ligands.ccd[{index}].id is invalid.")
+        ligands.append(LigandSpec(identifier.strip(), "ccd", code.strip()))
+    return ligands
+
+
+def _csv_ligands(
+    path: Path,
+    *,
+    id_column: str,
+    smiles_column: str,
+    delimiter: str | None,
+) -> list[LigandSpec]:
+    if not path.is_file():
+        raise click.UsageError(f"Ligand CSV does not exist: {path}")
+    if delimiter is None:
+        delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
+    if len(delimiter) != 1:
+        raise click.UsageError("ligands.delimiter must be one character.")
+    ligands: list[LigandSpec] = []
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter=delimiter)
+        fields = set(reader.fieldnames or [])
+        missing = {id_column, smiles_column} - fields
+        if missing:
+            names = ", ".join(sorted(missing))
+            raise click.UsageError(f"Ligand CSV is missing columns: {names}")
+        for row_number, row in enumerate(reader, start=2):
+            identifier = (row.get(id_column) or "").strip()
+            smiles = (row.get(smiles_column) or "").strip()
+            if not identifier or not smiles:
+                raise click.UsageError(
+                    f"Ligand CSV row {row_number} has an empty ID or SMILES."
+                )
+            ligands.append(LigandSpec(identifier, "smiles", smiles))
+    if not ligands:
+        raise click.UsageError("Ligand CSV contains no records.")
+    return ligands
+
+
+def _sdf_ligands(path: Path, id_property: str | None) -> list[LigandSpec]:
+    if not path.is_file():
+        raise click.UsageError(f"Ligand SDF does not exist: {path}")
+    supplier = Chem.SDMolSupplier(str(path), removeHs=False)
+    ligands: list[LigandSpec] = []
+    for index, molecule in enumerate(supplier):
+        if molecule is None:
+            raise click.UsageError(f"Failed to parse SDF record {index + 1}: {path}")
+        identifier = ""
+        if id_property and molecule.HasProp(id_property):
+            identifier = molecule.GetProp(id_property).strip()
+        if not identifier and molecule.HasProp("_Name"):
+            identifier = molecule.GetProp("_Name").strip()
+        if not identifier:
+            identifier = f"ligand_{index + 1:06d}"
+        smiles = Chem.MolToSmiles(
+            Chem.RemoveHs(molecule),
+            canonical=True,
+            isomericSmiles=True,
+        )
+        if not smiles:
+            raise click.UsageError(f"SDF record {index + 1} has no valid molecule.")
+        ligands.append(LigandSpec(identifier, "smiles", smiles))
+    if not ligands:
+        raise click.UsageError("Ligand SDF contains no records.")
+    return ligands
+
+
+def _load_ligands(
+    config: dict[str, Any],
+    base_dir: Path,
+) -> tuple[list[LigandSpec], dict[str, Any]]:
+    source_keys = _LIGAND_SOURCE_KEYS & set(config)
+    if len(source_keys) != 1:
+        choices = ", ".join(sorted(_LIGAND_SOURCE_KEYS))
+        raise click.UsageError(f"ligands must define exactly one source: {choices}.")
+    source = next(iter(source_keys))
+    allowed_keys = {
+        "smiles": {"smiles"},
+        "ccd": {"ccd"},
+        "csv": {"csv", "id_column", "smiles_column", "delimiter"},
+        "sdf": {"sdf", "id_property"},
+    }[source]
+    unknown = set(config) - allowed_keys
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise click.UsageError(f"Unknown ligands.{source} settings: {names}")
+    provenance: dict[str, Any] = {"type": source}
+    if source == "smiles":
+        return _inline_smiles(config[source]), provenance
+    if source == "ccd":
+        return _inline_ccd(config[source]), provenance
+
+    path = _resolve_path(config[source], base_dir, f"ligands.{source}")
+    if not path.is_file():
+        raise click.UsageError(f"Ligand {source.upper()} does not exist: {path}")
+    provenance.update({"path": str(path), "sha256": _sha256(path)})
+    if source == "csv":
+        id_column = config.get("id_column", "id")
+        smiles_column = config.get("smiles_column", "smiles")
+        delimiter = config.get("delimiter")
+        if not isinstance(id_column, str) or not isinstance(smiles_column, str):
+            raise click.UsageError("CSV column names must be strings.")
+        ligands = _csv_ligands(
+            path,
+            id_column=id_column,
+            smiles_column=smiles_column,
+            delimiter=delimiter,
+        )
+    else:
+        id_property = config.get("id_property")
+        if id_property is not None and not isinstance(id_property, str):
+            raise click.UsageError("ligands.id_property must be a string.")
+        ligands = _sdf_ligands(path, id_property)
+    return ligands, provenance
+
+
+def _load_config(config_path: Path) -> dict[str, Any]:
+    with config_path.open(encoding="utf-8") as handle:
+        loaded = yaml.safe_load(handle)
+    config = _mapping(loaded, "screen config")
+    unknown = set(config) - _TOP_LEVEL_KEYS
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise click.UsageError(f"Unknown screen config keys: {names}")
+    if config.get("version", 1) != 1:
+        raise click.UsageError("Only screen config version 1 is supported.")
+    return config
+
+
+def prepare_screen(  # noqa: C901, PLR0912, PLR0915
+    config_path: Path,
+) -> PreparedScreen:
+    """Validate a screen config and generate deterministic Boltz YAML chunks."""
+    config_path = config_path.expanduser().resolve()
+    config = _load_config(config_path)
+    base_dir = config_path.parent
+
+    target = _mapping(config.get("target"), "target")
+    unknown_target = set(target) - _TARGET_KEYS
+    if unknown_target:
+        names = ", ".join(sorted(unknown_target))
+        raise click.UsageError(f"Unknown target keys: {names}")
+    sequence_value = target.get("sequence")
+    if not isinstance(sequence_value, str):
+        raise click.UsageError("target.sequence must be a protein sequence string.")
+    sequence = re.sub(r"\s+", "", sequence_value).upper()
+    if not sequence or not re.fullmatch(r"[A-Z]+", sequence):
+        raise click.UsageError("target.sequence must contain amino-acid letters.")
+    target_id = target.get("id", "A")
+    if not isinstance(target_id, str) or not target_id.strip():
+        raise click.UsageError("target.id must be a non-empty string.")
+    target_id = target_id.strip()
+    if target_id == "B":
+        raise click.UsageError("target.id B is reserved for the ligand chain.")
+
+    msa_value = target.get("msa", "auto")
+    auto_msa = msa_value in ("auto", None)
+    msa_provenance: dict[str, object]
+    if not auto_msa and msa_value != "empty":
+        msa_path = _resolve_path(msa_value, base_dir, "target.msa")
+        if not msa_path.is_file():
+            raise click.UsageError(f"Target MSA does not exist: {msa_path}")
+        msa_value = str(msa_path)
+        msa_provenance = {
+            "mode": "file",
+            "path": msa_value,
+            "sha256": _sha256(msa_path),
+        }
+    elif auto_msa:
+        msa_provenance = {"mode": "auto"}
+    else:
+        msa_provenance = {"mode": "empty"}
+
+    ligands_config = _mapping(config.get("ligands"), "ligands")
+    ligands, ligand_provenance = _load_ligands(ligands_config, base_dir)
+
+    chunk_size = config.get("chunk_size", 1000)
+    if (
+        not isinstance(chunk_size, int)
+        or isinstance(chunk_size, bool)
+        or chunk_size < 1
+    ):
+        raise click.UsageError("chunk_size must be a positive integer.")
+
+    output_value = config.get("output_dir", f"{config_path.stem}_screen")
+    output_dir = _resolve_path(output_value, base_dir, "output_dir")
+    state_dir = output_dir / ".boltz-stfree"
+    inputs_dir = state_dir / "inputs"
+    runs_dir = output_dir / "runs"
+    manifest_path = state_dir / "screen_manifest.json"
+    auto_msa_path = state_dir / "msa" / "target.csv" if auto_msa else None
+    if auto_msa_path is not None:
+        msa_provenance["path"] = str(auto_msa_path)
+
+    raw_options = _mapping(config.get("options", {}), "options")
+    options: dict[str, Any] = {}
+    for raw_name, value in raw_options.items():
+        name = _normalize_option_name(raw_name)
+        if name in options:
+            raise click.UsageError(f"Duplicate normalized option: {name}")
+        options[name] = value
+    if auto_msa:
+        if options.get("use_msa_server") is False:
+            raise click.UsageError(
+                "target.msa is auto but options.use_msa_server is false."
+            )
+        options.setdefault("use_msa_server", True)
+    if (
+        len(sequence) > _MAX_SEQUENCE_PREFIX_TOKENS
+        and "affinity_crop_indices_dir" not in options
+    ):
+        raise click.UsageError(
+            "Targets longer than 200 residues require a validated external crop via "
+            "options.affinity_crop_indices_dir and "
+            "options.affinity_structure_free_crop_label."
+        )
+
+    records: list[dict[str, Any]] = []
+    expected_files: dict[Path, str] = {}
+    chunk_dirs: list[Path] = []
+    for index, ligand in enumerate(ligands, start=1):
+        chunk_index = (index - 1) // chunk_size
+        chunk_dir = inputs_dir / f"chunk_{chunk_index:05d}"
+        if not chunk_dirs or chunk_dirs[-1] != chunk_dir:
+            chunk_dirs.append(chunk_dir)
+        record_id = _safe_record_id(ligand.identifier, index)
+        protein: dict[str, object] = {"id": target_id, "sequence": sequence}
+        if msa_value == "empty":
+            protein["msa"] = "empty"
+        elif auto_msa_path is not None:
+            protein["msa"] = str(auto_msa_path)
+        elif isinstance(msa_value, str):
+            protein["msa"] = msa_value
+        ligand_entity = {"id": "B", ligand.kind: ligand.value}
+        payload = {
+            "version": 1,
+            "sequences": [
+                {"protein": protein},
+                {"ligand": ligand_entity},
+            ],
+            "properties": [{"affinity": {"binder": "B"}}],
+        }
+        rendered = yaml.safe_dump(payload, sort_keys=False)
+        input_path = chunk_dir / f"{record_id}.yaml"
+        expected_files[input_path] = rendered
+        records.append(
+            {
+                "record_id": record_id,
+                "ligand_id": ligand.identifier,
+                "ligand_kind": ligand.kind,
+                "ligand_value": ligand.value,
+                "chunk": chunk_dir.name,
+            }
+        )
+
+    manifest = {
+        "schema_version": 1,
+        "config_path": str(config_path),
+        "config_sha256": hashlib.sha256(
+            json.dumps(
+                config,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest(),
+        "target": {
+            "id": target_id,
+            "sequence_sha256": hashlib.sha256(sequence.encode()).hexdigest(),
+            "length": len(sequence),
+            "msa": msa_provenance,
+        },
+        "ligand_source": ligand_provenance,
+        "chunk_size": chunk_size,
+        "output_dir": str(output_dir),
+        "records": records,
+    }
+    if manifest_path.is_file():
+        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if existing != manifest:
+            raise click.UsageError(
+                f"Existing screen state does not match this config: {manifest_path}"
+            )
+
+    expected_paths = set(expected_files)
+    if inputs_dir.is_dir():
+        found_paths = set(inputs_dir.glob("chunk_*/*.yaml"))
+        unexpected = found_paths - expected_paths
+        if unexpected:
+            raise click.UsageError(
+                f"Generated input directory contains unexpected files: {inputs_dir}"
+            )
+    for path, rendered in expected_files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file() and path.read_text(encoding="utf-8") != rendered:
+            raise click.UsageError(f"Generated input differs from config: {path}")
+        if not path.is_file():
+            path.write_text(rendered, encoding="utf-8")
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    return PreparedScreen(
+        config_path=config_path,
+        output_dir=output_dir,
+        runs_dir=runs_dir,
+        manifest_path=manifest_path,
+        chunk_dirs=tuple(chunk_dirs),
+        options=options,
+        target_sequence=sequence,
+        auto_msa_path=auto_msa_path,
+    )
+
+
+def ensure_auto_msa(
+    prepared: PreparedScreen,
+    *,
+    predict_options: dict[str, Any],
+    compute_msa_fn: Any,
+) -> None:
+    """Generate one shared automatic MSA and verify it on later resumes."""
+    msa_path = prepared.auto_msa_path
+    if msa_path is None:
+        return
+    metadata_path = msa_path.with_suffix(".metadata.json")
+    sequence_sha256 = hashlib.sha256(prepared.target_sequence.encode()).hexdigest()
+    server_url = predict_options.get("msa_server_url", "https://api.colabfold.com")
+    pairing_strategy = predict_options.get("msa_pairing_strategy", "greedy")
+
+    def write_metadata(*, recovered: bool = False) -> None:
+        metadata = {
+            "schema_version": 1,
+            "path": str(msa_path),
+            "sha256": _sha256(msa_path),
+            "sequence_sha256": sequence_sha256,
+            "server_url": server_url,
+            "pairing_strategy": pairing_strategy,
+            "recovered_without_prior_metadata": recovered,
+        }
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    if msa_path.is_file() and metadata_path.is_file():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("sequence_sha256") != sequence_sha256:
+            raise click.ClickException(
+                f"Shared MSA sequence does not match the screen: {msa_path}"
+            )
+        if metadata.get("sha256") != _sha256(msa_path):
+            raise click.ClickException(
+                f"Shared MSA content changed after generation: {msa_path}"
+            )
+        return
+    if msa_path.is_file():
+        with msa_path.open(encoding="utf-8") as handle:
+            first_line = handle.readline().strip()
+        if first_line != "key,sequence":
+            raise click.ClickException(f"Shared MSA is incomplete: {msa_path}")
+        write_metadata(recovered=True)
+        return
+    if metadata_path.exists() and not msa_path.is_file():
+        raise click.ClickException(
+            f"Shared MSA is missing but provenance remains: {msa_path}"
+        )
+
+    msa_path.parent.mkdir(parents=True, exist_ok=True)
+    username = predict_options.get("msa_server_username") or os.environ.get(
+        "BOLTZ_MSA_USERNAME"
+    )
+    password = predict_options.get("msa_server_password") or os.environ.get(
+        "BOLTZ_MSA_PASSWORD"
+    )
+    api_key_value = predict_options.get("api_key_value") or os.environ.get(
+        "MSA_API_KEY_VALUE"
+    )
+    compute_msa_fn(
+        data={"target": prepared.target_sequence},
+        target_id="screen",
+        msa_dir=msa_path.parent,
+        msa_server_url=server_url,
+        msa_pairing_strategy=pairing_strategy,
+        msa_server_username=username,
+        msa_server_password=password,
+        api_key_header=predict_options.get("api_key_header"),
+        api_key_value=api_key_value,
+    )
+    if not msa_path.is_file():
+        raise click.ClickException(
+            f"MSA generation did not create the expected file: {msa_path}"
+        )
+    write_metadata()
+
+
+def build_predict_options(
+    raw_options: dict[str, Any],
+    *,
+    predict_command: click.Command,
+    config_dir: Path,
+    parent_context: click.Context,
+) -> dict[str, Any]:
+    """Validate YAML options against the existing predict command."""
+    params = {
+        param.name: param
+        for param in predict_command.params
+        if isinstance(param, click.Option) and param.name is not None
+    }
+    processed: dict[str, Any] = {}
+    option_context = click.Context(predict_command, parent=parent_context)
+    for name, value in raw_options.items():
+        if name in _MANAGED_PREDICT_OPTIONS:
+            managed = _MANAGED_PREDICT_OPTIONS[name]
+            if name == "affinity_distogram_modes":
+                comparable = (value,) if isinstance(value, str) else tuple(value)
+            else:
+                comparable = value
+            if comparable != managed:
+                raise click.UsageError(
+                    f"options.{name} is managed by screen and must be {managed!r}."
+                )
+            continue
+        param = params.get(name)
+        if param is None or name in {"data", "out_dir"}:
+            raise click.UsageError(f"Unknown or reserved predict option: {name}")
+        candidate = value
+        if isinstance(param.type, click.Path) and candidate is not None:
+            candidate = str(_resolve_path(candidate, config_dir, f"options.{name}"))
+        if name == "devices" and isinstance(candidate, int):
+            candidate = str(candidate)
+        if param.multiple and isinstance(candidate, list):
+            candidate = tuple(candidate)
+        try:
+            processed[name] = param.process_value(option_context, candidate)
+        except (click.BadParameter, TypeError, ValueError) as error:
+            raise click.UsageError(f"Invalid options.{name}: {error}") from error
+    processed.update(_MANAGED_PREDICT_OPTIONS)
+    processed.setdefault("affinity_recycling_steps", 0)
+    crop_dir = processed.get("affinity_crop_indices_dir")
+    crop_label = processed.get("affinity_structure_free_crop_label")
+    if (crop_dir is None) != (crop_label is None):
+        raise click.UsageError(
+            "options.affinity_crop_indices_dir and "
+            "options.affinity_structure_free_crop_label must be set together."
+        )
+    if crop_dir is not None and not Path(crop_dir).is_dir():
+        raise click.UsageError(
+            f"options.affinity_crop_indices_dir is not a directory: {crop_dir}"
+        )
+    if crop_label is not None and not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_.-]*",
+        str(crop_label),
+    ):
+        raise click.UsageError(
+            "options.affinity_structure_free_crop_label must be filename-safe."
+        )
+    if processed.get("write_embeddings") is True:
+        raise click.UsageError(
+            "options.write_embeddings is incompatible with compact screen output."
+        )
+    return processed
+
+
+def collect_screen_scores(prepared: PreparedScreen) -> Path:
+    """Aggregate compact score JSON files into one CSV and summary JSON."""
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    rows: list[dict[str, object]] = []
+    missing: list[str] = []
+    for record in manifest["records"]:
+        prediction_dir = (
+            prepared.runs_dir
+            / f"boltz_results_{record['chunk']}"
+            / "predictions"
+            / record["record_id"]
+        )
+        matches = sorted(
+            prediction_dir.glob("affinity_*__distogram_zero_distogram_features*.json")
+        )
+        if not matches:
+            missing.append(record["record_id"])
+            continue
+        if len(matches) != 1:
+            raise click.ClickException(
+                f"Multiple structure-free scores found for {record['record_id']}."
+            )
+        score = json.loads(matches[0].read_text(encoding="utf-8"))
+        rows.append(
+            {
+                **record,
+                "affinity_pred_value": score["affinity_pred_value"],
+                "affinity_probability_binary": score["affinity_probability_binary"],
+            }
+        )
+
+    scores_path = prepared.output_dir / "scores.csv"
+    columns = [
+        "record_id",
+        "ligand_id",
+        "ligand_kind",
+        "ligand_value",
+        "chunk",
+        "affinity_pred_value",
+        "affinity_probability_binary",
+    ]
+    with scores_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+    summary = {
+        "schema_version": 1,
+        "expected": len(manifest["records"]),
+        "completed": len(rows),
+        "missing": missing,
+        "scores": str(scores_path),
+    }
+    (prepared.output_dir / "screen_summary.json").write_text(
+        json.dumps(summary, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    if missing:
+        raise click.ClickException(
+            f"Screen is incomplete: {len(rows)}/{len(manifest['records'])} scores."
+        )
+    return scores_path

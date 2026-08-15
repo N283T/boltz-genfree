@@ -1,0 +1,19 @@
+version: 1
+
+target:
+  sequence: QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG
+  msa: auto
+
+ligands:
+  csv: ./screen_ligands.csv
+  id_column: id
+  smiles_column: smiles
+
+output_dir: ../screen-output
+chunk_size: 1000
+
+options:
+  seed: 20260718
+  num_workers: 2
+  affinity_recycling_steps: 0
+  affinity_batch_size: 1
