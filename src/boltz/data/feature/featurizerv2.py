@@ -1274,7 +1274,8 @@ def process_atom_features(
     atom_to_token = []
     token_to_rep_atom = []  # index on cropped atom table
     r_set_to_rep_atom = []
-    disto_coords_ensemble = []
+    if compute_distogram_target:
+        disto_coords_ensemble = []
     backbone_feat_index = []
     token_to_center_atom = []
 
@@ -1515,29 +1516,20 @@ def process_atom_features(
 
     if compute_distogram_target:
         disto_coords_ensemble = np.array(disto_coords_ensemble)
-    else:
-        # Keep the inference feature schema stable without reading token-level
-        # coordinates or constructing a coordinate-derived target distogram.
-        disto_coords_ensemble = np.zeros(
-            (len(data.tokens), len(e_offsets), 3),
-            dtype=np.float32,
+        if disto_use_ensemble:
+            # Use all available structures to create distogram
+            idx_list = range(disto_coords_ensemble.shape[1])
+        else:
+            # Only use sampled structures to create the distogram
+            idx_list = ensemble_features["ensemble_ref_idxs"]
+
+        token_count = len(data.tokens)
+        disto_target = torch.zeros(
+            token_count,
+            token_count,
+            len(idx_list),
+            num_bins,
         )
-
-    # Compute ensemble distogram
-    L = len(data.tokens)
-
-    if disto_use_ensemble:
-        # Use all available structures to create distogram
-        idx_list = range(disto_coords_ensemble.shape[1])
-    else:
-        # Only use a sampled structures to create distogram
-        idx_list = ensemble_features["ensemble_ref_idxs"]
-
-    # Create distogram
-    disto_target = torch.zeros(L, L, len(idx_list), num_bins)  # TODO1
-
-    # disto_target = torch.zeros(L, L, num_bins)
-    if compute_distogram_target:
         for i, e_idx in enumerate(idx_list):
             t_center = torch.Tensor(disto_coords_ensemble[:, e_idx, :])
             t_dists = torch.cdist(t_center, t_center)
@@ -1548,8 +1540,6 @@ def process_atom_features(
                 num_classes=num_bins,
             )
 
-    # Normalize distogram
-    # disto_target = disto_target / disto_target.sum(-1)[..., None]  # remove TODO1
     atom_data = np.concatenate(atom_data)
     atom_name = np.concatenate(atom_name)
     atom_element = np.concatenate(atom_element)
@@ -1560,10 +1550,11 @@ def process_atom_features(
     ref_space_uid = np.array(ref_space_uid)
 
     # Compute features
-    disto_coords_ensemble = from_numpy(disto_coords_ensemble)
-    disto_coords_ensemble = disto_coords_ensemble[
-        :, ensemble_features["ensemble_ref_idxs"]
-    ].permute(1, 0, 2)
+    if compute_distogram_target:
+        disto_coords_ensemble = from_numpy(disto_coords_ensemble)
+        disto_coords_ensemble = disto_coords_ensemble[
+            :, ensemble_features["ensemble_ref_idxs"]
+        ].permute(1, 0, 2)
     backbone_feat_index = from_numpy(np.asarray(backbone_feat_index)).long()
     ref_atom_name_chars = from_numpy(atom_name).long()
     ref_element = from_numpy(atom_element).long()
@@ -1670,8 +1661,17 @@ def process_atom_features(
             token_to_rep_atom = pad_dim(token_to_rep_atom, 0, pad_len)
             r_set_to_rep_atom = pad_dim(r_set_to_rep_atom, 0, pad_len)
             token_to_center_atom = pad_dim(token_to_center_atom, 0, pad_len)
-            disto_target = pad_dim(pad_dim(disto_target, 0, pad_len), 1, pad_len)
-            disto_coords_ensemble = pad_dim(disto_coords_ensemble, 1, pad_len)
+            if compute_distogram_target:
+                disto_target = pad_dim(
+                    pad_dim(disto_target, 0, pad_len),
+                    1,
+                    pad_len,
+                )
+                disto_coords_ensemble = pad_dim(
+                    disto_coords_ensemble,
+                    1,
+                    pad_len,
+                )
 
             if compute_frames:
                 frames = pad_dim(frames, 1, pad_len)
@@ -1692,11 +1692,13 @@ def process_atom_features(
         "token_to_rep_atom": token_to_rep_atom,
         "r_set_to_rep_atom": r_set_to_rep_atom,
         "token_to_center_atom": token_to_center_atom,
-        "disto_target": disto_target,
-        "disto_coords_ensemble": disto_coords_ensemble,
         "bfactor": bfactor,
         "plddt": plddt,
     }
+
+    if compute_distogram_target:
+        atom_features["disto_target"] = disto_target
+        atom_features["disto_coords_ensemble"] = disto_coords_ensemble
 
     if compute_frames:
         atom_features["frames_idx"] = frames

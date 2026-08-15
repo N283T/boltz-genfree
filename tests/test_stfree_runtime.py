@@ -82,6 +82,7 @@ def test_model_route_never_runs_structure_sampling(tmp_path: Path) -> None:
     assert kwargs["affinity_coordinate_free"] is True
     assert kwargs["skip_run_structure"] is True
     assert kwargs["skip_confidence_forward"] is True
+    assert kwargs["skip_pdistogram_forward"] is True
 
 
 def test_download_stfree_omits_structure_checkpoint(

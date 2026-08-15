@@ -351,7 +351,7 @@ def stfree_model_kwargs(options: StFreeRuntimeOptions) -> dict[str, object]:
         "use_kernels": not options.no_kernels,
         "use_flash_attn": options.flash_attn,
         "skip_confidence_forward": True,
-        "skip_pdistogram_forward": False,
+        "skip_pdistogram_forward": True,
         "skip_msa_forward": False,
         "capture_affinity_representations": False,
         "run_trunk_and_structure": True,

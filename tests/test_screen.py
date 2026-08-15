@@ -365,6 +365,15 @@ def test_reference_crop_accepts_long_target_and_records_provenance(
     ]
 
 
+@pytest.mark.parametrize("seed", [0, 1, 5, 50, 94, 98, 99])
+def test_reference_crop_blocks_are_exactly_ten_contiguous_residues(seed: int) -> None:
+    block = reference_crop_module._block_around(seed, 100)
+
+    assert len(block) == 10
+    assert seed in block
+    assert block == tuple(range(block[0], block[0] + 10))
+
+
 def test_reference_crop_library_fixed_uses_one_receptor_selection(
     tmp_path: Path,
 ) -> None:
@@ -395,6 +404,37 @@ def test_reference_crop_library_fixed_uses_one_receptor_selection(
         == crop_documents[1]["receptor_token_idx"]
     )
     assert {item["ligand_tokens_reserved"] for item in crop_documents} == {60}
+
+
+def test_reference_crop_reuses_selection_for_equal_ligand_sizes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = _write_reference(tmp_path, 230)
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO", "CCN", "CCCC"]},
+        sequence="A" * 230,
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_protein": "A",
+        "reference_ligand": "L",
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    calls: list[int] = []
+    original = reference_crop_module.select_receptor_tokens
+
+    def tracked_selection(*args, ligand_tokens: int, **kwargs):
+        calls.append(ligand_tokens)
+        return original(*args, ligand_tokens=ligand_tokens, **kwargs)
+
+    monkeypatch.setattr("boltz.screen.select_receptor_tokens", tracked_selection)
+
+    prepare_screen(config_path)
+
+    assert calls == [3, 4]
 
 
 def test_reference_ligand_may_share_protein_author_chain(tmp_path: Path) -> None:
@@ -573,6 +613,7 @@ def test_screen_options_are_yaml_driven_and_limited(tmp_path: Path) -> None:
     assert model_options["affinity_coordinate_free"] is True
     assert model_options["affinity_distogram_modes"] == ["zero_distogram_features"]
     assert model_options["skip_run_structure"] is True
+    assert model_options["skip_pdistogram_forward"] is True
 
 
 def test_screen_options_allow_seeded_etkdg(tmp_path: Path) -> None:
