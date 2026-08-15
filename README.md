@@ -67,8 +67,8 @@ with the release tag once assigned):
 
 ```bash
 git clone --branch <release-tag> \
-  https://github.com/N283T/boltz-distogramless-boltz.git
-cd boltz-distogramless-boltz
+  https://github.com/N283T/boltz2-affinity-interventions-boltz.git
+cd boltz2-affinity-interventions-boltz
 uv venv
 uv pip install ".[cuda]"
 ```
