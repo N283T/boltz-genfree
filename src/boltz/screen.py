@@ -18,7 +18,11 @@ from rdkit import Chem
 
 from boltz.data.mol import load_molecules
 from boltz.data.parse.schema import standardize
-from boltz.reference_crop import load_reference_crop, select_receptor_tokens
+from boltz.reference_crop import (
+    ReferenceLigandSelector,
+    load_reference_crop,
+    select_receptor_tokens,
+)
 from boltz.stfree_runtime import StFreeRuntimeOptions
 
 _TOP_LEVEL_KEYS = {
@@ -34,10 +38,9 @@ _CROP_KEYS = {
     "reference",
     "reference_protein",
     "reference_ligand",
-    "protein_chain",
-    "ligand_chain",
     "budget",
 }
+_REFERENCE_LIGAND_KEYS = {"chain", "residue", "ccd"}
 _LIGAND_SOURCE_KEYS = {"smiles", "csv", "sdf", "ccd"}
 _MAX_SEQUENCE_PREFIX_TOKENS = 200
 _MAX_AFFINITY_TOKENS = 256
@@ -529,39 +532,53 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             raise click.UsageError(
                 "target.crop.budget must be per_ligand or library_fixed."
             )
-        if {
-            "reference_protein",
-            "protein_chain",
-        }.issubset(crop_config) or {
-            "reference_ligand",
-            "ligand_chain",
-        }.issubset(crop_config):
-            raise click.UsageError(
-                "Use reference_protein/reference_ligand or the *_chain aliases, "
-                "not both."
-            )
-        protein_chain = crop_config.get(
-            "reference_protein",
-            crop_config.get("protein_chain"),
-        )
-        ligand_chain = crop_config.get(
-            "reference_ligand",
-            crop_config.get("ligand_chain"),
-        )
-        for name, value in (
-            ("reference_protein", protein_chain),
-            ("reference_ligand", ligand_chain),
+        protein_chain = crop_config.get("reference_protein")
+        if protein_chain is not None and (
+            not isinstance(protein_chain, str) or not protein_chain
         ):
-            if value is not None and (not isinstance(value, str) or not value):
-                raise click.UsageError(
-                    f"target.crop.{name} must be a non-empty string."
-                )
+            raise click.UsageError(
+                "target.crop.reference_protein must be a non-empty string."
+            )
+        reference_ligand = _mapping(
+            crop_config.get("reference_ligand"),
+            "target.crop.reference_ligand",
+        )
+        unknown_ligand = set(reference_ligand) - _REFERENCE_LIGAND_KEYS
+        if unknown_ligand:
+            names = ", ".join(sorted(unknown_ligand))
+            raise click.UsageError(
+                f"Unknown target.crop.reference_ligand settings: {names}"
+            )
+        missing_ligand = _REFERENCE_LIGAND_KEYS - set(reference_ligand)
+        if missing_ligand:
+            names = ", ".join(sorted(missing_ligand))
+            raise click.UsageError(f"target.crop.reference_ligand is missing: {names}")
+        ligand_chain = reference_ligand["chain"]
+        ligand_residue = reference_ligand["residue"]
+        ligand_ccd = reference_ligand["ccd"]
+        if not isinstance(ligand_chain, str) or not ligand_chain:
+            raise click.UsageError(
+                "target.crop.reference_ligand.chain must be a non-empty string."
+            )
+        if not isinstance(ligand_residue, int) or isinstance(ligand_residue, bool):
+            raise click.UsageError(
+                "target.crop.reference_ligand.residue must be an integer."
+            )
+        if not isinstance(ligand_ccd, str) or not ligand_ccd:
+            raise click.UsageError(
+                "target.crop.reference_ligand.ccd must be a non-empty string."
+            )
+        ligand_selector = ReferenceLigandSelector(
+            chain=ligand_chain,
+            residue=ligand_residue,
+            ccd=ligand_ccd.upper(),
+        )
         try:
             crop_reference = load_reference_crop(
                 crop_reference_path,
                 sequence,
                 protein_chain=protein_chain,
-                ligand_chain=ligand_chain,
+                ligand=ligand_selector,
             )
         except ValueError as error:
             raise click.UsageError(str(error)) from error
@@ -666,7 +683,11 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
                 "reference": str(crop_reference_path),
                 "reference_sha256": crop_reference_sha256,
                 "reference_protein": crop_reference.protein_chain,
-                "reference_ligand": crop_reference.ligand_chain,
+                "reference_ligand": {
+                    "chain": crop_reference.ligand_chain,
+                    "residue": crop_reference.ligand_residue,
+                    "ccd": crop_reference.ligand_ccd,
+                },
                 "ligand_tokens_reserved": (
                     max(ligand_token_counts)
                     if crop_policy == "library_fixed"
@@ -721,7 +742,11 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             "reference": str(crop_reference_path),
             "reference_sha256": crop_reference_sha256,
             "protein_chain": crop_reference.protein_chain,
-            "ligand_chain": crop_reference.ligand_chain,
+            "ligand": {
+                "chain": crop_reference.ligand_chain,
+                "residue": crop_reference.ligand_residue,
+                "ccd": crop_reference.ligand_ccd,
+            },
             "budget": crop_policy,
             "neighborhood_size": 10,
         }

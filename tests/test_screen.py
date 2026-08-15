@@ -14,6 +14,7 @@ from click.testing import CliRunner
 from rdkit import Chem
 
 import boltz.stfree_runtime as stfree_runtime
+from boltz import reference_crop as reference_crop_module
 from boltz.main import cli
 from boltz.screen import (
     build_screen_options,
@@ -65,6 +66,10 @@ def _write_reference(
     length: int,
     ligand_position: int = 5,
     ligand_chain: str = "L",
+    ligand_residue: int = 1,
+    ligand_ccd: str = "LIG",
+    ligand_insertion_code: str = "",
+    ligand_altloc: str = "",
 ) -> Path:
     lines = []
     serial = 1
@@ -77,7 +82,8 @@ def _write_reference(
         serial += 1
     lines.append("TER")
     lines.append(
-        f"HETATM{serial:5d}  C1  LIG {ligand_chain}   1    "
+        f"HETATM{serial:5d} {'C1':^4}{ligand_altloc:1}{ligand_ccd:>3} "
+        f"{ligand_chain:1}{ligand_residue:4d}{ligand_insertion_code:1}   "
         f"{float(ligand_position):8.3f}{1.0:8.3f}{0.0:8.3f}  1.00 20.00           C"
     )
     lines.append("END")
@@ -312,7 +318,7 @@ def test_reference_crop_accepts_long_target_and_records_provenance(
     config["target"]["crop"] = {
         "reference": reference.name,
         "reference_protein": "A",
-        "reference_ligand": "L",
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
@@ -372,7 +378,7 @@ def test_reference_crop_library_fixed_uses_one_receptor_selection(
     config["target"]["crop"] = {
         "reference": reference.name,
         "reference_protein": "A",
-        "reference_ligand": "L",
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
         "budget": "library_fixed",
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
@@ -402,7 +408,7 @@ def test_reference_ligand_may_share_protein_author_chain(tmp_path: Path) -> None
     config["target"]["crop"] = {
         "reference": reference.name,
         "reference_protein": "A",
-        "reference_ligand": "A",
+        "reference_ligand": {"chain": "A", "residue": 1, "ccd": "LIG"},
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
@@ -410,7 +416,91 @@ def test_reference_ligand_may_share_protein_author_chain(tmp_path: Path) -> None
     manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
 
     assert manifest["target"]["crop"]["protein_chain"] == "A"
-    assert manifest["target"]["crop"]["ligand_chain"] == "A"
+    assert manifest["target"]["crop"]["ligand"] == {
+        "chain": "A",
+        "residue": 1,
+        "ccd": "LIG",
+    }
+
+
+def test_reference_ligand_selector_requires_chain_residue_and_ccd(
+    tmp_path: Path,
+) -> None:
+    reference = _write_reference(tmp_path, 30)
+    config_path = _write_config(tmp_path, {"smiles": ["CCO"]}, sequence="A" * 30)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_ligand": {"chain": "L", "residue": 1},
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(click.UsageError, match="missing: ccd"):
+        prepare_screen(config_path)
+
+
+def test_reference_ligand_selector_rejects_zero_and_multiple_matches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = _write_reference(tmp_path, 30)
+    config_path = _write_config(tmp_path, {"smiles": ["CCO"]}, sequence="A" * 30)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    original_candidates = reference_crop_module._ligand_candidates
+
+    def duplicate_candidates(model: object) -> list[tuple[str, object]]:
+        candidates = original_candidates(model)  # type: ignore[arg-type]
+        return [*candidates, *candidates]  # type: ignore[return-value]
+
+    monkeypatch.setattr(
+        reference_crop_module,
+        "_ligand_candidates",
+        duplicate_candidates,
+    )
+
+    with pytest.raises(click.UsageError, match="matched multiple residues"):
+        prepare_screen(config_path)
+
+    monkeypatch.setattr(
+        reference_crop_module,
+        "_ligand_candidates",
+        original_candidates,
+    )
+    config["target"]["crop"]["reference_ligand"]["residue"] = 999
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(click.UsageError, match="matched no residue"):
+        prepare_screen(config_path)
+
+
+@pytest.mark.parametrize(
+    ("reference_kwargs", "message"),
+    [
+        ({"ligand_insertion_code": "A"}, "insertion code"),
+        ({"ligand_altloc": "A"}, "alternate locations"),
+    ],
+)
+def test_reference_ligand_selector_rejects_unprocessed_identifiers(
+    tmp_path: Path,
+    reference_kwargs: dict[str, object],
+    message: str,
+) -> None:
+    reference = _write_reference(tmp_path, 30, **reference_kwargs)
+    config_path = _write_config(tmp_path, {"smiles": ["CCO"]}, sequence="A" * 30)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(click.UsageError, match=message):
+        prepare_screen(config_path)
 
 
 def test_full_screen_rejects_ligand_above_128_tokens(tmp_path: Path) -> None:

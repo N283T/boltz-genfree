@@ -22,8 +22,19 @@ class ReferenceCrop:
 
     protein_chain: str
     ligand_chain: str
+    ligand_residue: int
+    ligand_ccd: str
     seed_order: tuple[int, ...]
     blocks: tuple[tuple[int, ...], ...]
+
+
+@dataclass(frozen=True)
+class ReferenceLigandSelector:
+    """A deliberately strict single-residue reference ligand selector."""
+
+    chain: str
+    residue: int
+    ccd: str
 
 
 def protein_atom_counts(sequence: str) -> tuple[int, ...]:
@@ -102,34 +113,67 @@ def _choose_protein_chain(
     return exact[0]
 
 
-def _choose_ligand_residues(
+def _ligand_candidates(
     model: gemmi.Model,
-    requested: str | None,
-) -> tuple[str, list[gemmi.Residue]]:
-    candidates: list[tuple[str, list[gemmi.Residue]]] = []
+) -> list[tuple[str, gemmi.Residue]]:
+    candidates: list[tuple[str, gemmi.Residue]] = []
     for chain in model:
-        residues = [
-            residue
-            for residue in chain
-            if not gemmi.find_tabulated_residue(residue.name).is_water()
-            and not gemmi.find_tabulated_residue(residue.name).is_amino_acid()
-            and not gemmi.find_tabulated_residue(residue.name).is_nucleic_acid()
-        ]
-        if _heavy_atom_coords(residues).size:
-            candidates.append((chain.name, residues))
-    if requested is not None:
-        candidates = [item for item in candidates if item[0] == requested]
-        if not candidates:
-            msg = f"Reference ligand chain {requested!r} was not found."
-            raise ValueError(msg)
-    if len(candidates) != 1:
-        names = ", ".join(name for name, _ in candidates) or "none"
+        for residue in chain:
+            info = gemmi.find_tabulated_residue(residue.name)
+            if (
+                not info.is_water()
+                and not info.is_amino_acid()
+                and not info.is_nucleic_acid()
+                and _heavy_atom_coords([residue]).size
+            ):
+                candidates.append((chain.name, residue))
+    return candidates
+
+
+def _choose_ligand_residue(
+    model: gemmi.Model,
+    selector: ReferenceLigandSelector,
+) -> gemmi.Residue:
+    candidates = [
+        residue
+        for chain_name, residue in _ligand_candidates(model)
+        if chain_name == selector.chain
+        and residue.seqid.num == selector.residue
+        and residue.name.upper() == selector.ccd
+    ]
+    if not candidates:
         msg = (
-            "Reference must contain exactly one non-water ligand chain after "
-            f"selection; candidates: {names}. Set target.crop.reference_ligand."
+            "Reference ligand selector matched no residue: "
+            f"chain={selector.chain!r}, residue={selector.residue}, "
+            f"ccd={selector.ccd!r}."
         )
         raise ValueError(msg)
-    return candidates[0]
+    if any(residue.seqid.icode.strip() for residue in candidates):
+        msg = (
+            "Reference ligand uses an insertion code, which is unsupported. "
+            "Preprocess the reference to a unique residue without an insertion code."
+        )
+        raise ValueError(msg)
+    if len(candidates) != 1:
+        msg = (
+            "Reference ligand selector matched multiple residues; preprocess the "
+            "reference so chain, residue, and CCD identify exactly one residue."
+        )
+        raise ValueError(msg)
+    selected = candidates[0]
+    if selected.entity_type == gemmi.EntityType.Branched:
+        msg = (
+            "Multi-residue or branched reference ligands are unsupported; provide "
+            "a preprocessed single-residue ligand."
+        )
+        raise ValueError(msg)
+    if any(atom.has_altloc() for atom in selected):
+        msg = (
+            "Reference ligand contains alternate locations, which are unsupported. "
+            "Preprocess the reference to one ligand conformer."
+        )
+        raise ValueError(msg)
+    return selected
 
 
 def _block_around(seed: int, sequence_length: int) -> tuple[int, ...]:
@@ -152,7 +196,7 @@ def load_reference_crop(
     sequence: str,
     *,
     protein_chain: str | None = None,
-    ligand_chain: str | None = None,
+    ligand: ReferenceLigandSelector,
 ) -> ReferenceCrop:
     """Rank receptor seeds by distance to a ligand and form sequence blocks."""
     try:
@@ -169,11 +213,11 @@ def load_reference_crop(
         sequence,
         protein_chain,
     )
-    selected_ligand, ligand_residues = _choose_ligand_residues(
+    selected_ligand = _choose_ligand_residue(
         model,
-        ligand_chain,
+        ligand,
     )
-    ligand_coords = _heavy_atom_coords(ligand_residues)
+    ligand_coords = _heavy_atom_coords([selected_ligand])
     centers = [_residue_center(residue) for residue in residues]
     resolved = [index for index, center in enumerate(centers) if center is not None]
     if not resolved:
@@ -193,7 +237,9 @@ def load_reference_crop(
     blocks = tuple(_block_around(seed, len(sequence)) for seed in seed_order)
     return ReferenceCrop(
         protein_chain=selected_protein.name,
-        ligand_chain=selected_ligand,
+        ligand_chain=ligand.chain,
+        ligand_residue=ligand.residue,
+        ligand_ccd=ligand.ccd,
         seed_order=seed_order,
         blocks=blocks,
     )
