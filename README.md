@@ -1,9 +1,14 @@
-# boltz-community
+# boltz2-affinity-interventions-boltz
 
-Community-maintained fork of [Boltz](https://github.com/jwohlwend/boltz) with bug fixes, broader compatibility, and CI.
+Structure-free affinity screening for Boltz-2, and the research interventions
+behind the manuscript that measures it.
 
-This repository also contains the structure-free affinity-screening route and
-the research interventions described below.
+This is a fork of
+[boltz-community](https://github.com/Novel-Therapeutics/boltz-community),
+itself a community-maintained fork of
+[Boltz](https://github.com/jwohlwend/boltz) with bug fixes, broader
+compatibility, and CI. Anything below that is not marked as added here comes
+from those upstreams.
 
 ## Repository provenance and license
 
