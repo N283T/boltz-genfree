@@ -14,6 +14,7 @@ from click.testing import CliRunner
 from rdkit import Chem
 
 import boltz.stfree_runtime as stfree_runtime
+from boltz import reference_crop as reference_crop_module
 from boltz.main import cli
 from boltz.screen import (
     build_screen_options,
@@ -58,6 +59,37 @@ def _write_ccd_cache(tmp_path: Path, molecules: dict[str, str]) -> Path:
         with (mol_dir / f"{code}.pkl").open("wb") as handle:
             pickle.dump(molecule, handle)
     return cache
+
+
+def _write_reference(
+    tmp_path: Path,
+    length: int,
+    ligand_position: int = 5,
+    ligand_chain: str = "L",
+    ligand_residue: int = 1,
+    ligand_ccd: str = "LIG",
+    ligand_insertion_code: str = "",
+    ligand_altloc: str = "",
+) -> Path:
+    lines = []
+    serial = 1
+    for residue_index in range(1, length + 1):
+        x = float(residue_index)
+        lines.append(
+            f"ATOM  {serial:5d}  CA  ALA A{residue_index:4d}    "
+            f"{x:8.3f}{0.0:8.3f}{0.0:8.3f}  1.00 20.00           C"
+        )
+        serial += 1
+    lines.append("TER")
+    lines.append(
+        f"HETATM{serial:5d} {'C1':^4}{ligand_altloc:1}{ligand_ccd:>3} "
+        f"{ligand_chain:1}{ligand_residue:4d}{ligand_insertion_code:1}   "
+        f"{float(ligand_position):8.3f}{1.0:8.3f}{0.0:8.3f}  1.00 20.00           C"
+    )
+    lines.append("END")
+    path = tmp_path / "reference.pdb"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
 
 
 def test_prepare_inline_smiles_chunks_and_is_idempotent(tmp_path: Path) -> None:
@@ -273,6 +305,204 @@ def test_full_screen_rejects_target_above_200_tokens(tmp_path: Path) -> None:
         prepare_screen(config_path)
 
 
+def test_reference_crop_accepts_long_target_and_records_provenance(
+    tmp_path: Path,
+) -> None:
+    reference = _write_reference(tmp_path, 230)
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO", "C" * 60]},
+        sequence="A" * 230,
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_protein": "A",
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    crops = [record["crop"] for record in manifest["records"]]
+
+    assert prepared.receptor_crop_indices_dir is not None
+    assert manifest["target"]["crop"]["budget"] == "per_ligand"
+    assert manifest["target"]["crop"]["reference_sha256"]
+    assert crops[0]["receptor_tokens"] > crops[1]["receptor_tokens"]
+    crop_document = json.loads(Path(crops[0]["path"]).read_text(encoding="utf-8"))
+    assert crop_document["selection"] == "reference_contiguous_blocks"
+    assert crop_document["ligand_tokens_reserved"] == 3
+    assert (
+        crop_document["reference_sha256"]
+        == manifest["target"]["crop"]["reference_sha256"]
+    )
+    for record in manifest["records"]:
+        prediction_dir = (
+            prepared.runs_dir
+            / f"boltz_results_{record['chunk']}"
+            / "predictions"
+            / record["record_id"]
+        )
+        prediction_dir.mkdir(parents=True, exist_ok=True)
+        score_path = (
+            prediction_dir / "affinity_B__distogram_zero_distogram_features.json"
+        )
+        score_path.write_text(
+            json.dumps(
+                {
+                    "affinity_pred_value": 1.0,
+                    "affinity_probability_binary": 0.5,
+                }
+            ),
+            encoding="utf-8",
+        )
+    with collect_screen_scores(prepared).open(encoding="utf-8", newline="") as handle:
+        score_rows = list(csv.DictReader(handle))
+    assert {row["crop_budget"] for row in score_rows} == {"per_ligand"}
+    assert [int(row["receptor_tokens"]) for row in score_rows] == [
+        crop["receptor_tokens"] for crop in crops
+    ]
+
+
+def test_reference_crop_library_fixed_uses_one_receptor_selection(
+    tmp_path: Path,
+) -> None:
+    reference = _write_reference(tmp_path, 230)
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO", "C" * 60]},
+        sequence="A" * 230,
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_protein": "A",
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
+        "budget": "library_fixed",
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    crop_documents = [
+        json.loads(Path(record["crop"]["path"]).read_text(encoding="utf-8"))
+        for record in manifest["records"]
+    ]
+
+    assert (
+        crop_documents[0]["receptor_token_idx"]
+        == crop_documents[1]["receptor_token_idx"]
+    )
+    assert {item["ligand_tokens_reserved"] for item in crop_documents} == {60}
+
+
+def test_reference_ligand_may_share_protein_author_chain(tmp_path: Path) -> None:
+    reference = _write_reference(tmp_path, 30, ligand_chain="A")
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        sequence="A" * 30,
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_protein": "A",
+        "reference_ligand": "A",
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["target"]["crop"]["protein_chain"] == "A"
+    assert manifest["target"]["crop"]["ligand"] == {
+        "chain": "A",
+        "residue": 1,
+        "ccd": "LIG",
+    }
+
+
+def test_reference_ligand_selector_requires_chain_residue_and_ccd(
+    tmp_path: Path,
+) -> None:
+    reference = _write_reference(tmp_path, 30)
+    config_path = _write_config(tmp_path, {"smiles": ["CCO"]}, sequence="A" * 30)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_ligand": {"chain": "L", "residue": 1},
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(click.UsageError, match="missing: ccd"):
+        prepare_screen(config_path)
+
+
+def test_reference_ligand_selector_rejects_zero_and_multiple_matches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reference = _write_reference(tmp_path, 30)
+    config_path = _write_config(tmp_path, {"smiles": ["CCO"]}, sequence="A" * 30)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_ligand": "L",
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    original_candidates = reference_crop_module._ligand_candidates
+
+    def duplicate_candidates(model: object) -> list[tuple[str, object]]:
+        candidates = original_candidates(model)  # type: ignore[arg-type]
+        return [*candidates, *candidates]  # type: ignore[return-value]
+
+    monkeypatch.setattr(
+        reference_crop_module,
+        "_ligand_candidates",
+        duplicate_candidates,
+    )
+
+    with pytest.raises(click.UsageError, match="chain matched multiple residues"):
+        prepare_screen(config_path)
+
+    monkeypatch.setattr(
+        reference_crop_module,
+        "_ligand_candidates",
+        original_candidates,
+    )
+    config["target"]["crop"]["reference_ligand"] = "Z"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(click.UsageError, match="matched no non-polymer residue"):
+        prepare_screen(config_path)
+
+
+@pytest.mark.parametrize(
+    ("reference_kwargs", "message"),
+    [
+        ({"ligand_insertion_code": "A"}, "insertion code"),
+        ({"ligand_altloc": "A"}, "alternate locations"),
+    ],
+)
+def test_reference_ligand_selector_rejects_unprocessed_identifiers(
+    tmp_path: Path,
+    reference_kwargs: dict[str, object],
+    message: str,
+) -> None:
+    reference = _write_reference(tmp_path, 30, **reference_kwargs)
+    config_path = _write_config(tmp_path, {"smiles": ["CCO"]}, sequence="A" * 30)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(click.UsageError, match=message):
+        prepare_screen(config_path)
+
+
 def test_full_screen_rejects_ligand_above_128_tokens(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,
@@ -478,8 +708,16 @@ def test_screen_cli_runs_chunks_with_stfree_runtime(
         data: Path,
         out_dir: Path,
         options: object,
+        receptor_crop_indices_dir: Path | None,
     ) -> None:
-        calls.append({"data": data, "out_dir": out_dir, "options": options})
+        calls.append(
+            {
+                "data": data,
+                "out_dir": out_dir,
+                "options": options,
+                "receptor_crop_indices_dir": receptor_crop_indices_dir,
+            }
+        )
         data_dir = data
         prediction_root = out_dir / f"boltz_results_{data_dir.stem}" / "predictions"
         for input_path in data_dir.glob("*.yaml"):

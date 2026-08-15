@@ -24,10 +24,11 @@ the compact JSON results into one `scores.csv`.
 Until the first tagged release, install from a pinned Git commit and expect the
 interface to evolve.
 
-The method requires a relevant receptor context. `screen` only accepts records
-whose complete receptor and ligand fit inside one affinity crop. A
-structure-free score is not evidence that Boltz generated or evaluated a
-physical ligand pose.
+The method requires a relevant receptor context. A short receptor can be used
+in full; a longer receptor can be selected from an experimental or otherwise
+supplied reference complex. The reference is used only to choose receptor
+sequence blocks. It does not provide a ligand pose or a structure-derived
+distogram to the model.
 
 ## Install
 
@@ -54,6 +55,11 @@ version: 1
 target:
   sequence: YOUR_PROTEIN_SEQUENCE
   msa: ./target.a3m  # or auto / empty
+  crop:              # optional when the complete receptor fits
+    reference: ./reference-complex.cif
+    reference_protein: A
+    reference_ligand: L
+    budget: per_ligand
 
 ligands:
   csv: ./library.csv
@@ -149,7 +155,8 @@ msa_server_url, msa_pairing_strategy and MSA authentication settings
 ```
 
 Every run uses Boltz-2, the affinity checkpoint, complete-input receptor
-selection, ETKDG ligand reference coordinates, zero distogram features, one
+selection or a reference-derived receptor crop, ETKDG ligand reference
+coordinates, zero distogram features, one
 record per affinity batch, one nominal diffusion sample, no structure
 sampling, and compact output. These route-defining values cannot be overridden.
 Affinity recycling defaults to 0 but remains configurable from 0 through 5.
@@ -158,10 +165,11 @@ CUDA kernels remain enabled unless `options.no_kernels` is true.
 Minimal output writes one score JSON per record plus shared run metadata. It
 suppresses structure files, full distogram artifacts, and Lightning logs.
 
-## Full-screen eligibility
+## Receptor selection and limits
 
 `screen` validates every library record before generating inputs or starting a
-GPU run. A record passes only when all three conditions hold:
+GPU run. Without `target.crop`, a record passes only when all three conditions
+hold:
 
 ```text
 target_tokens <= 200
@@ -177,6 +185,42 @@ Any hard-limit failure names the affected ligand and stops the whole screen;
 tokenization that every token was retained and fails if an input would be
 truncated.
 
+For a longer receptor, set `target.crop.reference` to a PDB or mmCIF complex.
+The observed sequence of `reference_protein` must exactly match `target.sequence`.
+When `reference_ligand` is an author chain ID and that chain contains exactly
+one non-polymer residue, the residue is selected automatically. If the chain
+contains multiple candidates, specify one explicitly:
+
+```yaml
+reference_ligand:
+  chain: L
+  residue: 501
+  ccd: ATP
+```
+
+The ligand may share an author chain ID with the protein. Zero or multiple
+matches fail during preparation. Ligands represented by multiple or branched
+residues, insertion codes, and alternate locations are intentionally
+unsupported; preprocess the reference to one unambiguous ligand residue and
+conformer first. Receptor residues are ranked by their minimum distance to that
+residue's heavy atoms and added as contiguous sequence blocks using the
+existing affinity crop behavior
+(`neighborhood_size: 10`). The complete screened ligand is always reserved
+first and is never truncated.
+
+Two budget policies are supported:
+
+- `per_ligand` (default) applies the 256-token, 2048-atom, and 200-protein-token
+  limits separately for each ligand. All records share the same reference block
+  priority, but smaller ligands may retain more receptor blocks.
+- `library_fixed` reserves capacity for the largest ligand in the library and
+  uses exactly the same receptor crop for every record.
+
+The reference checksum and chain selection are stored in the screen manifest.
+Each record also stores its receptor token indices, reserved ligand size, crop
+policy, and retained receptor-token count under `.boltz-stfree/crops/`. These
+files are included in resume provenance and summarized in `scores.csv`.
+
 CCD inputs are checked against the Boltz-2 component cache. A normal `screen`
 run downloads that cache when needed. Offline `--prepare-only` validation
 requires an existing cache, selected with `options.cache` or `BOLTZ_CACHE`.
@@ -190,10 +234,10 @@ default generated-pose route. These measurements establish feasibility for the
 tested hardware, target, inputs, and settings; they are not general performance
 or accuracy guarantees.
 
-Generated crops, external crops, complex structure sampling, structure-derived
-distograms, structure files, Boltz-1, multi-chain complexes, and research
-interventions are intentionally not exposed by this product runtime. They remain
-available only in the separate research/reproduction repository.
+Arbitrary external token crops, complex structure sampling, structure-derived
+distograms, structure files, Boltz-1, multi-chain prediction inputs, and
+research interventions are intentionally not exposed by this product runtime.
+They remain available only in the separate research/reproduction repository.
 
 ## Provenance
 

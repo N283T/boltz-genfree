@@ -165,6 +165,7 @@ def _run_provenance(
     *,
     runtime_version: str,
     checkpoint_sha256: str,
+    receptor_selection: object = "complete_input",
 ) -> dict[str, object]:
     """Build the immutable method identity used to protect resumed screens."""
     return {
@@ -175,7 +176,7 @@ def _run_provenance(
         "affinity_checkpoint_sha256": checkpoint_sha256,
         "method": {
             "input_contract": "one_protein_one_ligand",
-            "receptor_selection": "complete_input",
+            "receptor_selection": receptor_selection,
             "distogram_mode": _DISTOGRAM_MODE,
             "ligand_reference_conformer": "etkdg",
             "structure_generation_active": False,
@@ -188,6 +189,31 @@ def _run_provenance(
             "use_kernels": not options.no_kernels,
             "flash_attn": options.flash_attn,
         },
+    }
+
+
+def _receptor_crop_provenance(
+    manifest: object,
+    crop_dir: Path | None,
+) -> object:
+    """Fingerprint the exact per-record receptor selections used by a chunk."""
+    if crop_dir is None:
+        return "complete_input"
+    digest = hashlib.sha256()
+    for record in sorted(manifest.records, key=lambda item: item.id):
+        path = crop_dir / f"affinity_crop_{record.id}.json"
+        if not path.is_file():
+            raise click.ClickException(
+                f"Missing reference receptor crop for {record.id}: {path}"
+            )
+        digest.update(record.id.encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return {
+        "mode": "reference_contiguous_blocks",
+        "crop_sha256": digest.hexdigest(),
+        "record_count": len(manifest.records),
     }
 
 
@@ -323,6 +349,7 @@ def run_stfree_chunk(
     data: Path,
     out_dir: Path,
     options: StFreeRuntimeOptions,
+    receptor_crop_indices_dir: Path | None = None,
 ) -> None:
     """Score one chunk without generating or loading complex coordinates."""
     import torch
@@ -405,10 +432,15 @@ def run_stfree_chunk(
         raise click.ClickException("No valid protein-ligand records were processed.")
     _validate_one_to_one_manifest(manifest)
     runtime_version = _runtime_version()
+    receptor_selection = _receptor_crop_provenance(
+        manifest,
+        receptor_crop_indices_dir,
+    )
     provenance = _run_provenance(
         options,
         runtime_version=runtime_version,
         checkpoint_sha256=checkpoint_sha256,
+        receptor_selection=receptor_selection,
     )
     experiment_metadata = {
         "runtime": "boltz-stfree",
@@ -419,9 +451,9 @@ def run_stfree_chunk(
         "affinity_checkpoint_sha256": checkpoint_sha256,
         "seed": options.seed,
         "input_contract": "one_protein_one_ligand",
-        "receptor_selection": "complete_input",
+        "receptor_selection": receptor_selection,
         "structure_generation_active": False,
-        "generated_crop_active": False,
+        "generated_crop_active": receptor_crop_indices_dir is not None,
         "coordinate_derived_distogram_active": False,
         "distogram_modes": [_DISTOGRAM_MODE],
         "ligand_reference_conformer": "etkdg",
@@ -508,11 +540,12 @@ def run_stfree_chunk(
         override_method="other",
         affinity=True,
         affinity_crop_indices_dir=None,
+        affinity_receptor_crop_indices_dir=receptor_crop_indices_dir,
         affinity_structure_free=True,
         affinity_structure_free_single_sequence=False,
         affinity_sequence_window_start=0,
         affinity_ligand_ref_pos_mode="etkdg",
-        affinity_require_full_input=True,
+        affinity_require_full_input=receptor_crop_indices_dir is None,
         pin_memory=options.accelerator not in ("cpu", "mps"),
     )
     predict_args = {

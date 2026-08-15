@@ -1,3 +1,4 @@
+import json
 import pickle
 from pathlib import Path
 from typing import Optional
@@ -223,6 +224,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         override_method: Optional[str] = None,
         affinity: bool = False,
         affinity_crop_indices_dir: Optional[Path] = None,
+        affinity_receptor_crop_indices_dir: Optional[Path] = None,
         affinity_structure_free: bool = False,
         affinity_structure_free_single_sequence: bool = False,
         affinity_sequence_window_start: int = 0,
@@ -262,6 +264,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.override_method = override_method
         self.affinity = affinity
         self.affinity_crop_indices_dir = affinity_crop_indices_dir
+        self.affinity_receptor_crop_indices_dir = affinity_receptor_crop_indices_dir
         self.affinity_structure_free = affinity_structure_free
         self.affinity_structure_free_single_sequence = (
             affinity_structure_free_single_sequence
@@ -290,6 +293,32 @@ class PredictionDataset(torch.utils.data.Dataset):
                 msg = f"Affinity crop must contain token_idx: {path}"
                 raise ValueError(msg)
             return data["token_idx"].copy()
+
+    def _load_affinity_receptor_crop_indices(
+        self,
+        record_id: str,
+    ) -> Optional[np.ndarray]:
+        if self.affinity_receptor_crop_indices_dir is None:
+            return None
+        path = (
+            self.affinity_receptor_crop_indices_dir / f"affinity_crop_{record_id}.json"
+        )
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"Missing reference receptor crop for {record_id}: {path}"
+            )
+        with path.open(encoding="utf-8") as handle:
+            document = json.load(handle)
+        if document.get("record_id") != record_id:
+            raise ValueError(f"Reference receptor crop record ID mismatch: {path}")
+        indices = document.get("receptor_token_idx")
+        if not isinstance(indices, list) or not all(
+            isinstance(index, int) and not isinstance(index, bool) for index in indices
+        ):
+            raise ValueError(
+                f"Reference receptor crop must contain integer receptor_token_idx: {path}"
+            )
+        return np.asarray(indices, dtype=np.int64)
 
     def __getitem__(self, idx: int) -> dict:
         """Get an item from the dataset.
@@ -329,15 +358,30 @@ class PredictionDataset(torch.utils.data.Dataset):
         if self.affinity:
             if self.affinity_structure_free:
                 crop_indices = self._load_affinity_crop_indices(record.id)
+                receptor_crop_indices = self._load_affinity_receptor_crop_indices(
+                    record.id
+                )
+                if crop_indices is not None and receptor_crop_indices is not None:
+                    raise ValueError(
+                        "Cannot combine full-token and receptor-only affinity crops."
+                    )
                 if self.affinity_require_full_input:
                     if (
                         crop_indices is not None
+                        or receptor_crop_indices is not None
                         or self.affinity_sequence_window_start != 0
                     ):
                         msg = "Full-screen inference does not accept crop overrides."
                         raise ValueError(msg)
                     tokenized = self.cropper.crop_full_screen(
                         tokenized,
+                        max_tokens=256,
+                        max_atoms=2048,
+                    )
+                elif receptor_crop_indices is not None:
+                    tokenized = self.cropper.crop_by_receptor_token_indices(
+                        tokenized,
+                        receptor_crop_indices,
                         max_tokens=256,
                         max_atoms=2048,
                     )
@@ -462,6 +506,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         override_method: Optional[str] = None,
         affinity: bool = False,
         affinity_crop_indices_dir: Optional[Path] = None,
+        affinity_receptor_crop_indices_dir: Optional[Path] = None,
         affinity_structure_free: bool = False,
         affinity_structure_free_single_sequence: bool = False,
         affinity_sequence_window_start: int = 0,
@@ -513,6 +558,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         self.override_method = override_method
         self.affinity = affinity
         self.affinity_crop_indices_dir = affinity_crop_indices_dir
+        self.affinity_receptor_crop_indices_dir = affinity_receptor_crop_indices_dir
         self.affinity_structure_free = affinity_structure_free
         self.affinity_structure_free_single_sequence = (
             affinity_structure_free_single_sequence
@@ -542,6 +588,9 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             override_method=self.override_method,
             affinity=self.affinity,
             affinity_crop_indices_dir=self.affinity_crop_indices_dir,
+            affinity_receptor_crop_indices_dir=(
+                self.affinity_receptor_crop_indices_dir
+            ),
             affinity_structure_free=self.affinity_structure_free,
             affinity_structure_free_single_sequence=(
                 self.affinity_structure_free_single_sequence

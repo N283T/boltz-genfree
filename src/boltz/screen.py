@@ -18,6 +18,11 @@ from rdkit import Chem
 
 from boltz.data.mol import load_molecules
 from boltz.data.parse.schema import standardize
+from boltz.reference_crop import (
+    ReferenceLigandSelector,
+    load_reference_crop,
+    select_receptor_tokens,
+)
 from boltz.stfree_runtime import StFreeRuntimeOptions
 
 _TOP_LEVEL_KEYS = {
@@ -28,7 +33,14 @@ _TOP_LEVEL_KEYS = {
     "chunk_size",
     "options",
 }
-_TARGET_KEYS = {"id", "sequence", "msa"}
+_TARGET_KEYS = {"id", "sequence", "msa", "crop"}
+_CROP_KEYS = {
+    "reference",
+    "reference_protein",
+    "reference_ligand",
+    "budget",
+}
+_REFERENCE_LIGAND_KEYS = {"chain", "residue", "ccd"}
 _LIGAND_SOURCE_KEYS = {"smiles", "csv", "sdf", "ccd"}
 _MAX_SEQUENCE_PREFIX_TOKENS = 200
 _MAX_AFFINITY_TOKENS = 256
@@ -82,6 +94,7 @@ class PreparedScreen:
     screen_options: ScreenOptions
     target_sequence: str
     auto_msa_path: Path | None
+    receptor_crop_indices_dir: Path | None
 
 
 @dataclass(frozen=True)
@@ -351,10 +364,11 @@ def _validate_full_screen(
     *,
     cache: Path,
     ensure_ccd_cache: Callable[[Path], None] | None,
+    reference_crop: bool = False,
 ) -> list[int]:
-    """Require every record to retain the complete receptor and ligand."""
+    """Validate ligand limits and, without a reference, the complete receptor."""
     target_tokens = len(sequence)
-    if target_tokens > _MAX_SEQUENCE_PREFIX_TOKENS:
+    if not reference_crop and target_tokens > _MAX_SEQUENCE_PREFIX_TOKENS:
         raise click.UsageError(
             "Full-screen validation failed: "
             f"target_tokens={target_tokens} exceeds the 200-token receptor limit."
@@ -384,7 +398,7 @@ def _validate_full_screen(
         if ligand_tokens > _MAX_LIGAND_TOKENS:
             reasons.append(f"ligand_tokens={ligand_tokens} exceeds 128")
         total_tokens = target_tokens + ligand_tokens
-        if total_tokens > _MAX_AFFINITY_TOKENS:
+        if not reference_crop and total_tokens > _MAX_AFFINITY_TOKENS:
             reasons.append(
                 f"target_tokens={target_tokens} + ligand_tokens={ligand_tokens} "
                 f"= {total_tokens} exceeds 256"
@@ -490,11 +504,103 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
 
     ligands_config = _mapping(config.get("ligands"), "ligands")
     ligands, ligand_provenance = _load_ligands(ligands_config, base_dir)
+    crop_config_value = target.get("crop")
+    crop_config: dict[str, Any] | None = None
+    crop_reference = None
+    crop_reference_path: Path | None = None
+    crop_reference_sha256: str | None = None
+    crop_policy: str | None = None
+    if crop_config_value is not None:
+        crop_config = _mapping(crop_config_value, "target.crop")
+        unknown_crop = set(crop_config) - _CROP_KEYS
+        if unknown_crop:
+            names = ", ".join(sorted(unknown_crop))
+            raise click.UsageError(f"Unknown target.crop settings: {names}")
+        if "reference" not in crop_config:
+            raise click.UsageError("target.crop.reference is required.")
+        crop_reference_path = _resolve_path(
+            crop_config["reference"],
+            base_dir,
+            "target.crop.reference",
+        )
+        if not crop_reference_path.is_file():
+            raise click.UsageError(
+                f"Crop reference does not exist: {crop_reference_path}"
+            )
+        crop_policy = crop_config.get("budget", "per_ligand")
+        if crop_policy not in {"per_ligand", "library_fixed"}:
+            raise click.UsageError(
+                "target.crop.budget must be per_ligand or library_fixed."
+            )
+        protein_chain = crop_config.get("reference_protein")
+        if protein_chain is not None and (
+            not isinstance(protein_chain, str) or not protein_chain
+        ):
+            raise click.UsageError(
+                "target.crop.reference_protein must be a non-empty string."
+            )
+        reference_ligand_value = crop_config.get("reference_ligand")
+        if isinstance(reference_ligand_value, str):
+            if not reference_ligand_value:
+                raise click.UsageError(
+                    "target.crop.reference_ligand must not be empty."
+                )
+            ligand_selector = ReferenceLigandSelector(
+                chain=reference_ligand_value,
+            )
+        else:
+            reference_ligand = _mapping(
+                reference_ligand_value,
+                "target.crop.reference_ligand",
+            )
+            unknown_ligand = set(reference_ligand) - _REFERENCE_LIGAND_KEYS
+            if unknown_ligand:
+                names = ", ".join(sorted(unknown_ligand))
+                raise click.UsageError(
+                    f"Unknown target.crop.reference_ligand settings: {names}"
+                )
+            missing_ligand = _REFERENCE_LIGAND_KEYS - set(reference_ligand)
+            if missing_ligand:
+                names = ", ".join(sorted(missing_ligand))
+                raise click.UsageError(
+                    f"target.crop.reference_ligand is missing: {names}"
+                )
+            ligand_chain = reference_ligand["chain"]
+            ligand_residue = reference_ligand["residue"]
+            ligand_ccd = reference_ligand["ccd"]
+            if not isinstance(ligand_chain, str) or not ligand_chain:
+                raise click.UsageError(
+                    "target.crop.reference_ligand.chain must be a non-empty string."
+                )
+            if not isinstance(ligand_residue, int) or isinstance(ligand_residue, bool):
+                raise click.UsageError(
+                    "target.crop.reference_ligand.residue must be an integer."
+                )
+            if not isinstance(ligand_ccd, str) or not ligand_ccd:
+                raise click.UsageError(
+                    "target.crop.reference_ligand.ccd must be a non-empty string."
+                )
+            ligand_selector = ReferenceLigandSelector(
+                chain=ligand_chain,
+                residue=ligand_residue,
+                ccd=ligand_ccd.upper(),
+            )
+        try:
+            crop_reference = load_reference_crop(
+                crop_reference_path,
+                sequence,
+                protein_chain=protein_chain,
+                ligand=ligand_selector,
+            )
+        except ValueError as error:
+            raise click.UsageError(str(error)) from error
+        crop_reference_sha256 = _sha256(crop_reference_path)
     ligand_token_counts = _validate_full_screen(
         sequence,
         ligands,
         cache=_screen_cache_path(options, base_dir),
         ensure_ccd_cache=ensure_ccd_cache,
+        reference_crop=crop_reference is not None,
     )
 
     chunk_size = config.get("chunk_size", 1000)
@@ -509,6 +615,9 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     output_dir = _resolve_path(output_value, base_dir, "output_dir")
     state_dir = output_dir / ".boltz-stfree"
     inputs_dir = state_dir / "inputs"
+    receptor_crop_indices_dir = (
+        state_dir / "crops" if crop_reference is not None else None
+    )
     runs_dir = output_dir / "runs"
     manifest_path = state_dir / "screen_manifest.json"
     auto_msa_path = state_dir / "msa" / "target.csv" if auto_msa else None
@@ -518,6 +627,16 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     records: list[dict[str, Any]] = []
     expected_files: dict[Path, str] = {}
     chunk_dirs: list[Path] = []
+    fixed_receptor_indices: tuple[int, ...] | None = None
+    if crop_reference is not None and crop_policy == "library_fixed":
+        try:
+            fixed_receptor_indices = select_receptor_tokens(
+                crop_reference,
+                sequence,
+                ligand_tokens=max(ligand_token_counts),
+            )
+        except ValueError as error:
+            raise click.UsageError(str(error)) from error
     for index, (ligand, ligand_tokens) in enumerate(
         zip(ligands, ligand_token_counts, strict=True),
         start=1,
@@ -546,16 +665,55 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         rendered = yaml.safe_dump(payload, sort_keys=False)
         input_path = chunk_dir / f"{record_id}.yaml"
         expected_files[input_path] = rendered
-        records.append(
-            {
+        record = {
+            "record_id": record_id,
+            "ligand_id": ligand.identifier,
+            "ligand_kind": ligand.kind,
+            "ligand_value": ligand.value,
+            "ligand_tokens": ligand_tokens,
+            "chunk": chunk_dir.name,
+        }
+        if crop_reference is not None:
+            try:
+                receptor_indices = fixed_receptor_indices or select_receptor_tokens(
+                    crop_reference,
+                    sequence,
+                    ligand_tokens=ligand_tokens,
+                )
+            except ValueError as error:
+                raise click.UsageError(
+                    f"Reference crop failed for {ligand.identifier}: {error}"
+                ) from error
+            assert receptor_crop_indices_dir is not None
+            crop_path = receptor_crop_indices_dir / f"affinity_crop_{record_id}.json"
+            crop_document = {
+                "schema_version": 1,
                 "record_id": record_id,
-                "ligand_id": ligand.identifier,
-                "ligand_kind": ligand.kind,
-                "ligand_value": ligand.value,
-                "ligand_tokens": ligand_tokens,
-                "chunk": chunk_dir.name,
+                "selection": "reference_contiguous_blocks",
+                "budget": crop_policy,
+                "neighborhood_size": 10,
+                "reference": str(crop_reference_path),
+                "reference_sha256": crop_reference_sha256,
+                "reference_protein": crop_reference.protein_chain,
+                "reference_ligand": {
+                    "chain": crop_reference.ligand_chain,
+                    "residue": crop_reference.ligand_residue,
+                    "ccd": crop_reference.ligand_ccd,
+                },
+                "ligand_tokens_reserved": (
+                    max(ligand_token_counts)
+                    if crop_policy == "library_fixed"
+                    else ligand_tokens
+                ),
+                "receptor_token_idx": list(receptor_indices),
             }
-        )
+            expected_files[crop_path] = json.dumps(crop_document, indent=2) + "\n"
+            record["crop"] = {
+                "budget": crop_policy,
+                "receptor_tokens": len(receptor_indices),
+                "path": str(crop_path),
+            }
+        records.append(record)
 
     input_config = {key: value for key, value in config.items() if key != "options"}
     input_config["preprocessing"] = {
@@ -589,6 +747,21 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         "output_dir": str(output_dir),
         "records": records,
     }
+    if crop_reference is not None:
+        assert crop_reference_path is not None
+        manifest["target"]["crop"] = {
+            "selection": "reference_contiguous_blocks",
+            "reference": str(crop_reference_path),
+            "reference_sha256": crop_reference_sha256,
+            "protein_chain": crop_reference.protein_chain,
+            "ligand": {
+                "chain": crop_reference.ligand_chain,
+                "residue": crop_reference.ligand_residue,
+                "ccd": crop_reference.ligand_ccd,
+            },
+            "budget": crop_policy,
+            "neighborhood_size": 10,
+        }
     if manifest_path.is_file():
         existing = json.loads(manifest_path.read_text(encoding="utf-8"))
         if existing != manifest:
@@ -603,6 +776,17 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         if unexpected:
             raise click.UsageError(
                 f"Generated input directory contains unexpected files: {inputs_dir}"
+            )
+    if receptor_crop_indices_dir is not None and receptor_crop_indices_dir.is_dir():
+        expected_crop_paths = {
+            path for path in expected_paths if path.parent == receptor_crop_indices_dir
+        }
+        unexpected_crops = set(receptor_crop_indices_dir.glob("affinity_crop_*.json"))
+        unexpected_crops -= expected_crop_paths
+        if unexpected_crops:
+            raise click.UsageError(
+                "Generated crop directory contains unexpected files: "
+                f"{receptor_crop_indices_dir}"
             )
     for path, rendered in expected_files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -624,6 +808,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         screen_options=screen_options,
         target_sequence=sequence,
         auto_msa_path=auto_msa_path,
+        receptor_crop_indices_dir=receptor_crop_indices_dir,
     )
 
 
@@ -935,6 +1120,8 @@ def collect_screen_scores(prepared: PreparedScreen) -> Path:
         "ligand_value",
         "ligand_tokens",
         "chunk",
+        "crop_budget",
+        "receptor_tokens",
         "affinity_pred_value",
         "affinity_probability_binary",
     ]
@@ -942,6 +1129,12 @@ def collect_screen_scores(prepared: PreparedScreen) -> Path:
     with scores_temp.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
+        for row in rows:
+            crop = row.pop("crop", None)
+            row["crop_budget"] = crop["budget"] if crop else "complete_input"
+            row["receptor_tokens"] = (
+                crop["receptor_tokens"] if crop else manifest["target"]["length"]
+            )
         writer.writerows(rows)
     summary = {
         "schema_version": 1,

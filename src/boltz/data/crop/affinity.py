@@ -292,3 +292,56 @@ class AffinityCropper(Cropper):
         token_bonds = data.bonds[np.isin(data.bonds["token_1"], indices)]
         token_bonds = token_bonds[np.isin(token_bonds["token_2"], indices)]
         return replace(data, tokens=token_data, bonds=token_bonds)
+
+    def crop_by_receptor_token_indices(
+        self,
+        data: Tokenized,
+        receptor_token_indices: np.ndarray,
+        *,
+        max_tokens: int,
+        max_atoms: Optional[int] = None,
+    ) -> Tokenized:
+        """Combine an explicit receptor crop with every binder token."""
+        requested = np.asarray(receptor_token_indices, dtype=np.int64).reshape(-1)
+        if requested.size == 0:
+            raise ValueError("Reference affinity crop contains no receptor tokens.")
+        token_data = data.tokens
+        available_protein = {
+            int(token["token_idx"])
+            for token in token_data[
+                token_data["mol_type"] == const.chain_type_ids["PROTEIN"]
+            ]
+        }
+        invalid = [
+            int(index) for index in requested if int(index) not in available_protein
+        ]
+        if invalid:
+            raise ValueError(
+                "Reference affinity crop contains non-receptor or missing token IDs: "
+                f"{invalid[:10]}"
+            )
+        binder = token_data[token_data["affinity_mask"]]
+        if not binder.size:
+            raise ValueError("Reference affinity crop found no binder tokens.")
+        selected_ids = set(int(index) for index in requested)
+        selected_ids.update(int(index) for index in binder["token_idx"])
+        selected = token_data[np.isin(token_data["token_idx"], list(selected_ids))]
+        if selected.size > max_tokens:
+            raise ValueError(
+                f"Reference affinity crop exceeds {max_tokens} total tokens."
+            )
+        if max_atoms is not None and int(np.sum(selected["atom_num"])) > max_atoms:
+            raise ValueError(
+                f"Reference affinity crop exceeds {max_atoms} total atoms."
+            )
+        protein_count = int(
+            np.sum(selected["mol_type"] == const.chain_type_ids["PROTEIN"])
+        )
+        if protein_count > self.max_tokens_protein:
+            raise ValueError(
+                "Reference affinity crop exceeds the 200-token receptor limit."
+            )
+        return self.crop_by_token_indices(
+            data,
+            np.asarray(sorted(selected_ids), dtype=np.int64),
+        )

@@ -2651,6 +2651,7 @@ def screen(config: Path, prepare_only: bool) -> None:
             data=chunk_dir,
             out_dir=prepared.runs_dir,
             options=screen_options.runtime,
+            receptor_crop_indices_dir=prepared.receptor_crop_indices_dir,
         )
     scores_path = collect_screen_scores(prepared)
     click.echo(f"Screen complete: {scores_path}")
