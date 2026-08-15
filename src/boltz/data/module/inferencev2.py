@@ -468,7 +468,7 @@ class PredictionDataset(torch.utils.data.Dataset):
             max_seqs=const.max_msa_seqs,
             pad_to_max_seqs=False,
             single_sequence_prop=0.0,
-            compute_frames=True,
+            compute_frames=not self.affinity_structure_free,
             inference_pocket_constraints=pocket_constraints,
             inference_contact_constraints=contact_constraints,
             compute_constraint_features=True,

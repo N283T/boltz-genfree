@@ -201,16 +201,9 @@ def _choose_ligand_residue(
 def _block_around(seed: int, sequence_length: int) -> tuple[int, ...]:
     if sequence_length <= _NEIGHBORHOOD_SIZE:
         return tuple(range(sequence_length))
-    lower_bound = max(0, seed - _NEIGHBORHOOD_SIZE)
-    upper_bound = min(sequence_length - 1, seed + _NEIGHBORHOOD_SIZE)
-    radius = 0
-    block = (seed,)
-    while len(block) < _NEIGHBORHOOD_SIZE:
-        radius += 1
-        lower = max(lower_bound, seed - radius)
-        upper = min(upper_bound, seed + radius)
-        block = tuple(range(lower, upper + 1))
-    return block
+    start = seed - (_NEIGHBORHOOD_SIZE // 2)
+    start = min(max(0, start), sequence_length - _NEIGHBORHOOD_SIZE)
+    return tuple(range(start, start + _NEIGHBORHOOD_SIZE))
 
 
 def load_reference_crop(

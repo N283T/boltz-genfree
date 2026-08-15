@@ -629,16 +629,12 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     records: list[dict[str, Any]] = []
     expected_files: dict[Path, str] = {}
     chunk_dirs: list[Path] = []
-    fixed_receptor_indices: tuple[int, ...] | None = None
-    if crop_reference is not None and crop_policy == "library_fixed":
-        try:
-            fixed_receptor_indices = select_receptor_tokens(
-                crop_reference,
-                sequence,
-                ligand_tokens=max(ligand_token_counts),
-            )
-        except ValueError as error:
-            raise click.UsageError(str(error)) from error
+    library_ligand_tokens = (
+        max(ligand_token_counts)
+        if crop_reference is not None and crop_policy == "library_fixed"
+        else None
+    )
+    receptor_indices_by_ligand_tokens: dict[int, tuple[int, ...]] = {}
     for index, (ligand, ligand_tokens) in enumerate(
         zip(ligands, ligand_token_counts, strict=True),
         start=1,
@@ -676,12 +672,24 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             "chunk": chunk_dir.name,
         }
         if crop_reference is not None:
+            reserved_ligand_tokens = (
+                library_ligand_tokens
+                if library_ligand_tokens is not None
+                else ligand_tokens
+            )
             try:
-                receptor_indices = fixed_receptor_indices or select_receptor_tokens(
-                    crop_reference,
-                    sequence,
-                    ligand_tokens=ligand_tokens,
+                receptor_indices = receptor_indices_by_ligand_tokens.get(
+                    reserved_ligand_tokens
                 )
+                if receptor_indices is None:
+                    receptor_indices = select_receptor_tokens(
+                        crop_reference,
+                        sequence,
+                        ligand_tokens=reserved_ligand_tokens,
+                    )
+                    receptor_indices_by_ligand_tokens[reserved_ligand_tokens] = (
+                        receptor_indices
+                    )
             except ValueError as error:
                 raise click.UsageError(
                     f"Reference crop failed for {ligand.identifier}: {error}"
@@ -702,11 +710,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
                     "residue": crop_reference.ligand_residue,
                     "ccd": crop_reference.ligand_ccd,
                 },
-                "ligand_tokens_reserved": (
-                    max(ligand_token_counts)
-                    if crop_policy == "library_fixed"
-                    else ligand_tokens
-                ),
+                "ligand_tokens_reserved": reserved_ligand_tokens,
                 "receptor_token_idx": list(receptor_indices),
             }
             expected_files[crop_path] = json.dumps(crop_document, indent=2) + "\n"

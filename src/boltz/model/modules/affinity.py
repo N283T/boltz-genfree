@@ -12,7 +12,6 @@ from boltz.model.modules.affinity_distogram import (
     validate_affinity_distogram_mode,
 )
 from boltz.model.modules.encodersv2 import PairwiseConditioning
-from boltz.model.modules.transformersv2 import DiffusionTransformer
 from boltz.model.modules.utils import LinearNoBias
 
 

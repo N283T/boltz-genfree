@@ -1,18 +1,11 @@
 from pathlib import Path
-from dataclasses import replace
 
-import click
-import pytest
 import torch
 
 from boltz.data import const
 from boltz.data.types import AffinityInfo, ChainInfo, Manifest, Record, StructureInfo
-from boltz.main import (
-    expand_affinity_records,
-    filter_inputs_affinity,
-    filter_inputs_structure,
-)
 from boltz.data.write.writer import BoltzAffinityWriter
+from boltz.main import filter_inputs_affinity
 from boltz.model.modules.affinity import pool_affinity_pairs
 
 
@@ -32,16 +25,7 @@ def _make_affinity_record(record_id: str = "target") -> Record:
             ),
             ChainInfo(
                 chain_id=1,
-                chain_name="L1",
-                mol_type=const.chain_type_ids["NONPOLYMER"],
-                cluster_id=1,
-                msa_id=-1,
-                num_residues=1,
-                entity_id=1,
-            ),
-            ChainInfo(
-                chain_id=2,
-                chain_name="L2",
+                chain_name="L",
                 mol_type=const.chain_type_ids["NONPOLYMER"],
                 cluster_id=1,
                 msa_id=-1,
@@ -50,196 +34,68 @@ def _make_affinity_record(record_id: str = "target") -> Record:
             ),
         ],
         interfaces=[],
-        affinity=AffinityInfo(chain_id=1, mw=123.4, chain_name="L1"),
+        affinity=AffinityInfo(
+            chain_id=1,
+            mw=123.4,
+            chain_name="L",
+            output_id=record_id,
+        ),
     )
 
 
-def test_expand_affinity_records_fans_out_repeated_binders():
+def test_filter_inputs_affinity_skips_existing_output(tmp_path: Path) -> None:
+    pred_dir = tmp_path / "predictions" / "target"
+    pred_dir.mkdir(parents=True)
+    (pred_dir / "affinity_target.json").write_text("{}")
     manifest = Manifest(records=[_make_affinity_record()])
 
-    expanded = expand_affinity_records(manifest)
-
-    assert len(expanded.records) == 2
-    assert [record.affinity.chain_id for record in expanded.records] == [1, 2]
-    assert [record.affinity.chain_name for record in expanded.records] == ["L1", "L2"]
-    assert [record.affinity.output_id for record in expanded.records] == [
-        "target_L1",
-        "target_L2",
-    ]
-
-
-def test_expand_affinity_records_sanitizes_output_id():
-    record = replace(
-        _make_affinity_record(),
-        chains=[
-            _make_affinity_record().chains[0],
-            replace(_make_affinity_record().chains[1], chain_name="L/1"),
-            replace(_make_affinity_record().chains[2], chain_name="L 2"),
-        ],
-        affinity=AffinityInfo(chain_id=1, mw=123.4, chain_name="L/1"),
-    )
-
-    expanded = expand_affinity_records(Manifest(records=[record]))
-
-    assert [record.affinity.output_id for record in expanded.records] == [
-        "target_L_1",
-        "target_L_2",
-    ]
-
-
-def test_expand_affinity_records_supports_legacy_chain_id_only():
-    record = replace(
-        _make_affinity_record(), affinity=AffinityInfo(chain_id=1, mw=123.4)
-    )
-    manifest = Manifest(records=[record])
-
-    expanded = expand_affinity_records(manifest)
-
-    assert len(expanded.records) == 2
-    assert [record.affinity.chain_name for record in expanded.records] == ["L1", "L2"]
-
-
-def test_expand_affinity_records_raises_on_binder_mismatch():
-    record = replace(
-        _make_affinity_record(),
-        affinity=AffinityInfo(chain_id=99, mw=123.4, chain_name="MISSING"),
-    )
-
-    with pytest.raises(
-        click.ClickException,
-        match="could not find binder chain 'MISSING'",
-    ):
-        expand_affinity_records(Manifest(records=[record]))
-
-
-def test_filter_inputs_affinity_tracks_per_copy_outputs(tmp_path: Path):
-    pred_dir = tmp_path / "predictions" / "target"
-    pred_dir.mkdir(parents=True)
-    (pred_dir / "pre_affinity_target.npz").write_bytes(b"ok")
-    (pred_dir / "affinity_target_L1.json").write_text("{}")
-
-    manifest = expand_affinity_records(Manifest(records=[_make_affinity_record()]))
-
-    filtered = filter_inputs_affinity(manifest, tmp_path, override=False)
-
-    assert len(filtered.records) == 1
-    assert filtered.records[0].affinity.chain_name == "L2"
-
-
-def test_filter_inputs_affinity_requires_requested_intervention_outputs(
-    tmp_path: Path,
-):
-    pred_dir = tmp_path / "predictions" / "target"
-    pred_dir.mkdir(parents=True)
-    (pred_dir / "pre_affinity_target.npz").write_bytes(b"ok")
-    (pred_dir / "affinity_target_L1.json").write_text("{}")
-
-    manifest = expand_affinity_records(Manifest(records=[_make_affinity_record()]))
     filtered = filter_inputs_affinity(
         manifest,
         tmp_path,
         override=False,
-        distogram_modes=("control", "constant_far"),
+        require_pre_affinity=False,
     )
 
-    assert len(filtered.records) == 2
+    assert filtered.records == []
 
 
-def test_filter_inputs_affinity_keeps_existing_outputs_with_override(tmp_path: Path):
+def test_filter_inputs_affinity_keeps_existing_output_with_override(
+    tmp_path: Path,
+) -> None:
     pred_dir = tmp_path / "predictions" / "target"
     pred_dir.mkdir(parents=True)
-    (pred_dir / "pre_affinity_target.npz").write_bytes(b"ok")
-    (pred_dir / "affinity_target_L1.json").write_text("{}")
-    (pred_dir / "affinity_target_L2.json").write_text("{}")
+    (pred_dir / "affinity_target.json").write_text("{}")
+    manifest = Manifest(records=[_make_affinity_record()])
 
-    manifest = expand_affinity_records(Manifest(records=[_make_affinity_record()]))
+    filtered = filter_inputs_affinity(
+        manifest,
+        tmp_path,
+        override=True,
+        require_pre_affinity=False,
+    )
 
-    filtered = filter_inputs_affinity(manifest, tmp_path, override=True)
-
-    assert len(filtered.records) == 2
+    assert [record.id for record in filtered.records] == ["target"]
 
 
-def test_filter_inputs_affinity_uses_output_tag(tmp_path: Path):
+def test_filter_inputs_affinity_uses_output_tag(tmp_path: Path) -> None:
     pred_dir = tmp_path / "predictions" / "target"
     pred_dir.mkdir(parents=True)
-    (pred_dir / "pre_affinity_target.npz").write_bytes(b"ok")
-    tagged = pred_dir / "affinity_target_L1__distogram_normal_random__run_seed17.json"
+    tagged = pred_dir / "affinity_target__distogram_normal_random__run_seed17.json"
     tagged.write_text("{}")
-    manifest = expand_affinity_records(Manifest(records=[_make_affinity_record()]))
+    manifest = Manifest(records=[_make_affinity_record()])
 
     filtered = filter_inputs_affinity(
         manifest,
         tmp_path,
         distogram_modes=("normal_random",),
         output_tag="seed17",
-    )
-
-    assert [record.affinity.chain_name for record in filtered.records] == ["L2"]
-
-
-def test_filter_inputs_structure_does_not_treat_embedding_cache_as_prediction(
-    tmp_path: Path,
-):
-    pred_dir = tmp_path / "predictions" / "target"
-    pred_dir.mkdir(parents=True)
-    (pred_dir / "embeddings_target.npz").write_bytes(b"cache")
-    manifest = Manifest(records=[_make_affinity_record()])
-
-    filtered = filter_inputs_structure(
-        manifest,
-        tmp_path,
-        resume_embeddings=True,
-    )
-
-    assert [record.id for record in filtered.records] == ["target"]
-
-
-def test_filter_inputs_structure_hard_skips_with_prepared_affinity(tmp_path: Path):
-    pred_dir = tmp_path / "predictions" / "target"
-    pred_dir.mkdir(parents=True)
-    (pred_dir / "pre_affinity_target.npz").write_bytes(b"prepared")
-    manifest = Manifest(records=[_make_affinity_record()])
-
-    filtered = filter_inputs_structure(
-        manifest,
-        tmp_path,
-        resume_embeddings=True,
-        skip_structure=True,
+        require_pre_affinity=False,
     )
 
     assert filtered.records == []
 
 
-def test_filter_inputs_structure_hard_skip_requires_prepared_affinity(tmp_path: Path):
-    manifest = Manifest(records=[_make_affinity_record()])
-
-    with pytest.raises(
-        click.ClickException,
-        match="requires prepared pre_affinity artifacts; missing: target",
-    ):
-        filter_inputs_structure(manifest, tmp_path, skip_structure=True)
-
-
-def test_structure_free_filter_requires_no_pre_affinity(tmp_path: Path):
-    manifest = Manifest(records=[_make_affinity_record()])
-
-    filtered_structure = filter_inputs_structure(
-        manifest,
-        tmp_path,
-        skip_structure=True,
-        structure_free=True,
-    )
-    filtered_affinity = filter_inputs_affinity(
-        manifest,
-        tmp_path,
-        require_pre_affinity=False,
-    )
-
-    assert filtered_structure.records == []
-    assert [record.id for record in filtered_affinity.records] == ["target"]
-
-
-def test_affinity_writer_accepts_embedding_output(tmp_path: Path):
+def test_affinity_writer_accepts_embedding_output(tmp_path: Path) -> None:
     writer = BoltzAffinityWriter(
         data_dir=tmp_path,
         output_dir=tmp_path / "predictions",
@@ -249,7 +105,7 @@ def test_affinity_writer_accepts_embedding_output(tmp_path: Path):
     assert writer.write_embeddings is True
 
 
-def test_affinity_writer_accepts_output_tag(tmp_path: Path):
+def test_affinity_writer_accepts_output_tag(tmp_path: Path) -> None:
     writer = BoltzAffinityWriter(
         data_dir=tmp_path,
         output_dir=tmp_path / "predictions",
@@ -259,7 +115,7 @@ def test_affinity_writer_accepts_output_tag(tmp_path: Path):
     assert writer.output_tag == "seed17"
 
 
-def test_pool_affinity_pairs_matches_cross_pair_head_pooling():
+def test_pool_affinity_pairs_matches_cross_pair_head_pooling() -> None:
     z = torch.arange(18, dtype=torch.float32).reshape(1, 3, 3, 2)
     feats = {
         "token_pad_mask": torch.ones(1, 3),

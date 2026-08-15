@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import math
@@ -16,6 +17,13 @@ import click
 
 _DISTOGRAM_MODE = "zero_distogram_features"
 _LIGAND_CONFORMER_MODES = {"skip", "etkdg"}
+_UNUSED_STFREE_MODEL_MODULES = (
+    "structure_module",
+    "diffusion_conditioning",
+    "confidence_module",
+    "distogram_module",
+    "bfactor_module",
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +60,31 @@ def _patch_torch_checkpoint_loading(torch: object) -> None:
 
     patched_load._boltz_patched = True  # type: ignore[attr-defined]
     torch.load = patched_load  # type: ignore[attr-defined]
+
+
+def _prune_stfree_model(model: object) -> tuple[str, ...]:
+    """Drop checkpoint modules that the fixed StFree forward path cannot call."""
+    required_flags = {
+        "affinity_coordinate_free": True,
+        "skip_run_structure": True,
+        "skip_confidence_forward": True,
+        "skip_pdistogram_forward": True,
+    }
+    invalid = [
+        name
+        for name, expected in required_flags.items()
+        if getattr(model, name, None) != expected
+    ]
+    if invalid:
+        names = ", ".join(invalid)
+        raise RuntimeError(f"Cannot prune a non-StFree model; invalid flags: {names}")
+
+    removed = []
+    for name in _UNUSED_STFREE_MODEL_MODULES:
+        if getattr(model, name, None) is not None:
+            setattr(model, name, None)
+            removed.append(name)
+    return tuple(removed)
 
 
 def _validate_one_to_one_manifest(manifest: object) -> None:
@@ -351,7 +384,7 @@ def stfree_model_kwargs(options: StFreeRuntimeOptions) -> dict[str, object]:
         "use_kernels": not options.no_kernels,
         "use_flash_attn": options.flash_attn,
         "skip_confidence_forward": True,
-        "skip_pdistogram_forward": False,
+        "skip_pdistogram_forward": True,
         "skip_msa_forward": False,
         "capture_affinity_representations": False,
         "run_trunk_and_structure": True,
@@ -527,13 +560,6 @@ def run_stfree_chunk(
         len(pending.records),
     )
     precision: int | str = 32 if options.accelerator in ("cpu", "mps") else "bf16-mixed"
-    map_location = (
-        "cpu"
-        if options.accelerator == "cpu"
-        else "mps"
-        if options.accelerator == "mps"
-        else "cuda"
-    )
     writer = BoltzAffinityWriter(
         data_dir=processed.targets_dir,
         output_dir=run_dir / "predictions",
@@ -591,10 +617,14 @@ def run_stfree_chunk(
         affinity_checkpoint,
         strict=True,
         predict_args=predict_args,
-        map_location=map_location,
+        map_location="cpu",
         ema=False,
         **stfree_model_kwargs(options),
     )
+    _prune_stfree_model(model)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     model.eval()
     click.echo(f"Running structure-free affinity for {len(pending.records)} record(s).")
     trainer.predict(model, datamodule=data_module, return_predictions=False)
