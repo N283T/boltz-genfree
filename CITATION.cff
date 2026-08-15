@@ -7,7 +7,7 @@ type: software
 authors:
   - family-names: "PLACEHOLDER"
     given-names: "AUTHOR LIST NOT FINALIZED"
-repository-code: "https://github.com/N283T/boltz-distogramless-boltz"
+repository-code: "https://github.com/N283T/boltz2-affinity-interventions-boltz"
 license: MIT
 abstract: >-
   Structure-free Boltz-2 affinity screening software and the research
