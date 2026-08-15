@@ -1,4 +1,4 @@
-"""Shared test fixtures for boltz-community tests."""
+"""Shared test fixtures for Boltz-StFree tests."""
 
 import gzip
 import tempfile

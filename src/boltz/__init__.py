@@ -1,9 +1,12 @@
 from importlib.metadata import PackageNotFoundError, version
 
-try:  # noqa: SIM105
-    __version__ = version("boltz-community")
+try:
+    __version__ = version("boltz-stfree")
 except PackageNotFoundError:
     try:
-        __version__ = version("boltz")
+        __version__ = version("boltz-community")
     except PackageNotFoundError:
-        pass
+        try:
+            __version__ = version("boltz")
+        except PackageNotFoundError:
+            __version__ = "0+unknown"

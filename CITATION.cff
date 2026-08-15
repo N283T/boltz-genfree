@@ -2,16 +2,16 @@ cff-version: 1.2.0
 message: >-
   If you use this software, please cite the software release and the associated
   manuscript once its bibliographic details are finalized.
-title: "PLACEHOLDER: final software artifact title"
+title: "Boltz-StFree: structure-free Boltz-2 affinity screening"
 type: software
 authors:
   - family-names: "PLACEHOLDER"
     given-names: "AUTHOR LIST NOT FINALIZED"
-repository-code: "https://github.com/N283T/boltz2-affinity-interventions-boltz"
+repository-code: "https://github.com/N283T/boltz-stfree"
 license: MIT
 abstract: >-
-  Structure-free Boltz-2 affinity screening software and the research
-  interventions used to reproduce the associated manuscript.
+  Structure-free Boltz-2 affinity screening software derived from the runtime
+  used to reproduce the associated manuscript.
 keywords:
   - binding affinity
   - virtual screening

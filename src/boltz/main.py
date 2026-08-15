@@ -10,13 +10,13 @@ import tempfile
 import warnings
 from dataclasses import asdict, dataclass, replace
 from functools import partial
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from multiprocessing import Pool
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Literal, Optional, Union
 
 import click
-
-from importlib.metadata import version as _pkg_version
 
 try:
     from pytorch_lightning.utilities import rank_zero_only
@@ -46,6 +46,20 @@ BOLTZ2_AFFINITY_URL_WITH_FALLBACK = [
     "https://model-gateway.boltz.bio/boltz2_aff.ckpt",
     "https://huggingface.co/boltz-community/boltz-2/resolve/main/boltz2_aff.ckpt",
 ]
+
+
+def _runtime_version() -> str:
+    """Return this distribution version with source-tree fallbacks."""
+    try:
+        return _pkg_version("boltz-stfree")
+    except PackageNotFoundError:
+        try:
+            return _pkg_version("boltz-community")
+        except PackageNotFoundError:
+            try:
+                return _pkg_version("boltz")
+            except PackageNotFoundError:
+                return "0+unknown"
 
 
 def _resolved_path_for_message(path: Path) -> Path:
@@ -1191,10 +1205,10 @@ def process_inputs(
 
 @click.group()
 @click.version_option(
-    version=_pkg_version("boltz-community"), prog_name="boltz-community"
+    version=_runtime_version(), prog_name="boltz-stfree"
 )
 def cli() -> None:
-    """Boltz."""
+    """Boltz-StFree structure-free affinity screening runtime."""
     return
 
 
@@ -2336,8 +2350,8 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             output_tag=affinity_output_tag,
             screening_minimal_output=affinity_screening_minimal_output,
             experiment_metadata={
-                "runtime": "boltz-community",
-                "runtime_version": _pkg_version("boltz-community"),
+                "runtime": "boltz-stfree",
+                "runtime_version": _runtime_version(),
                 "input_sources": _resolved_input_sources(data),
                 "structure_checkpoint": str(structure_checkpoint.resolve()),
                 "structure_checkpoint_sha256": _sha256_file(structure_checkpoint),

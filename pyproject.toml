@@ -3,10 +3,10 @@ requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "boltz-community"
-version = "2.10.10"
+name = "boltz-stfree"
+version = "0.1.0"
 requires-python = ">=3.10"
-description = "Community-maintained fork of Boltz with bug fixes, broader compatibility, and CI"
+description = "Structure-free Boltz-2 affinity screening"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
@@ -15,8 +15,7 @@ authors = [
     { name = "Saro Passaro" },
 ]
 maintainers = [
-    { name = "Andrei Volgin", email = "a.volgin@noveltherapeutics.ai" },
-    { name = "boltz-community contributors" },
+    { name = "N283T" },
 ]
 keywords = [
     "protein-structure-prediction",
@@ -24,6 +23,9 @@ keywords = [
     "alphafold",
     "biology",
     "drug-discovery",
+    "virtual-screening",
+    "binding-affinity",
+    "structure-free",
     "deep-learning",
 ]
 classifiers = [
@@ -64,15 +66,17 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Novel-Therapeutics/boltz-community"
-Source = "https://github.com/Novel-Therapeutics/boltz-community"
-Issues = "https://github.com/Novel-Therapeutics/boltz-community/issues"
-Changelog = "https://github.com/Novel-Therapeutics/boltz-community/releases"
+Homepage = "https://github.com/N283T/boltz-stfree"
+Source = "https://github.com/N283T/boltz-stfree"
+Issues = "https://github.com/N283T/boltz-stfree/issues"
+Changelog = "https://github.com/N283T/boltz-stfree/releases"
+Research-Runtime = "https://github.com/N283T/boltz2-affinity-interventions-boltz"
+Community-Upstream = "https://github.com/Novel-Therapeutics/boltz-community"
 Upstream = "https://github.com/jwohlwend/boltz"
 
 [project.scripts]
-boltz = "boltz.main:cli"
-boltz-fix-macos-libomp = "boltz.scripts.fix_macos_libomp:main"
+boltz-stfree = "boltz.main:cli"
+boltz-stfree-fix-macos-libomp = "boltz.scripts.fix_macos_libomp:main"
 
 [project.optional-dependencies]
 lint = ["ruff"]
