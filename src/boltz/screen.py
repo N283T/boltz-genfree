@@ -539,40 +539,52 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             raise click.UsageError(
                 "target.crop.reference_protein must be a non-empty string."
             )
-        reference_ligand = _mapping(
-            crop_config.get("reference_ligand"),
-            "target.crop.reference_ligand",
-        )
-        unknown_ligand = set(reference_ligand) - _REFERENCE_LIGAND_KEYS
-        if unknown_ligand:
-            names = ", ".join(sorted(unknown_ligand))
-            raise click.UsageError(
-                f"Unknown target.crop.reference_ligand settings: {names}"
+        reference_ligand_value = crop_config.get("reference_ligand")
+        if isinstance(reference_ligand_value, str):
+            if not reference_ligand_value:
+                raise click.UsageError(
+                    "target.crop.reference_ligand must not be empty."
+                )
+            ligand_selector = ReferenceLigandSelector(
+                chain=reference_ligand_value,
             )
-        missing_ligand = _REFERENCE_LIGAND_KEYS - set(reference_ligand)
-        if missing_ligand:
-            names = ", ".join(sorted(missing_ligand))
-            raise click.UsageError(f"target.crop.reference_ligand is missing: {names}")
-        ligand_chain = reference_ligand["chain"]
-        ligand_residue = reference_ligand["residue"]
-        ligand_ccd = reference_ligand["ccd"]
-        if not isinstance(ligand_chain, str) or not ligand_chain:
-            raise click.UsageError(
-                "target.crop.reference_ligand.chain must be a non-empty string."
+        else:
+            reference_ligand = _mapping(
+                reference_ligand_value,
+                "target.crop.reference_ligand",
             )
-        if not isinstance(ligand_residue, int) or isinstance(ligand_residue, bool):
-            raise click.UsageError(
-                "target.crop.reference_ligand.residue must be an integer."
+            unknown_ligand = set(reference_ligand) - _REFERENCE_LIGAND_KEYS
+            if unknown_ligand:
+                names = ", ".join(sorted(unknown_ligand))
+                raise click.UsageError(
+                    f"Unknown target.crop.reference_ligand settings: {names}"
+                )
+            missing_ligand = _REFERENCE_LIGAND_KEYS - set(reference_ligand)
+            if missing_ligand:
+                names = ", ".join(sorted(missing_ligand))
+                raise click.UsageError(
+                    f"target.crop.reference_ligand is missing: {names}"
+                )
+            ligand_chain = reference_ligand["chain"]
+            ligand_residue = reference_ligand["residue"]
+            ligand_ccd = reference_ligand["ccd"]
+            if not isinstance(ligand_chain, str) or not ligand_chain:
+                raise click.UsageError(
+                    "target.crop.reference_ligand.chain must be a non-empty string."
+                )
+            if not isinstance(ligand_residue, int) or isinstance(ligand_residue, bool):
+                raise click.UsageError(
+                    "target.crop.reference_ligand.residue must be an integer."
+                )
+            if not isinstance(ligand_ccd, str) or not ligand_ccd:
+                raise click.UsageError(
+                    "target.crop.reference_ligand.ccd must be a non-empty string."
+                )
+            ligand_selector = ReferenceLigandSelector(
+                chain=ligand_chain,
+                residue=ligand_residue,
+                ccd=ligand_ccd.upper(),
             )
-        if not isinstance(ligand_ccd, str) or not ligand_ccd:
-            raise click.UsageError(
-                "target.crop.reference_ligand.ccd must be a non-empty string."
-            )
-        ligand_selector = ReferenceLigandSelector(
-            chain=ligand_chain,
-            residue=ligand_residue,
-            ccd=ligand_ccd.upper(),
-        )
         try:
             crop_reference = load_reference_crop(
                 crop_reference_path,

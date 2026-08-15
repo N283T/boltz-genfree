@@ -58,10 +58,7 @@ target:
   crop:              # optional when the complete receptor fits
     reference: ./reference-complex.cif
     reference_protein: A
-    reference_ligand:
-      chain: L
-      residue: 501
-      ccd: ATP
+    reference_ligand: L
     budget: per_ligand
 
 ligands:
@@ -190,14 +187,24 @@ truncated.
 
 For a longer receptor, set `target.crop.reference` to a PDB or mmCIF complex.
 The observed sequence of `reference_protein` must exactly match `target.sequence`.
-`reference_ligand` must identify exactly one non-polymer residue by author chain
-ID, integer residue number, and CCD name. The ligand may share an author chain
-ID with the protein. Zero or multiple matches fail during preparation. Ligands
-represented by multiple or branched residues, insertion codes, and alternate
-locations are intentionally unsupported; preprocess the reference to one
-unambiguous ligand residue and conformer first. Receptor residues are ranked by
-their minimum distance to that residue's heavy atoms and added as contiguous
-sequence blocks using the existing affinity crop behavior
+When `reference_ligand` is an author chain ID and that chain contains exactly
+one non-polymer residue, the residue is selected automatically. If the chain
+contains multiple candidates, specify one explicitly:
+
+```yaml
+reference_ligand:
+  chain: L
+  residue: 501
+  ccd: ATP
+```
+
+The ligand may share an author chain ID with the protein. Zero or multiple
+matches fail during preparation. Ligands represented by multiple or branched
+residues, insertion codes, and alternate locations are intentionally
+unsupported; preprocess the reference to one unambiguous ligand residue and
+conformer first. Receptor residues are ranked by their minimum distance to that
+residue's heavy atoms and added as contiguous sequence blocks using the
+existing affinity crop behavior
 (`neighborhood_size: 10`). The complete screened ligand is always reserved
 first and is never truncated.
 

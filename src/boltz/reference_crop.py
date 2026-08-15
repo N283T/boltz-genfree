@@ -33,8 +33,8 @@ class ReferenceLigandSelector:
     """A deliberately strict single-residue reference ligand selector."""
 
     chain: str
-    residue: int
-    ccd: str
+    residue: int | None = None
+    ccd: str | None = None
 
 
 def protein_atom_counts(sequence: str) -> tuple[int, ...]:
@@ -134,33 +134,55 @@ def _choose_ligand_residue(
     model: gemmi.Model,
     selector: ReferenceLigandSelector,
 ) -> gemmi.Residue:
-    candidates = [
+    if (selector.residue is None) != (selector.ccd is None):
+        msg = "Reference ligand residue and CCD must be specified together."
+        raise ValueError(msg)
+    chain_candidates = [
         residue
         for chain_name, residue in _ligand_candidates(model)
         if chain_name == selector.chain
-        and residue.seqid.num == selector.residue
-        and residue.name.upper() == selector.ccd
     ]
+    if selector.residue is None:
+        candidates = chain_candidates
+    else:
+        candidates = [
+            residue
+            for residue in chain_candidates
+            if residue.seqid.num == selector.residue
+            and residue.name.upper() == selector.ccd
+        ]
     if not candidates:
-        msg = (
-            "Reference ligand selector matched no residue: "
-            f"chain={selector.chain!r}, residue={selector.residue}, "
-            f"ccd={selector.ccd!r}."
-        )
+        if selector.residue is None:
+            msg = (
+                "Reference ligand chain matched no non-polymer residue: "
+                f"chain={selector.chain!r}."
+            )
+        else:
+            msg = (
+                "Reference ligand selector matched no residue: "
+                f"chain={selector.chain!r}, residue={selector.residue}, "
+                f"ccd={selector.ccd!r}."
+            )
         raise ValueError(msg)
-    if any(residue.seqid.icode.strip() for residue in candidates):
+    if len(candidates) != 1:
+        if selector.residue is None:
+            msg = (
+                "Reference ligand chain matched multiple residues; specify "
+                "reference_ligand with chain, residue, and CCD."
+            )
+        else:
+            msg = (
+                "Reference ligand selector matched multiple residues; preprocess the "
+                "reference so chain, residue, and CCD identify exactly one residue."
+            )
+        raise ValueError(msg)
+    selected = candidates[0]
+    if selected.seqid.icode.strip():
         msg = (
             "Reference ligand uses an insertion code, which is unsupported. "
             "Preprocess the reference to a unique residue without an insertion code."
         )
         raise ValueError(msg)
-    if len(candidates) != 1:
-        msg = (
-            "Reference ligand selector matched multiple residues; preprocess the "
-            "reference so chain, residue, and CCD identify exactly one residue."
-        )
-        raise ValueError(msg)
-    selected = candidates[0]
     if selected.entity_type == gemmi.EntityType.Branched:
         msg = (
             "Multi-residue or branched reference ligands are unsupported; provide "
@@ -238,8 +260,8 @@ def load_reference_crop(
     return ReferenceCrop(
         protein_chain=selected_protein.name,
         ligand_chain=ligand.chain,
-        ligand_residue=ligand.residue,
-        ligand_ccd=ligand.ccd,
+        ligand_residue=selected_ligand.seqid.num,
+        ligand_ccd=selected_ligand.name.upper(),
         seed_order=seed_order,
         blocks=blocks,
     )

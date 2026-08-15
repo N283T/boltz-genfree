@@ -408,7 +408,7 @@ def test_reference_ligand_may_share_protein_author_chain(tmp_path: Path) -> None
     config["target"]["crop"] = {
         "reference": reference.name,
         "reference_protein": "A",
-        "reference_ligand": {"chain": "A", "residue": 1, "ccd": "LIG"},
+        "reference_ligand": "A",
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
@@ -448,7 +448,7 @@ def test_reference_ligand_selector_rejects_zero_and_multiple_matches(
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     config["target"]["crop"] = {
         "reference": reference.name,
-        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
+        "reference_ligand": "L",
     }
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
@@ -464,7 +464,7 @@ def test_reference_ligand_selector_rejects_zero_and_multiple_matches(
         duplicate_candidates,
     )
 
-    with pytest.raises(click.UsageError, match="matched multiple residues"):
+    with pytest.raises(click.UsageError, match="chain matched multiple residues"):
         prepare_screen(config_path)
 
     monkeypatch.setattr(
@@ -472,9 +472,9 @@ def test_reference_ligand_selector_rejects_zero_and_multiple_matches(
         "_ligand_candidates",
         original_candidates,
     )
-    config["target"]["crop"]["reference_ligand"]["residue"] = 999
+    config["target"]["crop"]["reference_ligand"] = "Z"
     config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-    with pytest.raises(click.UsageError, match="matched no residue"):
+    with pytest.raises(click.UsageError, match="matched no non-polymer residue"):
         prepare_screen(config_path)
 
 
