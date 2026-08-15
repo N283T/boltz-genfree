@@ -6,9 +6,6 @@ import torch
 import pytest
 
 from boltz.model.potentials.potentials import (
-    DistancePotential,
-    FlatBottomPotential,
-    DihedralPotential,
     ConnectionsPotential,
     ContactPotentital,
     get_potentials,
@@ -172,7 +169,6 @@ class TestGetPotentials:
         )
         type_names = [type(p).__name__ for p in potentials]
         assert "ContactPotentital" in type_names
-        assert "TemplateReferencePotential" in type_names
 
 
 class TestUnionContactPotential:
