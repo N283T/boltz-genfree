@@ -84,9 +84,11 @@ boltz-stfree screen screen.yaml --prepare-only
 
 The generated inputs and immutable manifest live under
 `<output_dir>/.boltz-stfree/`; per-chunk runtime artifacts live under
-`<output_dir>/runs/`. Re-running the same config resumes through the existing
-Boltz output checks. A changed config or ligand source is rejected rather than
-mixed into existing screen state.
+`<output_dir>/runs/`. Re-running the same input and preprocessing configuration
+resumes through provenance-checked outputs. A changed target, ligand source,
+component cache, MSA source, or preprocessing limit is rejected rather than
+mixed into existing screen state. Operational options such as `override` may be
+changed safely.
 
 With `target.msa: auto`, `screen` calls the configured MSA server exactly once
 for the target and records a checksum beside the shared MSA. Every ligand and
@@ -228,5 +230,6 @@ Run the CPU-focused tests with:
 pytest -m "not slow and not regression" -q
 ```
 
-Generic input, training, and prediction documentation inherited from the
-runtime is available under [`docs/`](docs/).
+Generic structure prediction, training, and intervention workflows are outside
+this product's scope. Their documentation and implementation remain in the
+[separate research/reproduction repository](https://github.com/N283T/boltz2-affinity-interventions-boltz).

@@ -372,9 +372,15 @@ def download_boltz2_ccd(cache: Path) -> None:
             tar.extractall(cache)  # noqa: S202
 
 
-def download_stfree(cache: Path) -> None:
-    """Download only the component data and affinity checkpoint."""
+def download_stfree(
+    cache: Path,
+    *,
+    include_default_affinity: bool = True,
+) -> None:
+    """Download component data and, when needed, the default affinity checkpoint."""
     download_boltz2_ccd(cache)
+    if not include_default_affinity:
+        return
     affinity_model = cache / "boltz2_aff.ckpt"
     if _checkpoint_needs_download(affinity_model, "Boltz-2 affinity weights"):
         click.echo(
@@ -2605,9 +2611,9 @@ def predict(  # noqa: C901, PLR0915, PLR0912
 def screen(config: Path, prepare_only: bool) -> None:
     """Screen one protein target against a ligand library."""
     from boltz.screen import (
-        build_screen_options,
         collect_screen_scores,
         ensure_auto_msa,
+        invalidate_screen_aggregates,
         prepare_screen,
     )
     from boltz.stfree_runtime import run_stfree_chunk
@@ -2616,10 +2622,7 @@ def screen(config: Path, prepare_only: bool) -> None:
         config,
         ensure_ccd_cache=None if prepare_only else download_boltz2_ccd,
     )
-    screen_options = build_screen_options(
-        prepared.options,
-        config_dir=prepared.config_path.parent,
-    )
+    screen_options = prepared.screen_options
     click.echo(
         f"Prepared {len(prepared.chunk_dirs)} chunk(s) in "
         f"{prepared.output_dir}."
@@ -2627,6 +2630,9 @@ def screen(config: Path, prepare_only: bool) -> None:
     if prepare_only:
         click.echo(f"Manifest: {prepared.manifest_path}")
         return
+
+    if screen_options.runtime.override:
+        invalidate_screen_aggregates(prepared)
 
     if prepared.auto_msa_path is not None:
         click.echo("Preparing one shared target MSA for all screen chunks.")

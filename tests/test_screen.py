@@ -19,6 +19,7 @@ from boltz.screen import (
     build_screen_options,
     collect_screen_scores,
     ensure_auto_msa,
+    invalidate_screen_aggregates,
     prepare_screen,
 )
 from boltz.stfree_runtime import stfree_model_kwargs
@@ -229,6 +230,16 @@ def test_auto_msa_is_generated_once_and_verified(tmp_path: Path) -> None:
     metadata_path = prepared.auto_msa_path.with_suffix(".metadata.json")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata["server_url"] == "https://msa.example.test"
+    changed_options = build_screen_options(
+        {**options, "msa_pairing_strategy": "complete"},
+        config_dir=tmp_path,
+    )
+    with pytest.raises(click.ClickException, match="source settings"):
+        ensure_auto_msa(
+            prepared,
+            screen_options=changed_options,
+            compute_msa_fn=fake_compute_msa,
+        )
 
 
 def test_custom_msa_is_hashed_in_manifest(tmp_path: Path) -> None:
@@ -340,6 +351,92 @@ def test_screen_options_reject_structure_route_options(tmp_path: Path) -> None:
         )
 
 
+def test_screen_options_reject_unsupported_accelerator_and_devices(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(click.UsageError, match="gpu, cpu, or mps"):
+        build_screen_options(
+            {"accelerator": "tpu"},
+            config_dir=tmp_path,
+        )
+    with pytest.raises(click.UsageError, match="must be 1"):
+        build_screen_options(
+            {"accelerator": "cpu", "devices": [0, 1]},
+            config_dir=tmp_path,
+        )
+
+
+def test_runtime_options_do_not_change_prepared_input_identity(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        options={"override": False},
+    )
+    first = prepare_screen(config_path)
+    first_manifest = first.manifest_path.read_text(encoding="utf-8")
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["options"]["override"] = True
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    second = prepare_screen(config_path)
+
+    assert second.screen_options.runtime.override is True
+    assert second.manifest_path.read_text(encoding="utf-8") == first_manifest
+
+
+def test_preprocessing_options_are_part_of_prepared_input_identity(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        options={"max_msa_seqs": 1024},
+    )
+    prepare_screen(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["options"]["max_msa_seqs"] = 2048
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(click.UsageError, match="state does not match"):
+        prepare_screen(config_path)
+
+
+def test_cache_and_auto_msa_source_are_part_of_input_identity(tmp_path: Path) -> None:
+    config = {
+        "version": 1,
+        "target": {"sequence": SEQUENCE, "msa": "auto"},
+        "ligands": {"smiles": ["CCO"]},
+        "output_dir": "./output",
+        "options": {
+            "cache": "./cache-one",
+            "msa_server_url": "https://msa-one.example.test",
+        },
+    }
+    config_path = tmp_path / "screen.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    prepare_screen(config_path)
+
+    config["options"]["cache"] = "./cache-two"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(click.UsageError, match="state does not match"):
+        prepare_screen(config_path)
+
+
+def test_override_invalidation_removes_published_aggregates(tmp_path: Path) -> None:
+    prepared = prepare_screen(
+        _write_config(tmp_path, {"smiles": ["CCO"]}),
+    )
+    scores = prepared.output_dir / "scores.csv"
+    summary = prepared.output_dir / "screen_summary.json"
+    scores.write_text("old scores\n", encoding="utf-8")
+    summary.write_text('{"completed": 1}\n', encoding="utf-8")
+
+    invalidate_screen_aggregates(prepared)
+
+    assert not scores.exists()
+    assert not summary.exists()
+
+
 def test_screen_cli_prepare_only_never_runs_inference(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path, {"smiles": ["CCO", "CCN"]})
 
@@ -361,6 +458,7 @@ def test_screen_cli_prepare_only_validates_stfree_options(tmp_path: Path) -> Non
 
     assert result.exit_code != 0
     assert "Unknown Boltz-StFree options" in result.output
+    assert not (tmp_path / "output").exists()
 
 
 def test_screen_cli_runs_chunks_with_stfree_runtime(

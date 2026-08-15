@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import os
 import platform
 import warnings
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import click
+
+_DISTOGRAM_MODE = "zero_distogram_features"
 
 
 @dataclass(frozen=True)
@@ -121,6 +127,159 @@ def _trainer_strategy(
     return DDPStrategy(start_method=start_method), devices
 
 
+@lru_cache(maxsize=8)
+def _cached_file_sha256(path_value: str, size: int, mtime_ns: int) -> str:
+    """Hash a stable file identity once per process."""
+    del size, mtime_ns
+    digest = hashlib.sha256()
+    with Path(path_value).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    """Return a cached digest that invalidates when file metadata changes."""
+    resolved = path.resolve()
+    stat = resolved.stat()
+    return _cached_file_sha256(str(resolved), stat.st_size, stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=1)
+def _runtime_code_sha256() -> str:
+    """Fingerprint the installed Boltz Python implementation."""
+    package_dir = Path(__file__).resolve().parent
+    digest = hashlib.sha256()
+    for path in sorted(package_dir.rglob("*.py")):
+        relative = path.relative_to(package_dir).as_posix().encode()
+        digest.update(relative)
+        digest.update(b"\0")
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+    return digest.hexdigest()
+
+
+def _run_provenance(
+    options: StFreeRuntimeOptions,
+    *,
+    runtime_version: str,
+    checkpoint_sha256: str,
+) -> dict[str, object]:
+    """Build the immutable method identity used to protect resumed screens."""
+    return {
+        "schema_version": 1,
+        "runtime": "boltz-stfree",
+        "runtime_version": runtime_version,
+        "runtime_code_sha256": _runtime_code_sha256(),
+        "affinity_checkpoint_sha256": checkpoint_sha256,
+        "method": {
+            "input_contract": "one_protein_one_ligand",
+            "receptor_selection": "complete_input",
+            "distogram_mode": _DISTOGRAM_MODE,
+            "ligand_reference_conformer": "etkdg",
+            "structure_generation_active": False,
+            "affinity_recycling_steps": options.affinity_recycling_steps,
+            "affinity_mw_correction": options.affinity_mw_correction,
+            "seed": options.seed,
+            "max_msa_seqs": options.max_msa_seqs,
+            "subsample_msa": options.subsample_msa,
+            "num_subsampled_msa": options.num_subsampled_msa,
+            "use_kernels": not options.no_kernels,
+            "flash_attn": options.flash_attn,
+        },
+    }
+
+
+def _validate_resume_state(
+    *,
+    manifest: object,
+    run_dir: Path,
+    provenance: dict[str, object],
+    override: bool,
+) -> None:
+    """Reject malformed or differently-derived scores before resume filtering."""
+    from boltz.data.types import get_affinity_output_id
+
+    score_paths = []
+    for record in manifest.records:
+        output_id = get_affinity_output_id(record)
+        score_paths.append(
+            run_dir
+            / "predictions"
+            / record.id
+            / f"affinity_{output_id}__distogram_{_DISTOGRAM_MODE}.json"
+        )
+    existing = [path for path in score_paths if path.exists()]
+    if override:
+        for path in existing:
+            if not path.is_file() and not path.is_symlink():
+                raise click.ClickException(
+                    f"Cannot replace non-file structure-free output: {path}"
+                )
+            try:
+                path.unlink()
+            except OSError as error:
+                raise click.ClickException(
+                    f"Could not remove structure-free output for override: {path}"
+                ) from error
+        return
+    if not existing:
+        return
+
+    metadata_path = run_dir / "predictions" / "affinity_run_metadata.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise click.ClickException(
+            "Existing structure-free scores have missing or invalid run metadata; "
+            "set options.override: true to recompute them."
+        ) from error
+    metadata_experiment = (
+        metadata.get("experiment", {}) if isinstance(metadata, dict) else {}
+    )
+    if (
+        not isinstance(metadata_experiment, dict)
+        or metadata_experiment.get("provenance") != provenance
+    ):
+        raise click.ClickException(
+            "Existing structure-free scores have different checkpoint or runtime "
+            "provenance; set options.override: true to recompute them."
+        )
+
+    for path in existing:
+        try:
+            score = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise click.ClickException(
+                f"Existing structure-free score is invalid: {path}; set "
+                "options.override: true to recompute it."
+            ) from error
+        if not isinstance(score, dict):
+            raise click.ClickException(
+                f"Existing structure-free score does not match the expected schema: "
+                f"{path}; set options.override: true to recompute it."
+            )
+        scalar_keys = ("affinity_pred_value", "affinity_probability_binary")
+        valid_scalars = all(
+            isinstance(score.get(key), (int, float))
+            and not isinstance(score.get(key), bool)
+            and math.isfinite(float(score[key]))
+            for key in scalar_keys
+        )
+        experiment = score.get("experiment", {})
+        if (
+            not valid_scalars
+            or score.get("distogram_intervention") != _DISTOGRAM_MODE
+            or not isinstance(experiment, dict)
+            or experiment.get("run_metadata_file") != "../affinity_run_metadata.json"
+        ):
+            raise click.ClickException(
+                f"Existing structure-free score does not match the expected schema: "
+                f"{path}; set options.override: true to recompute it."
+            )
+
+
 def stfree_model_kwargs(options: StFreeRuntimeOptions) -> dict[str, object]:
     """Return the fixed model route used by every Boltz-StFree record."""
     from boltz.main import (
@@ -146,7 +305,7 @@ def stfree_model_kwargs(options: StFreeRuntimeOptions) -> dict[str, object]:
         ),
         "steering_args": asdict(steering),
         "affinity_mw_correction": options.affinity_mw_correction,
-        "affinity_distogram_modes": ["zero_distogram_features"],
+        "affinity_distogram_modes": [_DISTOGRAM_MODE],
         "affinity_coordinate_free": True,
         "use_kernels": not options.no_kernels,
         "use_flash_attn": options.flash_attn,
@@ -178,7 +337,6 @@ def run_stfree_chunk(
         _configure_wsl_multiprocessing_tempdir,
         _resolved_input_sources,
         _runtime_version,
-        _sha256_file,
         _validate_checkpoint_for_load,
         check_inputs,
         download_stfree,
@@ -208,7 +366,15 @@ def run_stfree_chunk(
 
     cache = options.cache.expanduser().resolve()
     cache.mkdir(parents=True, exist_ok=True)
-    download_stfree(cache)
+    download_stfree(
+        cache,
+        include_default_affinity=options.affinity_checkpoint is None,
+    )
+    affinity_checkpoint = (
+        options.affinity_checkpoint or cache / "boltz2_aff.ckpt"
+    ).expanduser()
+    _validate_checkpoint_for_load(affinity_checkpoint, "Boltz-2 affinity weights")
+    checkpoint_sha256 = _file_sha256(affinity_checkpoint)
 
     input_paths = check_inputs(data.expanduser().resolve(), skip_bad_inputs=False)
     run_dir = out_dir.expanduser().resolve() / f"boltz_results_{data.stem}"
@@ -238,11 +404,44 @@ def run_stfree_chunk(
     if not manifest.records:
         raise click.ClickException("No valid protein-ligand records were processed.")
     _validate_one_to_one_manifest(manifest)
+    runtime_version = _runtime_version()
+    provenance = _run_provenance(
+        options,
+        runtime_version=runtime_version,
+        checkpoint_sha256=checkpoint_sha256,
+    )
+    experiment_metadata = {
+        "runtime": "boltz-stfree",
+        "runtime_version": runtime_version,
+        "provenance": provenance,
+        "input_sources": _resolved_input_sources(input_paths),
+        "affinity_checkpoint": str(affinity_checkpoint.resolve()),
+        "affinity_checkpoint_sha256": checkpoint_sha256,
+        "seed": options.seed,
+        "input_contract": "one_protein_one_ligand",
+        "receptor_selection": "complete_input",
+        "structure_generation_active": False,
+        "generated_crop_active": False,
+        "coordinate_derived_distogram_active": False,
+        "distogram_modes": [_DISTOGRAM_MODE],
+        "ligand_reference_conformer": "etkdg",
+        "affinity_recycling_steps": options.affinity_recycling_steps,
+        "affinity_sampling_steps": 1,
+        "affinity_diffusion_samples": 1,
+        "affinity_batch_size": 1,
+        "use_kernels": not options.no_kernels,
+    }
+    _validate_resume_state(
+        manifest=manifest,
+        run_dir=run_dir,
+        provenance=provenance,
+        override=options.override,
+    )
     pending = filter_inputs_affinity(
         manifest=manifest,
         outdir=run_dir,
         override=options.override,
-        distogram_modes=("zero_distogram_features",),
+        distogram_modes=(_DISTOGRAM_MODE,),
         output_tag=None,
         require_pre_affinity=False,
     )
@@ -278,11 +477,6 @@ def run_stfree_chunk(
         if options.accelerator == "mps"
         else "cuda"
     )
-    affinity_checkpoint = (
-        options.affinity_checkpoint or cache / "boltz2_aff.ckpt"
-    ).expanduser()
-    _validate_checkpoint_for_load(affinity_checkpoint, "Boltz-2 affinity weights")
-
     writer = BoltzAffinityWriter(
         data_dir=processed.targets_dir,
         output_dir=run_dir / "predictions",
@@ -290,26 +484,7 @@ def run_stfree_chunk(
         write_affinity_representations=False,
         output_tag=None,
         screening_minimal_output=True,
-        experiment_metadata={
-            "runtime": "boltz-stfree",
-            "runtime_version": _runtime_version(),
-            "input_sources": _resolved_input_sources(input_paths),
-            "affinity_checkpoint": str(affinity_checkpoint.resolve()),
-            "affinity_checkpoint_sha256": _sha256_file(affinity_checkpoint),
-            "seed": options.seed,
-            "input_contract": "one_protein_one_ligand",
-            "receptor_selection": "complete_input",
-            "structure_generation_active": False,
-            "generated_crop_active": False,
-            "coordinate_derived_distogram_active": False,
-            "distogram_modes": ["zero_distogram_features"],
-            "ligand_reference_conformer": "etkdg",
-            "affinity_recycling_steps": options.affinity_recycling_steps,
-            "affinity_sampling_steps": 1,
-            "affinity_diffusion_samples": 1,
-            "affinity_batch_size": 1,
-            "use_kernels": not options.no_kernels,
-        },
+        experiment_metadata=experiment_metadata,
     )
     trainer = Trainer(
         default_root_dir=run_dir,

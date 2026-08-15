@@ -79,6 +79,7 @@ class PreparedScreen:
     manifest_path: Path
     chunk_dirs: tuple[Path, ...]
     options: dict[str, Any]
+    screen_options: ScreenOptions
     target_sequence: str
     auto_msa_path: Path | None
 
@@ -485,6 +486,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         raise click.UsageError(
             "screen is full-screen-only and does not accept affinity crop options."
         )
+    screen_options = build_screen_options(options, config_dir=base_dir)
 
     ligands_config = _mapping(config.get("ligands"), "ligands")
     ligands, ligand_provenance = _load_ligands(ligands_config, base_dir)
@@ -555,12 +557,22 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             }
         )
 
+    input_config = {key: value for key, value in config.items() if key != "options"}
+    input_config["preprocessing"] = {
+        "component_cache": str(screen_options.runtime.cache),
+        "max_msa_seqs": screen_options.runtime.max_msa_seqs,
+    }
+    if auto_msa:
+        input_config["preprocessing"]["auto_msa"] = {
+            "server_url": screen_options.msa_server_url,
+            "pairing_strategy": screen_options.msa_pairing_strategy,
+        }
     manifest = {
         "schema_version": 2,
         "config_path": str(config_path),
         "config_sha256": hashlib.sha256(
             json.dumps(
-                config,
+                input_config,
                 ensure_ascii=False,
                 separators=(",", ":"),
                 sort_keys=True,
@@ -609,6 +621,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         manifest_path=manifest_path,
         chunk_dirs=tuple(chunk_dirs),
         options=options,
+        screen_options=screen_options,
         target_sequence=sequence,
         auto_msa_path=auto_msa_path,
     )
@@ -653,6 +666,13 @@ def ensure_auto_msa(
         if metadata.get("sha256") != _sha256(msa_path):
             raise click.ClickException(
                 f"Shared MSA content changed after generation: {msa_path}"
+            )
+        if (
+            metadata.get("server_url") != server_url
+            or metadata.get("pairing_strategy") != pairing_strategy
+        ):
+            raise click.ClickException(
+                f"Shared MSA source settings do not match the screen state: {msa_path}"
             )
         return
     if msa_path.is_file():
@@ -772,8 +792,13 @@ def build_screen_options(
         raise click.UsageError(f"Unknown Boltz-StFree options: {names}")
 
     accelerator = raw_options.get("accelerator", "gpu")
-    if accelerator not in {"gpu", "cpu", "tpu", "mps"}:
-        raise click.UsageError("options.accelerator must be gpu, cpu, tpu, or mps.")
+    if accelerator not in {"gpu", "cpu", "mps"}:
+        raise click.UsageError("options.accelerator must be gpu, cpu, or mps.")
+    devices = _devices_option(raw_options.get("devices", 1))
+    if accelerator in {"cpu", "mps"} and devices != 1:
+        raise click.UsageError(
+            f"options.devices must be 1 when accelerator is {accelerator}."
+        )
     cache = _screen_cache_path(raw_options, config_dir)
     checkpoint_value = raw_options.get("affinity_checkpoint")
     checkpoint = (
@@ -792,7 +817,7 @@ def build_screen_options(
     runtime = StFreeRuntimeOptions(
         cache=cache,
         affinity_checkpoint=checkpoint,
-        devices=_devices_option(raw_options.get("devices", 1)),
+        devices=devices,
         accelerator=accelerator,
         num_workers=_integer_option(raw_options, "num_workers", 2, minimum=0),
         override=_boolean_option(raw_options, "override", False),
@@ -850,6 +875,27 @@ def build_screen_options(
     )
 
 
+def invalidate_screen_aggregates(prepared: PreparedScreen) -> None:
+    """Remove published aggregates before an explicit override starts."""
+    for name in (
+        "scores.csv",
+        "screen_summary.json",
+        ".scores.csv.tmp",
+        ".screen_summary.json.tmp",
+    ):
+        path = prepared.output_dir / name
+        if not path.exists():
+            continue
+        if not path.is_file() and not path.is_symlink():
+            raise click.ClickException(f"Cannot replace non-file screen output: {path}")
+        try:
+            path.unlink()
+        except OSError as error:
+            raise click.ClickException(
+                f"Could not invalidate screen output for override: {path}"
+            ) from error
+
+
 def collect_screen_scores(prepared: PreparedScreen) -> Path:
     """Aggregate compact score JSON files into one CSV and summary JSON."""
     manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
@@ -892,7 +938,8 @@ def collect_screen_scores(prepared: PreparedScreen) -> Path:
         "affinity_pred_value",
         "affinity_probability_binary",
     ]
-    with scores_path.open("w", encoding="utf-8", newline="") as handle:
+    scores_temp = prepared.output_dir / ".scores.csv.tmp"
+    with scores_temp.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=columns)
         writer.writeheader()
         writer.writerows(rows)
@@ -903,10 +950,14 @@ def collect_screen_scores(prepared: PreparedScreen) -> Path:
         "missing": missing,
         "scores": str(scores_path),
     }
-    (prepared.output_dir / "screen_summary.json").write_text(
+    summary_path = prepared.output_dir / "screen_summary.json"
+    summary_temp = prepared.output_dir / ".screen_summary.json.tmp"
+    summary_temp.write_text(
         json.dumps(summary, indent=2) + "\n",
         encoding="utf-8",
     )
+    scores_temp.replace(scores_path)
+    summary_temp.replace(summary_path)
     if missing:
         raise click.ClickException(
             f"Screen is incomplete: {len(rows)}/{len(manifest['records'])} scores."

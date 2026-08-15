@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import click
 import pytest
 
 from boltz.data import const
-from boltz.data.types import AffinityInfo, ChainInfo, Manifest, Record, StructureInfo
+from boltz.data.types import (
+    AffinityInfo,
+    ChainInfo,
+    Manifest,
+    Record,
+    StructureInfo,
+    get_affinity_output_id,
+)
 from boltz.main import download_stfree
 from boltz.stfree_runtime import (
     StFreeRuntimeOptions,
+    _run_provenance,
     _validate_one_to_one_manifest,
+    _validate_resume_state,
     stfree_model_kwargs,
 )
 
@@ -92,3 +102,99 @@ def test_download_stfree_omits_structure_checkpoint(
 
     assert [path.name for path in downloads] == ["boltz2_aff.ckpt"]
     assert not (tmp_path / "boltz2_conf.ckpt").exists()
+
+
+def test_download_stfree_skips_default_checkpoint_for_custom_weight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "mols").mkdir()
+    downloads: list[str] = []
+    monkeypatch.setattr(
+        "boltz.main._download",
+        lambda url, destination: downloads.append(destination),
+    )
+
+    download_stfree(tmp_path, include_default_affinity=False)
+
+    assert downloads == []
+
+
+def _write_existing_score(
+    run_dir: Path,
+    manifest: Manifest,
+    provenance: dict[str, object],
+) -> Path:
+    record = manifest.records[0]
+    output_id = get_affinity_output_id(record)
+    prediction_dir = run_dir / "predictions"
+    score_dir = prediction_dir / record.id
+    score_dir.mkdir(parents=True)
+    (prediction_dir / "affinity_run_metadata.json").write_text(
+        json.dumps({"experiment": {"provenance": provenance}}),
+        encoding="utf-8",
+    )
+    score_path = (
+        score_dir / f"affinity_{output_id}__distogram_zero_distogram_features.json"
+    )
+    score_path.write_text(
+        json.dumps(
+            {
+                "affinity_pred_value": 1.0,
+                "affinity_probability_binary": 0.5,
+                "distogram_intervention": "zero_distogram_features",
+                "experiment": {"run_metadata_file": "../affinity_run_metadata.json"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return score_path
+
+
+def test_resume_rejects_changed_provenance(tmp_path: Path) -> None:
+    manifest = Manifest([_record()])
+    _write_existing_score(tmp_path, manifest, {"checkpoint": "old"})
+
+    with pytest.raises(click.ClickException, match="different checkpoint"):
+        _validate_resume_state(
+            manifest=manifest,
+            run_dir=tmp_path,
+            provenance={"checkpoint": "new"},
+            override=False,
+        )
+
+
+def test_resume_rejects_malformed_score_and_override_removes_old_output(
+    tmp_path: Path,
+) -> None:
+    manifest = Manifest([_record()])
+    provenance = {"checkpoint": "same"}
+    score_path = _write_existing_score(tmp_path, manifest, provenance)
+    score_path.write_text("not-json", encoding="utf-8")
+
+    with pytest.raises(click.ClickException, match="score is invalid"):
+        _validate_resume_state(
+            manifest=manifest,
+            run_dir=tmp_path,
+            provenance=provenance,
+            override=False,
+        )
+    _validate_resume_state(
+        manifest=manifest,
+        run_dir=tmp_path,
+        provenance=provenance,
+        override=True,
+    )
+    assert not score_path.exists()
+
+
+def test_run_provenance_captures_checkpoint_and_method(tmp_path: Path) -> None:
+    provenance = _run_provenance(
+        StFreeRuntimeOptions(cache=tmp_path),
+        runtime_version="test-version",
+        checkpoint_sha256="abc123",
+    )
+
+    assert provenance["affinity_checkpoint_sha256"] == "abc123"
+    assert provenance["method"]["structure_generation_active"] is False
+    assert len(provenance["runtime_code_sha256"]) == 64
