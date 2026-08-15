@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import pickle
 from pathlib import Path
 
 import click
@@ -44,6 +45,18 @@ def _write_config(
     return path
 
 
+def _write_ccd_cache(tmp_path: Path, molecules: dict[str, str]) -> Path:
+    cache = tmp_path / "cache"
+    mol_dir = cache / "mols"
+    mol_dir.mkdir(parents=True)
+    for code, smiles in molecules.items():
+        molecule = Chem.MolFromSmiles(smiles)
+        assert molecule is not None
+        with (mol_dir / f"{code}.pkl").open("wb") as handle:
+            pickle.dump(molecule, handle)
+    return cache
+
+
 def test_prepare_inline_smiles_chunks_and_is_idempotent(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,
@@ -73,6 +86,8 @@ def test_prepare_inline_smiles_chunks_and_is_idempotent(tmp_path: Path) -> None:
     assert first["sequences"][0]["protein"]["msa"] == "empty"
     assert first["sequences"][1]["ligand"] == {"id": "B", "smiles": "CCO"}
     assert first["properties"] == [{"affinity": {"binder": "B"}}]
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    assert [record["ligand_tokens"] for record in manifest["records"]] == [3, 3]
 
 
 def test_prepare_csv_library_resolves_config_relative_path(tmp_path: Path) -> None:
@@ -116,9 +131,11 @@ def test_prepare_sdf_library_uses_molecule_names(tmp_path: Path) -> None:
 
 
 def test_prepare_ccd_library(tmp_path: Path) -> None:
+    _write_ccd_cache(tmp_path, {"ATP": "CCO", "ADP": "CCN"})
     config_path = _write_config(
         tmp_path,
         {"ccd": ["ATP", {"id": "adp-reference", "ccd": "ADP"}]},
+        options={"cache": "./cache"},
     )
 
     prepared = prepare_screen(config_path)
@@ -127,6 +144,25 @@ def test_prepare_ccd_library(tmp_path: Path) -> None:
 
     assert payloads[0]["sequences"][1]["ligand"]["ccd"] == "ATP"
     assert payloads[1]["sequences"][1]["ligand"]["ccd"] == "ADP"
+
+
+def test_prepare_ccd_library_can_populate_missing_cache(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"ccd": ["ATP"]},
+        options={"cache": "./cache"},
+    )
+    calls: list[Path] = []
+
+    def ensure_cache(cache: Path) -> None:
+        calls.append(cache)
+        _write_ccd_cache(tmp_path, {"ATP": "CCO"})
+
+    prepared = prepare_screen(config_path, ensure_ccd_cache=ensure_cache)
+
+    assert calls == [tmp_path / "cache"]
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["records"][0]["ligand_tokens"] == 3
 
 
 def test_auto_msa_enables_server_by_default(tmp_path: Path) -> None:
@@ -212,14 +248,63 @@ def test_custom_msa_is_hashed_in_manifest(tmp_path: Path) -> None:
     assert len(manifest["target"]["msa"]["sha256"]) == 64
 
 
-def test_long_target_requires_external_crop(tmp_path: Path) -> None:
+def test_full_screen_rejects_target_above_200_tokens(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,
         {"smiles": ["CCO"]},
         sequence="A" * 201,
     )
 
-    with pytest.raises(click.UsageError, match="validated external crop"):
+    with pytest.raises(click.UsageError, match="target_tokens=201 exceeds"):
+        prepare_screen(config_path)
+
+
+def test_full_screen_rejects_ligand_above_128_tokens(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": [{"id": "too-large", "smiles": "C" * 129}]},
+    )
+
+    with pytest.raises(click.UsageError, match="too-large: ligand_tokens=129"):
+        prepare_screen(config_path)
+
+
+def test_full_screen_rejects_target_ligand_total_above_256(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": [{"id": "does-not-fit", "smiles": "C" * 57}]},
+        sequence="A" * 200,
+    )
+
+    with pytest.raises(click.UsageError, match=r"200 \+ ligand_tokens=57 = 257"):
+        prepare_screen(config_path)
+
+
+def test_full_screen_warns_above_training_ligand_limit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": [{"id": "large-but-valid", "smiles": "C" * 57}]},
+    )
+
+    prepare_screen(config_path)
+
+    assert "large-but-valid=57" in capsys.readouterr().err
+
+
+def test_screen_rejects_explicit_crop_options(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        options={
+            "affinity_crop_indices_dir": "./crops",
+            "affinity_structure_free_crop_label": "known-pocket-v1",
+        },
+    )
+
+    with pytest.raises(click.UsageError, match="full-screen-only"):
         prepare_screen(config_path)
 
 

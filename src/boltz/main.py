@@ -350,17 +350,9 @@ def download_boltz1(cache: Path) -> None:
                 continue
 
 
-@rank_zero_only
-def download_boltz2(cache: Path) -> None:
-    """Download all the required data.
-
-    Parameters
-    ----------
-    cache : Path
-        The cache directory.
-
-    """
-    # Download CCD
+def download_boltz2_ccd(cache: Path) -> None:
+    """Download and extract the Boltz-2 CCD component cache."""
+    cache.mkdir(parents=True, exist_ok=True)
     mols = cache / "mols"
     tar_mols = cache / "mols.tar"
     if not mols.exists():
@@ -378,6 +370,19 @@ def download_boltz2(cache: Path) -> None:
         )
         with tarfile.open(str(tar_mols), "r") as tar:
             tar.extractall(cache)  # noqa: S202
+
+
+@rank_zero_only
+def download_boltz2(cache: Path) -> None:
+    """Download all the required data.
+
+    Parameters
+    ----------
+    cache : Path
+        The cache directory.
+
+    """
+    download_boltz2_ccd(cache)
 
     # Download model
     model = cache / "boltz2_conf.ckpt"
@@ -2602,7 +2607,10 @@ def screen(ctx: click.Context, config: Path, prepare_only: bool) -> None:
         prepare_screen,
     )
 
-    prepared = prepare_screen(config)
+    prepared = prepare_screen(
+        config,
+        ensure_ccd_cache=None if prepare_only else download_boltz2_ccd,
+    )
     predict_options = build_predict_options(
         prepared.options,
         predict_command=predict,

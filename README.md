@@ -26,9 +26,10 @@ compatibility and research interventions.
 Until the first tagged release, install from a pinned Git commit and expect the
 interface to evolve.
 
-The method requires a relevant receptor context. When the receptor does not fit
-inside one affinity crop, provide a validated external crop. A structure-free
-score is not evidence that Boltz generated or evaluated a physical ligand pose.
+The method requires a relevant receptor context. `screen` only accepts records
+whose complete receptor and ligand fit inside one affinity crop. A
+structure-free score is not evidence that Boltz generated or evaluated a
+physical ligand pose.
 
 ## Install
 
@@ -159,26 +160,28 @@ reference coordinates, and the other managed settings above.
 Minimal output writes one score JSON per record plus shared run metadata. It
 suppresses structure files, full distogram artifacts, and Lightning logs.
 
-## Receptor crop requirements
+## Full-screen eligibility
 
-The affinity crop can contain at most 256 tokens, including at most 128 ligand
-tokens and at most 200 receptor tokens. If the complete receptor fits, the
-default sequence-prefix crop can retain it. For longer receptors, supply
-validated receptor-token indices and a provenance label:
+`screen` validates every library record before generating inputs or starting a
+GPU run. A record passes only when all three conditions hold:
 
-```yaml
-options:
-  affinity_crop_indices_dir: ./crops
-  affinity_structure_free_crop_label: known-pocket-v1
+```text
+target_tokens <= 200
+ligand_tokens <= 128
+target_tokens + ligand_tokens <= 256
 ```
 
-`screen` rejects targets longer than 200 residues unless this external crop is
-configured. Crop files must follow the existing per-record runtime format.
+Small-molecule ligand tokens are counted after the same standardization and
+hydrogen removal used by Boltz affinity parsing. Ligands from 57 through 128
+tokens are accepted with a warning because 56 was the maximum during training.
+Any hard-limit failure names the affected ligand and stops the whole screen;
+`screen` does not crop or silently skip it. Explicit affinity crop options are
+therefore rejected by this command. The lower-level `predict` command remains
+available for research runs that intentionally use external crops.
 
-Do not interpret an arbitrary sequence-prefix crop as pocket discovery. The
-paper found that moving the receptor crop away from the relevant site can
-damage screening even though removing compound-specific pose generation does
-not.
+CCD inputs are checked against the Boltz-2 component cache. A normal `screen`
+run downloads that cache when needed. Offline `--prepare-only` validation
+requires an existing cache, selected with `options.cache` or `BOLTZ_CACHE`.
 
 ## Measured scope
 

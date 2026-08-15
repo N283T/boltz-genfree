@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,9 @@ from typing import Any
 import click
 import yaml
 from rdkit import Chem
+
+from boltz.data.mol import load_molecules
+from boltz.data.parse.schema import standardize
 
 _TOP_LEVEL_KEYS = {
     "version",
@@ -26,6 +30,9 @@ _TOP_LEVEL_KEYS = {
 _TARGET_KEYS = {"id", "sequence", "msa"}
 _LIGAND_SOURCE_KEYS = {"smiles", "csv", "sdf", "ccd"}
 _MAX_SEQUENCE_PREFIX_TOKENS = 200
+_MAX_AFFINITY_TOKENS = 256
+_MAX_LIGAND_TOKENS = 128
+_MAX_TRAINING_LIGAND_TOKENS = 56
 _MANAGED_PREDICT_OPTIONS: dict[str, object] = {
     "model": "boltz2",
     "affinity_structure_free": True,
@@ -257,6 +264,128 @@ def _load_ligands(
     return ligands, provenance
 
 
+def _screen_cache_path(options: dict[str, Any], base_dir: Path) -> Path:
+    cache = options.get("cache")
+    if cache is not None:
+        return _resolve_path(cache, base_dir, "options.cache")
+    env_cache = os.environ.get("BOLTZ_CACHE")
+    if env_cache:
+        return Path(env_cache).expanduser().resolve()
+    return Path("~/.boltz").expanduser().resolve()
+
+
+def _smiles_token_count(ligand: LigandSpec) -> int:
+    """Count ligand tokens using the same standardization as affinity parsing."""
+    try:
+        standardized = standardize(ligand.value)
+        molecule = Chem.MolFromSmiles(standardized)
+        if molecule is None:
+            raise ValueError("RDKit could not parse the standardized SMILES.")
+        molecule.UpdatePropertyCache(strict=True)
+        molecule = Chem.AddHs(molecule)
+        molecule = Chem.RemoveHs(molecule, sanitize=False)
+    except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+        raise click.UsageError(
+            f"Ligand {ligand.identifier!r} failed SMILES preprocessing: {error}"
+        ) from error
+    return molecule.GetNumAtoms()
+
+
+def _ccd_token_counts(
+    ligands: list[LigandSpec],
+    *,
+    cache: Path,
+    ensure_ccd_cache: Callable[[Path], None] | None,
+) -> dict[str, int]:
+    """Load CCD molecules and return their atom-token counts."""
+    codes = sorted({ligand.value for ligand in ligands})
+    mol_dir = cache / "mols"
+    missing = [code for code in codes if not (mol_dir / f"{code}.pkl").is_file()]
+    if missing and ensure_ccd_cache is not None:
+        ensure_ccd_cache(cache)
+        missing = [code for code in codes if not (mol_dir / f"{code}.pkl").is_file()]
+    if missing:
+        shown = ", ".join(missing[:10])
+        remainder = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
+        raise click.UsageError(
+            "Cannot validate CCD ligand tokens because the component cache is "
+            f"missing {shown}{remainder} under {mol_dir}. Run a normal screen to "
+            "download the CCD cache, or set options.cache to an existing Boltz-2 "
+            "cache."
+        )
+
+    molecules = load_molecules(str(mol_dir), codes)
+    return {code: molecule.GetNumAtoms() for code, molecule in molecules.items()}
+
+
+def _validate_full_screen(
+    sequence: str,
+    ligands: list[LigandSpec],
+    *,
+    cache: Path,
+    ensure_ccd_cache: Callable[[Path], None] | None,
+) -> list[int]:
+    """Require every record to retain the complete receptor and ligand."""
+    target_tokens = len(sequence)
+    if target_tokens > _MAX_SEQUENCE_PREFIX_TOKENS:
+        raise click.UsageError(
+            "Full-screen validation failed: "
+            f"target_tokens={target_tokens} exceeds the 200-token receptor limit."
+        )
+
+    ccd_ligands = [ligand for ligand in ligands if ligand.kind == "ccd"]
+    ccd_counts = (
+        _ccd_token_counts(
+            ccd_ligands,
+            cache=cache,
+            ensure_ccd_cache=ensure_ccd_cache,
+        )
+        if ccd_ligands
+        else {}
+    )
+    token_counts = [
+        _smiles_token_count(ligand)
+        if ligand.kind == "smiles"
+        else ccd_counts[ligand.value]
+        for ligand in ligands
+    ]
+
+    failures: list[str] = []
+    warnings: list[str] = []
+    for ligand, ligand_tokens in zip(ligands, token_counts, strict=True):
+        reasons: list[str] = []
+        if ligand_tokens > _MAX_LIGAND_TOKENS:
+            reasons.append(f"ligand_tokens={ligand_tokens} exceeds 128")
+        total_tokens = target_tokens + ligand_tokens
+        if total_tokens > _MAX_AFFINITY_TOKENS:
+            reasons.append(
+                f"target_tokens={target_tokens} + ligand_tokens={ligand_tokens} "
+                f"= {total_tokens} exceeds 256"
+            )
+        if reasons:
+            failures.append(f"{ligand.identifier}: " + "; ".join(reasons))
+        elif ligand_tokens > _MAX_TRAINING_LIGAND_TOKENS:
+            warnings.append(f"{ligand.identifier}={ligand_tokens}")
+
+    if failures:
+        details = "\n".join(f"  - {failure}" for failure in failures[:20])
+        if len(failures) > 20:
+            details += f"\n  - ... and {len(failures) - 20} more"
+        raise click.UsageError(
+            f"Full-screen validation failed for {len(failures)} ligand(s):\n{details}"
+        )
+    if warnings:
+        details = ", ".join(warnings[:20])
+        if len(warnings) > 20:
+            details += f", ... and {len(warnings) - 20} more"
+        click.echo(
+            "Warning: ligand tokens above the 56-token training maximum; "
+            f"affinity estimates may be inaccurate: {details}",
+            err=True,
+        )
+    return token_counts
+
+
 def _load_config(config_path: Path) -> dict[str, Any]:
     with config_path.open(encoding="utf-8") as handle:
         loaded = yaml.safe_load(handle)
@@ -272,6 +401,8 @@ def _load_config(config_path: Path) -> dict[str, Any]:
 
 def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     config_path: Path,
+    *,
+    ensure_ccd_cache: Callable[[Path], None] | None = None,
 ) -> PreparedScreen:
     """Validate a screen config and generate deterministic Boltz YAML chunks."""
     config_path = config_path.expanduser().resolve()
@@ -314,8 +445,29 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     else:
         msa_provenance = {"mode": "empty"}
 
+    raw_options = _mapping(config.get("options", {}), "options")
+    options: dict[str, Any] = {}
+    for raw_name, value in raw_options.items():
+        name = _normalize_option_name(raw_name)
+        if name in options:
+            raise click.UsageError(f"Duplicate normalized option: {name}")
+        options[name] = value
+    if {
+        "affinity_crop_indices_dir",
+        "affinity_structure_free_crop_label",
+    } & options.keys():
+        raise click.UsageError(
+            "screen is full-screen-only and does not accept affinity crop options."
+        )
+
     ligands_config = _mapping(config.get("ligands"), "ligands")
     ligands, ligand_provenance = _load_ligands(ligands_config, base_dir)
+    ligand_token_counts = _validate_full_screen(
+        sequence,
+        ligands,
+        cache=_screen_cache_path(options, base_dir),
+        ensure_ccd_cache=ensure_ccd_cache,
+    )
 
     chunk_size = config.get("chunk_size", 1000)
     if (
@@ -335,33 +487,19 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     if auto_msa_path is not None:
         msa_provenance["path"] = str(auto_msa_path)
 
-    raw_options = _mapping(config.get("options", {}), "options")
-    options: dict[str, Any] = {}
-    for raw_name, value in raw_options.items():
-        name = _normalize_option_name(raw_name)
-        if name in options:
-            raise click.UsageError(f"Duplicate normalized option: {name}")
-        options[name] = value
     if auto_msa:
         if options.get("use_msa_server") is False:
             raise click.UsageError(
                 "target.msa is auto but options.use_msa_server is false."
             )
         options.setdefault("use_msa_server", True)
-    if (
-        len(sequence) > _MAX_SEQUENCE_PREFIX_TOKENS
-        and "affinity_crop_indices_dir" not in options
-    ):
-        raise click.UsageError(
-            "Targets longer than 200 residues require a validated external crop via "
-            "options.affinity_crop_indices_dir and "
-            "options.affinity_structure_free_crop_label."
-        )
-
     records: list[dict[str, Any]] = []
     expected_files: dict[Path, str] = {}
     chunk_dirs: list[Path] = []
-    for index, ligand in enumerate(ligands, start=1):
+    for index, (ligand, ligand_tokens) in enumerate(
+        zip(ligands, ligand_token_counts, strict=True),
+        start=1,
+    ):
         chunk_index = (index - 1) // chunk_size
         chunk_dir = inputs_dir / f"chunk_{chunk_index:05d}"
         if not chunk_dirs or chunk_dirs[-1] != chunk_dir:
@@ -392,12 +530,13 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
                 "ligand_id": ligand.identifier,
                 "ligand_kind": ligand.kind,
                 "ligand_value": ligand.value,
+                "ligand_tokens": ligand_tokens,
                 "chunk": chunk_dir.name,
             }
         )
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "config_path": str(config_path),
         "config_sha256": hashlib.sha256(
             json.dumps(
@@ -641,6 +780,7 @@ def collect_screen_scores(prepared: PreparedScreen) -> Path:
         "ligand_id",
         "ligand_kind",
         "ligand_value",
+        "ligand_tokens",
         "chunk",
         "affinity_pred_value",
         "affinity_probability_binary",
