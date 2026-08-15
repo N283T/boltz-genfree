@@ -16,6 +16,7 @@ from boltz.data.crop.affinity import AffinityCropper
 from boltz.data.feature.featurizerv2 import Boltz2Featurizer
 from boltz.data.mol import load_canonicals, load_molecules
 from boltz.data.pad import pad_to_max
+from boltz.data.parse.schema import compute_3d_conformer
 from boltz.data.tokenize.boltz2 import Boltz2Tokenizer
 from boltz.data.types import (
     MSA,
@@ -32,11 +33,12 @@ def prepare_ligand_reference_conformers(
     molecules: dict,
     tokenized: Tokenized,
     mode: str,
+    etkdg_seed: int | None = None,
 ) -> dict:
     """Prepare ligand-local conformers used by the atom input encoder."""
-    if mode in {"etkdg", "all_zero"}:
+    if mode == "skip" or (mode == "etkdg" and etkdg_seed is None):
         return molecules
-    if mode != "rdkit_2d":
+    if mode not in {"etkdg", "rdkit_2d"}:
         msg = f"Unsupported ligand reference conformer mode: {mode}"
         raise ValueError(msg)
 
@@ -49,7 +51,15 @@ def prepare_ligand_reference_conformers(
     for name in ligand_names:
         mol = Chem.Mol(molecules[name])
         mol.RemoveAllConformers()
-        rdDepictor.Compute2DCoords(mol)
+        if mode == "rdkit_2d":
+            rdDepictor.Compute2DCoords(mol)
+        else:
+            mol = Chem.AddHs(mol)
+            if not compute_3d_conformer(mol, random_seed=etkdg_seed):
+                smiles = Chem.MolToSmiles(Chem.RemoveHs(mol))
+                msg = f"Failed to compute ETKDG conformer for {smiles}"
+                raise ValueError(msg)
+            mol = Chem.RemoveHs(mol, sanitize=False)
         prepared[name] = mol
     return prepared
 
@@ -61,7 +71,7 @@ def apply_ligand_reference_position_intervention(
     """Apply an exact post-featurization intervention to ligand ref_pos."""
     if mode in {"etkdg", "rdkit_2d"}:
         return features
-    if mode != "all_zero":
+    if mode != "skip":
         msg = f"Unsupported ligand reference conformer mode: {mode}"
         raise ValueError(msg)
 
@@ -229,6 +239,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         affinity_structure_free_single_sequence: bool = False,
         affinity_sequence_window_start: int = 0,
         affinity_ligand_ref_pos_mode: str = "etkdg",
+        affinity_ligand_ref_pos_seed: int | None = None,
         affinity_require_full_input: bool = False,
     ) -> None:
         """Initialize the training dataset.
@@ -271,6 +282,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         )
         self.affinity_sequence_window_start = affinity_sequence_window_start
         self.affinity_ligand_ref_pos_mode = affinity_ligand_ref_pos_mode
+        self.affinity_ligand_ref_pos_seed = affinity_ligand_ref_pos_seed
         self.affinity_require_full_input = affinity_require_full_input
         if self.affinity:
             self.cropper = AffinityCropper()
@@ -424,12 +436,12 @@ class PredictionDataset(torch.utils.data.Dataset):
         if uncached:
             self._mol_cache.update(load_molecules(self.mol_dir, uncached))
         molecules.update({k: self._mol_cache[k] for k in mol_names})
-        if self.affinity_ligand_ref_pos_mode != "etkdg":
-            molecules = prepare_ligand_reference_conformers(
-                molecules,
-                tokenized,
-                self.affinity_ligand_ref_pos_mode,
-            )
+        molecules = prepare_ligand_reference_conformers(
+            molecules,
+            tokenized,
+            self.affinity_ligand_ref_pos_mode,
+            self.affinity_ligand_ref_pos_seed,
+        )
 
         # Inference specific options
         options = record.inference_options
@@ -511,6 +523,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         affinity_structure_free_single_sequence: bool = False,
         affinity_sequence_window_start: int = 0,
         affinity_ligand_ref_pos_mode: str = "etkdg",
+        affinity_ligand_ref_pos_seed: int | None = None,
         affinity_require_full_input: bool = False,
         pin_memory: bool = True,
     ) -> None:
@@ -565,6 +578,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         )
         self.affinity_sequence_window_start = affinity_sequence_window_start
         self.affinity_ligand_ref_pos_mode = affinity_ligand_ref_pos_mode
+        self.affinity_ligand_ref_pos_seed = affinity_ligand_ref_pos_seed
         self.affinity_require_full_input = affinity_require_full_input
         self.pin_memory = pin_memory
 
@@ -597,6 +611,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             ),
             affinity_sequence_window_start=self.affinity_sequence_window_start,
             affinity_ligand_ref_pos_mode=self.affinity_ligand_ref_pos_mode,
+            affinity_ligand_ref_pos_seed=self.affinity_ligand_ref_pos_seed,
             affinity_require_full_input=self.affinity_require_full_input,
         )
         return DataLoader(

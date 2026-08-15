@@ -197,4 +197,27 @@ def test_run_provenance_captures_checkpoint_and_method(tmp_path: Path) -> None:
 
     assert provenance["affinity_checkpoint_sha256"] == "abc123"
     assert provenance["method"]["structure_generation_active"] is False
+    assert provenance["method"]["ligand_reference_conformer"] == {
+        "mode": "skip",
+        "reference_positions": "zero",
+        "etkdg_seed": None,
+    }
     assert len(provenance["runtime_code_sha256"]) == 64
+
+
+def test_run_provenance_records_seeded_etkdg(tmp_path: Path) -> None:
+    provenance = _run_provenance(
+        StFreeRuntimeOptions(
+            cache=tmp_path,
+            ligand_reference_conformer="etkdg",
+            etkdg_seed=17,
+        ),
+        runtime_version="test-version",
+        checkpoint_sha256="abc123",
+    )
+
+    assert provenance["method"]["ligand_reference_conformer"] == {
+        "mode": "etkdg",
+        "reference_positions": "etkdg_v3_uff",
+        "etkdg_seed": 17,
+    }

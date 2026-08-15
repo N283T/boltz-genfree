@@ -567,10 +567,33 @@ def test_screen_options_are_yaml_driven_and_limited(tmp_path: Path) -> None:
     assert options.runtime.num_workers == 4
     assert options.runtime.cache == (tmp_path / "cache").resolve()
     assert options.runtime.affinity_recycling_steps == 3
+    assert options.runtime.ligand_reference_conformer == "skip"
+    assert options.runtime.etkdg_seed == 42
     model_options = stfree_model_kwargs(options.runtime)
     assert model_options["affinity_coordinate_free"] is True
     assert model_options["affinity_distogram_modes"] == ["zero_distogram_features"]
     assert model_options["skip_run_structure"] is True
+
+
+def test_screen_options_allow_seeded_etkdg(tmp_path: Path) -> None:
+    options = build_screen_options(
+        {
+            "ligand_reference_conformer": "etkdg",
+            "etkdg_seed": 17,
+        },
+        config_dir=tmp_path,
+    )
+
+    assert options.runtime.ligand_reference_conformer == "etkdg"
+    assert options.runtime.etkdg_seed == 17
+
+
+def test_screen_options_reject_unknown_ligand_conformer(tmp_path: Path) -> None:
+    with pytest.raises(click.UsageError, match="must be skip or etkdg"):
+        build_screen_options(
+            {"ligand_reference_conformer": "rdkit_2d"},
+            config_dir=tmp_path,
+        )
 
 
 def test_screen_options_reject_structure_route_options(tmp_path: Path) -> None:

@@ -73,6 +73,7 @@ options:
   seed: 20260718
   num_workers: 2
   affinity_recycling_steps: 0
+  ligand_reference_conformer: skip
 ```
 
 Then run:
@@ -141,8 +142,7 @@ screen config.
 ### Runtime options
 
 Keys below `options` may use `snake_case` or CLI-style hyphenated names.
-Boltz-StFree deliberately exposes only settings that do not change the
-structure-free method:
+Boltz-StFree keeps the method surface deliberately small:
 
 ```text
 cache, affinity_checkpoint
@@ -151,14 +151,26 @@ seed, override
 max_msa_seqs, subsample_msa, num_subsampled_msa
 no_kernels, flash_attn
 affinity_mw_correction, affinity_recycling_steps
+ligand_reference_conformer, etkdg_seed
 msa_server_url, msa_pairing_strategy and MSA authentication settings
 ```
 
 Every run uses Boltz-2, the affinity checkpoint, complete-input receptor
-selection or a reference-derived receptor crop, ETKDG ligand reference
-coordinates, zero distogram features, one
+selection or a reference-derived receptor crop, zero distogram features, one
 record per affinity batch, one nominal diffusion sample, no structure
-sampling, and compact output. These route-defining values cannot be overridden.
+sampling, and compact output. Ligand conformer generation defaults to `skip`;
+the ligand reference-position tensor is explicitly zeroed in this mode.
+For comparison runs, deterministic ETKDGv3 plus UFF can be enabled with:
+
+```yaml
+options:
+  ligand_reference_conformer: etkdg
+  etkdg_seed: 42
+```
+
+The mode and effective ETKDG seed are recorded in run provenance, so outputs
+from different conformer conditions cannot be resumed together. SDF records
+are canonicalized to SMILES; their supplied coordinates are not reused.
 Affinity recycling defaults to 0 but remains configurable from 0 through 5.
 CUDA kernels remain enabled unless `options.no_kernels` is true.
 

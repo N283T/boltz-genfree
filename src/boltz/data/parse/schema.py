@@ -198,8 +198,12 @@ def convert_atom_name(name: str) -> tuple[int, int, int, int]:
     return tuple(name)
 
 
-def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
-    """Generate 3D coordinates using EKTDG method.
+def compute_3d_conformer(
+    mol: Mol,
+    version: str = "v3",
+    random_seed: int | None = None,
+) -> bool:
+    """Generate 3D coordinates using the ETKDG method.
 
     Taken from `pdbeccdutils.core.component.Component`.
 
@@ -208,7 +212,9 @@ def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
     mol: Mol
         The RDKit molecule to process
     version: str, optional
-        The ETKDG version, defaults ot v3
+        The ETKDG version, defaults to v3.
+    random_seed: int, optional
+        The deterministic RDKit seed. By default, RDKit selects its own seed.
 
     Returns
     -------
@@ -224,6 +230,8 @@ def compute_3d_conformer(mol: Mol, version: str = "v3") -> bool:
         options = AllChem.ETKDGv2()
 
     options.clearConfs = False
+    if random_seed is not None:
+        options.randomSeed = random_seed
     conf_id = -1
 
     try:
@@ -1377,7 +1385,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             if skip_ligand_conformer_generation:
                 conformer = Conformer(mol.GetNumAtoms())
                 conformer.Set3D(False)
-                conformer.SetProp("coord_generation", "all_zero_structure_free")
+                conformer.SetProp("coord_generation", "skipped_structure_free")
                 mol.AddConformer(conformer, assignId=True)
             else:
                 success = compute_3d_conformer(mol)
