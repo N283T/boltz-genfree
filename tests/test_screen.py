@@ -13,13 +13,16 @@ import yaml
 from click.testing import CliRunner
 from rdkit import Chem
 
-from boltz.main import cli, predict
+import boltz.stfree_runtime as stfree_runtime
+from boltz.main import cli
 from boltz.screen import (
-    build_predict_options,
+    build_screen_options,
     collect_screen_scores,
     ensure_auto_msa,
+    invalidate_screen_aggregates,
     prepare_screen,
 )
+from boltz.stfree_runtime import stfree_model_kwargs
 
 SEQUENCE = "QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEI"
 
@@ -177,7 +180,7 @@ def test_auto_msa_enables_server_by_default(tmp_path: Path) -> None:
 
     prepared = prepare_screen(path)
 
-    assert prepared.options["use_msa_server"] is True
+    assert "use_msa_server" not in prepared.options
     assert prepared.auto_msa_path == (tmp_path / "output/.boltz-stfree/msa/target.csv")
     generated = next(prepared.output_dir.glob(".boltz-stfree/inputs/chunk_*/*.yaml"))
     payload = yaml.safe_load(generated.read_text(encoding="utf-8"))
@@ -209,14 +212,15 @@ def test_auto_msa_is_generated_once_and_verified(tmp_path: Path) -> None:
         "msa_server_url": "https://msa.example.test",
         "msa_pairing_strategy": "greedy",
     }
+    screen_options = build_screen_options(options, config_dir=tmp_path)
     ensure_auto_msa(
         prepared,
-        predict_options=options,
+        screen_options=screen_options,
         compute_msa_fn=fake_compute_msa,
     )
     ensure_auto_msa(
         prepared,
-        predict_options=options,
+        screen_options=screen_options,
         compute_msa_fn=fake_compute_msa,
     )
 
@@ -226,6 +230,16 @@ def test_auto_msa_is_generated_once_and_verified(tmp_path: Path) -> None:
     metadata_path = prepared.auto_msa_path.with_suffix(".metadata.json")
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     assert metadata["server_url"] == "https://msa.example.test"
+    changed_options = build_screen_options(
+        {**options, "msa_pairing_strategy": "complete"},
+        config_dir=tmp_path,
+    )
+    with pytest.raises(click.ClickException, match="source settings"):
+        ensure_auto_msa(
+            prepared,
+            screen_options=changed_options,
+            compute_msa_fn=fake_compute_msa,
+        )
 
 
 def test_custom_msa_is_hashed_in_manifest(tmp_path: Path) -> None:
@@ -308,37 +322,119 @@ def test_screen_rejects_explicit_crop_options(tmp_path: Path) -> None:
         prepare_screen(config_path)
 
 
-def test_predict_options_are_yaml_driven_but_route_is_managed(tmp_path: Path) -> None:
-    parent_context = click.Context(cli)
-    options = build_predict_options(
+def test_screen_options_are_yaml_driven_and_limited(tmp_path: Path) -> None:
+    options = build_screen_options(
         {
             "devices": 1,
             "num_workers": 4,
             "cache": "./cache",
             "affinity_recycling_steps": 3,
         },
-        predict_command=predict,
         config_dir=tmp_path,
-        parent_context=parent_context,
     )
 
-    assert options["devices"] == 1
-    assert options["num_workers"] == 4
-    assert options["cache"] == str((tmp_path / "cache").resolve())
-    assert options["affinity_recycling_steps"] == 3
-    assert options["affinity_structure_free"] is True
-    assert options["affinity_distogram_modes"] == ("zero_distogram_features",)
-    assert options["affinity_screening_minimal_output"] is True
+    assert options.runtime.devices == 1
+    assert options.runtime.num_workers == 4
+    assert options.runtime.cache == (tmp_path / "cache").resolve()
+    assert options.runtime.affinity_recycling_steps == 3
+    model_options = stfree_model_kwargs(options.runtime)
+    assert model_options["affinity_coordinate_free"] is True
+    assert model_options["affinity_distogram_modes"] == ["zero_distogram_features"]
+    assert model_options["skip_run_structure"] is True
 
 
-def test_predict_options_reject_managed_route_override(tmp_path: Path) -> None:
-    with pytest.raises(click.UsageError, match="managed by screen"):
-        build_predict_options(
+def test_screen_options_reject_structure_route_options(tmp_path: Path) -> None:
+    with pytest.raises(click.UsageError, match="Unknown Boltz-StFree options"):
+        build_screen_options(
             {"affinity_distogram_modes": ["control"]},
-            predict_command=predict,
             config_dir=tmp_path,
-            parent_context=click.Context(cli),
         )
+
+
+def test_screen_options_reject_unsupported_accelerator_and_devices(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(click.UsageError, match="gpu, cpu, or mps"):
+        build_screen_options(
+            {"accelerator": "tpu"},
+            config_dir=tmp_path,
+        )
+    with pytest.raises(click.UsageError, match="must be 1"):
+        build_screen_options(
+            {"accelerator": "cpu", "devices": [0, 1]},
+            config_dir=tmp_path,
+        )
+
+
+def test_runtime_options_do_not_change_prepared_input_identity(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        options={"override": False},
+    )
+    first = prepare_screen(config_path)
+    first_manifest = first.manifest_path.read_text(encoding="utf-8")
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["options"]["override"] = True
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    second = prepare_screen(config_path)
+
+    assert second.screen_options.runtime.override is True
+    assert second.manifest_path.read_text(encoding="utf-8") == first_manifest
+
+
+def test_preprocessing_options_are_part_of_prepared_input_identity(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        options={"max_msa_seqs": 1024},
+    )
+    prepare_screen(config_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["options"]["max_msa_seqs"] = 2048
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(click.UsageError, match="state does not match"):
+        prepare_screen(config_path)
+
+
+def test_cache_and_auto_msa_source_are_part_of_input_identity(tmp_path: Path) -> None:
+    config = {
+        "version": 1,
+        "target": {"sequence": SEQUENCE, "msa": "auto"},
+        "ligands": {"smiles": ["CCO"]},
+        "output_dir": "./output",
+        "options": {
+            "cache": "./cache-one",
+            "msa_server_url": "https://msa-one.example.test",
+        },
+    }
+    config_path = tmp_path / "screen.yaml"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    prepare_screen(config_path)
+
+    config["options"]["cache"] = "./cache-two"
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    with pytest.raises(click.UsageError, match="state does not match"):
+        prepare_screen(config_path)
+
+
+def test_override_invalidation_removes_published_aggregates(tmp_path: Path) -> None:
+    prepared = prepare_screen(
+        _write_config(tmp_path, {"smiles": ["CCO"]}),
+    )
+    scores = prepared.output_dir / "scores.csv"
+    summary = prepared.output_dir / "screen_summary.json"
+    scores.write_text("old scores\n", encoding="utf-8")
+    summary.write_text('{"completed": 1}\n', encoding="utf-8")
+
+    invalidate_screen_aggregates(prepared)
+
+    assert not scores.exists()
+    assert not summary.exists()
 
 
 def test_screen_cli_prepare_only_never_runs_inference(tmp_path: Path) -> None:
@@ -351,20 +447,21 @@ def test_screen_cli_prepare_only_never_runs_inference(tmp_path: Path) -> None:
     assert "Manifest:" in result.output
 
 
-def test_screen_cli_prepare_only_validates_predict_options(tmp_path: Path) -> None:
+def test_screen_cli_prepare_only_validates_stfree_options(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,
         {"smiles": ["CCO"]},
-        options={"not_a_predict_option": True},
+        options={"not_a_stfree_option": True},
     )
 
     result = CliRunner().invoke(cli, ["screen", str(config_path), "--prepare-only"])
 
     assert result.exit_code != 0
-    assert "Unknown or reserved predict option" in result.output
+    assert "Unknown Boltz-StFree options" in result.output
+    assert not (tmp_path / "output").exists()
 
 
-def test_screen_cli_runs_chunks_with_managed_options(
+def test_screen_cli_runs_chunks_with_stfree_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -376,18 +473,15 @@ def test_screen_cli_runs_chunks_with_managed_options(
     )
     calls: list[dict[str, object]] = []
 
-    def fake_predict(**kwargs: object) -> None:
-        calls.append(kwargs)
-        assert kwargs["affinity_structure_free"] is True
-        assert kwargs["affinity_structure_free_fast"] is True
-        assert kwargs["affinity_screening_minimal_output"] is True
-        assert kwargs["affinity_distogram_modes"] == ("zero_distogram_features",)
-        data_dir = Path(str(kwargs["data"]))
-        prediction_root = (
-            Path(str(kwargs["out_dir"]))
-            / f"boltz_results_{data_dir.stem}"
-            / "predictions"
-        )
+    def fake_run_stfree_chunk(
+        *,
+        data: Path,
+        out_dir: Path,
+        options: object,
+    ) -> None:
+        calls.append({"data": data, "out_dir": out_dir, "options": options})
+        data_dir = data
+        prediction_root = out_dir / f"boltz_results_{data_dir.stem}" / "predictions"
         for input_path in data_dir.glob("*.yaml"):
             record_dir = prediction_root / input_path.stem
             record_dir.mkdir(parents=True)
@@ -404,15 +498,23 @@ def test_screen_cli_runs_chunks_with_managed_options(
                 encoding="utf-8",
             )
 
-    monkeypatch.setattr(predict, "callback", fake_predict)
+    monkeypatch.setattr(stfree_runtime, "run_stfree_chunk", fake_run_stfree_chunk)
 
     result = CliRunner().invoke(cli, ["screen", str(config_path)])
 
     assert result.exit_code == 0, result.output
     assert len(calls) == 2
-    assert all(call["num_workers"] == 3 for call in calls)
+    assert all(call["options"].num_workers == 3 for call in calls)
     assert (tmp_path / "output/scores.csv").is_file()
     assert "Screen complete" in result.output
+
+
+def test_cli_exposes_only_screen() -> None:
+    result = CliRunner().invoke(cli, ["--help"])
+
+    assert result.exit_code == 0
+    assert "screen" in result.output
+    assert "predict" not in result.output
 
 
 def test_collect_screen_scores_preserves_library_identity(tmp_path: Path) -> None:
