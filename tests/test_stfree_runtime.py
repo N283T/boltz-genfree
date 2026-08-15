@@ -20,6 +20,7 @@ from boltz.data.types import (
 from boltz.main import download_stfree
 from boltz.stfree_runtime import (
     StFreeRuntimeOptions,
+    _prune_stfree_model,
     _run_provenance,
     _validate_one_to_one_manifest,
     _validate_resume_state,
@@ -83,6 +84,52 @@ def test_model_route_never_runs_structure_sampling(tmp_path: Path) -> None:
     assert kwargs["skip_run_structure"] is True
     assert kwargs["skip_confidence_forward"] is True
     assert kwargs["skip_pdistogram_forward"] is True
+
+
+def test_stfree_model_pruning_removes_only_unreachable_modules() -> None:
+    class Model:
+        affinity_coordinate_free = True
+        skip_run_structure = True
+        skip_confidence_forward = True
+        skip_pdistogram_forward = True
+        structure_module = object()
+        diffusion_conditioning = object()
+        confidence_module = object()
+        distogram_module = object()
+        bfactor_module = object()
+        affinity_module1 = object()
+        affinity_module2 = object()
+
+    model = Model()
+
+    removed = _prune_stfree_model(model)
+
+    assert removed == (
+        "structure_module",
+        "diffusion_conditioning",
+        "confidence_module",
+        "distogram_module",
+        "bfactor_module",
+    )
+    assert all(getattr(model, name) is None for name in removed)
+    assert model.affinity_module1 is not None
+    assert model.affinity_module2 is not None
+
+
+def test_stfree_model_pruning_rejects_an_active_structure_route() -> None:
+    model = type(
+        "Model",
+        (),
+        {
+            "affinity_coordinate_free": True,
+            "skip_run_structure": False,
+            "skip_confidence_forward": True,
+            "skip_pdistogram_forward": True,
+        },
+    )()
+
+    with pytest.raises(RuntimeError, match="skip_run_structure"):
+        _prune_stfree_model(model)
 
 
 def test_download_stfree_omits_structure_checkpoint(
