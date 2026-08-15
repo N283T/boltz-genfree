@@ -372,6 +372,32 @@ def download_boltz2_ccd(cache: Path) -> None:
             tar.extractall(cache)  # noqa: S202
 
 
+def download_stfree(cache: Path) -> None:
+    """Download only the component data and affinity checkpoint."""
+    download_boltz2_ccd(cache)
+    affinity_model = cache / "boltz2_aff.ckpt"
+    if _checkpoint_needs_download(affinity_model, "Boltz-2 affinity weights"):
+        click.echo(
+            f"Downloading the Boltz-2 affinity weights to {affinity_model}. You may "
+            "change the cache directory with options.cache."
+        )
+        for index, url in enumerate(BOLTZ2_AFFINITY_URL_WITH_FALLBACK):
+            try:
+                _download(url, str(affinity_model))
+                _validate_checkpoint_for_load(
+                    affinity_model,
+                    "Boltz-2 affinity weights",
+                )
+                break
+            except Exception as error:  # noqa: BLE001
+                if index == len(BOLTZ2_AFFINITY_URL_WITH_FALLBACK) - 1:
+                    msg = (
+                        "Failed to download the affinity checkpoint from all URLs. "
+                        f"Last error: {error}"
+                    )
+                    raise RuntimeError(msg) from error
+
+
 @rank_zero_only
 def download_boltz2(cache: Path) -> None:
     """Download all the required data.
@@ -382,7 +408,7 @@ def download_boltz2(cache: Path) -> None:
         The cache directory.
 
     """
-    download_boltz2_ccd(cache)
+    download_stfree(cache)
 
     # Download model
     model = cache / "boltz2_conf.ckpt"
@@ -401,27 +427,6 @@ def download_boltz2(cache: Path) -> None:
                     msg = f"Failed to download model from all URLs. Last error: {e}"
                     raise RuntimeError(msg) from e
                 continue
-
-    # Download affinity model
-    affinity_model = cache / "boltz2_aff.ckpt"
-    if _checkpoint_needs_download(affinity_model, "Boltz-2 affinity weights"):
-        click.echo(
-            f"Downloading the Boltz-2 affinity weights to {affinity_model}. You may "
-            "change the cache directory with the --cache flag."
-        )
-        for i, url in enumerate(BOLTZ2_AFFINITY_URL_WITH_FALLBACK):
-            try:
-                _download(url, str(affinity_model))
-                _validate_checkpoint_for_load(
-                    affinity_model, "Boltz-2 affinity weights"
-                )
-                break
-            except Exception as e:  # noqa: BLE001
-                if i == len(BOLTZ2_AFFINITY_URL_WITH_FALLBACK) - 1:
-                    msg = f"Failed to download model from all URLs. Last error: {e}"
-                    raise RuntimeError(msg) from e
-                continue
-
 
 def get_cache_path() -> str:
     """Determine the cache path, prioritising the BOLTZ_CACHE environment variable.
@@ -1224,7 +1229,7 @@ def _parse_devices(value: str) -> Union[int, List[int]]:
     return int(value)
 
 
-@cli.command(context_settings={"show_default": True})
+@click.command(name="predict", hidden=True)
 @click.argument("data", type=click.Path(exists=True))
 @click.option(
     "--out_dir",
@@ -2597,25 +2602,23 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     is_flag=True,
     help="Validate the config and generate chunked Boltz inputs without inference.",
 )
-@click.pass_context
-def screen(ctx: click.Context, config: Path, prepare_only: bool) -> None:
+def screen(config: Path, prepare_only: bool) -> None:
     """Screen one protein target against a ligand library."""
     from boltz.screen import (
-        build_predict_options,
+        build_screen_options,
         collect_screen_scores,
         ensure_auto_msa,
         prepare_screen,
     )
+    from boltz.stfree_runtime import run_stfree_chunk
 
     prepared = prepare_screen(
         config,
         ensure_ccd_cache=None if prepare_only else download_boltz2_ccd,
     )
-    predict_options = build_predict_options(
+    screen_options = build_screen_options(
         prepared.options,
-        predict_command=predict,
         config_dir=prepared.config_path.parent,
-        parent_context=ctx,
     )
     click.echo(
         f"Prepared {len(prepared.chunk_dirs)} chunk(s) in "
@@ -2629,21 +2632,19 @@ def screen(ctx: click.Context, config: Path, prepare_only: bool) -> None:
         click.echo("Preparing one shared target MSA for all screen chunks.")
         ensure_auto_msa(
             prepared,
-            predict_options=predict_options,
+            screen_options=screen_options,
             compute_msa_fn=compute_msa,
         )
-        predict_options["use_msa_server"] = False
 
     for index, chunk_dir in enumerate(prepared.chunk_dirs, start=1):
         click.echo(
             f"Running screen chunk {index}/{len(prepared.chunk_dirs)}: "
             f"{chunk_dir.name}"
         )
-        ctx.invoke(
-            predict,
-            data=str(chunk_dir),
-            out_dir=str(prepared.runs_dir),
-            **predict_options,
+        run_stfree_chunk(
+            data=chunk_dir,
+            out_dir=prepared.runs_dir,
+            options=screen_options.runtime,
         )
     scores_path = collect_screen_scores(prepared)
     click.echo(f"Screen complete: {scores_path}")

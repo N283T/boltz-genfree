@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from boltz.data.crop.affinity import AffinityCropper
-from boltz.data.types import TokenBondV2, TokenV2, Tokenized
+from boltz.data.types import TokenBondV2, Tokenized, TokenV2
 
 
 def _tokenized() -> Tokenized:
@@ -69,9 +69,29 @@ def test_sequence_prefix_crop_does_not_depend_on_coordinates_or_resolution():
     first_crop = cropper.crop_sequence_prefix(first, max_tokens=5, max_atoms=20)
     second_crop = cropper.crop_sequence_prefix(second, max_tokens=5, max_atoms=20)
 
-    assert first_crop.tokens["token_idx"].tolist() == second_crop.tokens[
-        "token_idx"
-    ].tolist()
+    assert (
+        first_crop.tokens["token_idx"].tolist()
+        == second_crop.tokens["token_idx"].tolist()
+    )
+
+
+def test_full_screen_crop_keeps_every_token_when_input_fits():
+    cropped = AffinityCropper(max_tokens_protein=4).crop_full_screen(
+        _sequence_tokenized(),
+        max_tokens=7,
+        max_atoms=23,
+    )
+
+    assert cropped.tokens["token_idx"].tolist() == list(range(7))
+
+
+def test_full_screen_crop_fails_instead_of_truncating_receptor():
+    with pytest.raises(ValueError, match="kept 5/7 tokens"):
+        AffinityCropper(max_tokens_protein=2).crop_full_screen(
+            _sequence_tokenized(),
+            max_tokens=5,
+            max_atoms=20,
+        )
 
 
 def test_sequence_window_crop_uses_zero_based_protein_offset():

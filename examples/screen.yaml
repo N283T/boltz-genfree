@@ -16,4 +16,3 @@ options:
   seed: 20260718
   num_workers: 2
   affinity_recycling_steps: 0
-  affinity_batch_size: 1

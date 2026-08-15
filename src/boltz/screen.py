@@ -18,6 +18,7 @@ from rdkit import Chem
 
 from boltz.data.mol import load_molecules
 from boltz.data.parse.schema import standardize
+from boltz.stfree_runtime import StFreeRuntimeOptions
 
 _TOP_LEVEL_KEYS = {
     "version",
@@ -33,17 +34,29 @@ _MAX_SEQUENCE_PREFIX_TOKENS = 200
 _MAX_AFFINITY_TOKENS = 256
 _MAX_LIGAND_TOKENS = 128
 _MAX_TRAINING_LIGAND_TOKENS = 56
-_MANAGED_PREDICT_OPTIONS: dict[str, object] = {
-    "model": "boltz2",
-    "affinity_structure_free": True,
-    "affinity_structure_free_fast": True,
-    "affinity_screening_minimal_output": True,
-    "affinity_distogram_modes": ("zero_distogram_features",),
-    "sampling_steps_affinity": 1,
-    "diffusion_samples_affinity": 1,
-}
-_OPTION_ALIASES = {
-    "affinity_distogram_mode": "affinity_distogram_modes",
+_OPTION_ALIASES: dict[str, str] = {}
+_SCREEN_OPTION_KEYS = {
+    "cache",
+    "affinity_checkpoint",
+    "devices",
+    "accelerator",
+    "num_workers",
+    "override",
+    "seed",
+    "preprocessing_threads",
+    "max_msa_seqs",
+    "subsample_msa",
+    "num_subsampled_msa",
+    "no_kernels",
+    "flash_attn",
+    "affinity_mw_correction",
+    "affinity_recycling_steps",
+    "msa_server_url",
+    "msa_pairing_strategy",
+    "msa_server_username",
+    "msa_server_password",
+    "api_key_header",
+    "api_key_value",
 }
 
 
@@ -68,6 +81,19 @@ class PreparedScreen:
     options: dict[str, Any]
     target_sequence: str
     auto_msa_path: Path | None
+
+
+@dataclass(frozen=True)
+class ScreenOptions:
+    """Validated runtime and MSA-server settings."""
+
+    runtime: StFreeRuntimeOptions
+    msa_server_url: str = "https://api.colabfold.com"
+    msa_pairing_strategy: str = "greedy"
+    msa_server_username: str | None = None
+    msa_server_password: str | None = None
+    api_key_header: str | None = None
+    api_key_value: str | None = None
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -487,12 +513,6 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     if auto_msa_path is not None:
         msa_provenance["path"] = str(auto_msa_path)
 
-    if auto_msa:
-        if options.get("use_msa_server") is False:
-            raise click.UsageError(
-                "target.msa is auto but options.use_msa_server is false."
-            )
-        options.setdefault("use_msa_server", True)
     records: list[dict[str, Any]] = []
     expected_files: dict[Path, str] = {}
     chunk_dirs: list[Path] = []
@@ -597,7 +617,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
 def ensure_auto_msa(
     prepared: PreparedScreen,
     *,
-    predict_options: dict[str, Any],
+    screen_options: ScreenOptions,
     compute_msa_fn: Any,
 ) -> None:
     """Generate one shared automatic MSA and verify it on later resumes."""
@@ -606,8 +626,8 @@ def ensure_auto_msa(
         return
     metadata_path = msa_path.with_suffix(".metadata.json")
     sequence_sha256 = hashlib.sha256(prepared.target_sequence.encode()).hexdigest()
-    server_url = predict_options.get("msa_server_url", "https://api.colabfold.com")
-    pairing_strategy = predict_options.get("msa_pairing_strategy", "greedy")
+    server_url = screen_options.msa_server_url
+    pairing_strategy = screen_options.msa_pairing_strategy
 
     def write_metadata(*, recovered: bool = False) -> None:
         metadata = {
@@ -648,15 +668,13 @@ def ensure_auto_msa(
         )
 
     msa_path.parent.mkdir(parents=True, exist_ok=True)
-    username = predict_options.get("msa_server_username") or os.environ.get(
+    username = screen_options.msa_server_username or os.environ.get(
         "BOLTZ_MSA_USERNAME"
     )
-    password = predict_options.get("msa_server_password") or os.environ.get(
+    password = screen_options.msa_server_password or os.environ.get(
         "BOLTZ_MSA_PASSWORD"
     )
-    api_key_value = predict_options.get("api_key_value") or os.environ.get(
-        "MSA_API_KEY_VALUE"
-    )
+    api_key_value = screen_options.api_key_value or os.environ.get("MSA_API_KEY_VALUE")
     compute_msa_fn(
         data={"target": prepared.target_sequence},
         target_id="screen",
@@ -665,7 +683,7 @@ def ensure_auto_msa(
         msa_pairing_strategy=pairing_strategy,
         msa_server_username=username,
         msa_server_password=password,
-        api_key_header=predict_options.get("api_key_header"),
+        api_key_header=screen_options.api_key_header,
         api_key_value=api_key_value,
     )
     if not msa_path.is_file():
@@ -675,72 +693,161 @@ def ensure_auto_msa(
     write_metadata()
 
 
-def build_predict_options(
+def _integer_option(
+    options: dict[str, Any],
+    name: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    value = options.get(name, default)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise click.UsageError(f"options.{name} must be an integer.")
+    if minimum is not None and value < minimum:
+        raise click.UsageError(f"options.{name} must be at least {minimum}.")
+    if maximum is not None and value > maximum:
+        raise click.UsageError(f"options.{name} must be at most {maximum}.")
+    return value
+
+
+def _boolean_option(options: dict[str, Any], name: str, default: bool) -> bool:
+    value = options.get(name, default)
+    if not isinstance(value, bool):
+        raise click.UsageError(f"options.{name} must be true or false.")
+    return value
+
+
+def _optional_string(options: dict[str, Any], name: str) -> str | None:
+    value = options.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise click.UsageError(f"options.{name} must be a non-empty string.")
+    return value
+
+
+def _devices_option(value: object) -> int | list[int]:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = [int(item.strip()) for item in value.split(",")]
+        except ValueError as error:
+            raise click.UsageError("options.devices is invalid.") from error
+        if len(parsed) == 1 and parsed[0] > 0:
+            return parsed[0]
+        if len(parsed) > 1 and all(device >= 0 for device in parsed):
+            return parsed
+    if (
+        isinstance(value, list)
+        and value
+        and all(
+            isinstance(device, int) and not isinstance(device, bool) and device >= 0
+            for device in value
+        )
+    ):
+        return value
+    raise click.UsageError(
+        "options.devices must be a positive count or a list of GPU indices."
+    )
+
+
+def _cpu_count() -> int:
+    try:
+        return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError):
+        return os.cpu_count() or 1
+
+
+def build_screen_options(
     raw_options: dict[str, Any],
     *,
-    predict_command: click.Command,
     config_dir: Path,
-    parent_context: click.Context,
-) -> dict[str, Any]:
-    """Validate YAML options against the existing predict command."""
-    params = {
-        param.name: param
-        for param in predict_command.params
-        if isinstance(param, click.Option) and param.name is not None
-    }
-    processed: dict[str, Any] = {}
-    option_context = click.Context(predict_command, parent=parent_context)
-    for name, value in raw_options.items():
-        if name in _MANAGED_PREDICT_OPTIONS:
-            managed = _MANAGED_PREDICT_OPTIONS[name]
-            if name == "affinity_distogram_modes":
-                comparable = (value,) if isinstance(value, str) else tuple(value)
-            else:
-                comparable = value
-            if comparable != managed:
-                raise click.UsageError(
-                    f"options.{name} is managed by screen and must be {managed!r}."
-                )
-            continue
-        param = params.get(name)
-        if param is None or name in {"data", "out_dir"}:
-            raise click.UsageError(f"Unknown or reserved predict option: {name}")
-        candidate = value
-        if isinstance(param.type, click.Path) and candidate is not None:
-            candidate = str(_resolve_path(candidate, config_dir, f"options.{name}"))
-        if name == "devices" and isinstance(candidate, int):
-            candidate = str(candidate)
-        if param.multiple and isinstance(candidate, list):
-            candidate = tuple(candidate)
-        try:
-            processed[name] = param.process_value(option_context, candidate)
-        except (click.BadParameter, TypeError, ValueError) as error:
-            raise click.UsageError(f"Invalid options.{name}: {error}") from error
-    processed.update(_MANAGED_PREDICT_OPTIONS)
-    processed.setdefault("affinity_recycling_steps", 0)
-    crop_dir = processed.get("affinity_crop_indices_dir")
-    crop_label = processed.get("affinity_structure_free_crop_label")
-    if (crop_dir is None) != (crop_label is None):
+) -> ScreenOptions:
+    """Validate the deliberately small Boltz-StFree option surface."""
+    unknown = set(raw_options) - _SCREEN_OPTION_KEYS
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise click.UsageError(f"Unknown Boltz-StFree options: {names}")
+
+    accelerator = raw_options.get("accelerator", "gpu")
+    if accelerator not in {"gpu", "cpu", "tpu", "mps"}:
+        raise click.UsageError("options.accelerator must be gpu, cpu, tpu, or mps.")
+    cache = _screen_cache_path(raw_options, config_dir)
+    checkpoint_value = raw_options.get("affinity_checkpoint")
+    checkpoint = (
+        _resolve_path(checkpoint_value, config_dir, "options.affinity_checkpoint")
+        if checkpoint_value is not None
+        else None
+    )
+    if checkpoint is not None and not checkpoint.is_file():
         raise click.UsageError(
-            "options.affinity_crop_indices_dir and "
-            "options.affinity_structure_free_crop_label must be set together."
+            f"options.affinity_checkpoint does not exist: {checkpoint}"
         )
-    if crop_dir is not None and not Path(crop_dir).is_dir():
+    seed = raw_options.get("seed")
+    if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool)):
+        raise click.UsageError("options.seed must be an integer or null.")
+
+    runtime = StFreeRuntimeOptions(
+        cache=cache,
+        affinity_checkpoint=checkpoint,
+        devices=_devices_option(raw_options.get("devices", 1)),
+        accelerator=accelerator,
+        num_workers=_integer_option(raw_options, "num_workers", 2, minimum=0),
+        override=_boolean_option(raw_options, "override", False),
+        seed=seed,
+        preprocessing_threads=_integer_option(
+            raw_options,
+            "preprocessing_threads",
+            _cpu_count(),
+            minimum=1,
+        ),
+        max_msa_seqs=_integer_option(
+            raw_options,
+            "max_msa_seqs",
+            8192,
+            minimum=1,
+        ),
+        subsample_msa=_boolean_option(raw_options, "subsample_msa", True),
+        num_subsampled_msa=_integer_option(
+            raw_options,
+            "num_subsampled_msa",
+            1024,
+            minimum=1,
+        ),
+        no_kernels=_boolean_option(raw_options, "no_kernels", False),
+        flash_attn=_boolean_option(raw_options, "flash_attn", False),
+        affinity_mw_correction=_boolean_option(
+            raw_options,
+            "affinity_mw_correction",
+            False,
+        ),
+        affinity_recycling_steps=_integer_option(
+            raw_options,
+            "affinity_recycling_steps",
+            0,
+            minimum=0,
+            maximum=5,
+        ),
+    )
+    server_url = raw_options.get("msa_server_url", "https://api.colabfold.com")
+    pairing = raw_options.get("msa_pairing_strategy", "greedy")
+    if not isinstance(server_url, str) or not server_url:
+        raise click.UsageError("options.msa_server_url must be a non-empty string.")
+    if pairing not in {"greedy", "complete"}:
         raise click.UsageError(
-            f"options.affinity_crop_indices_dir is not a directory: {crop_dir}"
+            "options.msa_pairing_strategy must be greedy or complete."
         )
-    if crop_label is not None and not re.fullmatch(
-        r"[A-Za-z0-9][A-Za-z0-9_.-]*",
-        str(crop_label),
-    ):
-        raise click.UsageError(
-            "options.affinity_structure_free_crop_label must be filename-safe."
-        )
-    if processed.get("write_embeddings") is True:
-        raise click.UsageError(
-            "options.write_embeddings is incompatible with compact screen output."
-        )
-    return processed
+    return ScreenOptions(
+        runtime=runtime,
+        msa_server_url=server_url,
+        msa_pairing_strategy=pairing,
+        msa_server_username=_optional_string(raw_options, "msa_server_username"),
+        msa_server_password=_optional_string(raw_options, "msa_server_password"),
+        api_key_header=_optional_string(raw_options, "api_key_header"),
+        api_key_value=_optional_string(raw_options, "api_key_value"),
+    )
 
 
 def collect_screen_scores(prepared: PreparedScreen) -> Path:

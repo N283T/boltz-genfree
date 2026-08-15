@@ -182,6 +182,26 @@ class AffinityCropper(Cropper):
             max_atoms=max_atoms,
         )
 
+    def crop_full_screen(
+        self,
+        data: Tokenized,
+        max_tokens: int,
+        max_atoms: Optional[int] = None,
+    ) -> Tokenized:
+        """Select the full receptor and ligand or fail without truncation."""
+        cropped = self.crop_sequence_prefix(
+            data,
+            max_tokens=max_tokens,
+            max_atoms=max_atoms,
+        )
+        if cropped.tokens.size != data.tokens.size:
+            msg = (
+                "Full-screen input was truncated during affinity token selection: "
+                f"kept {cropped.tokens.size}/{data.tokens.size} tokens."
+            )
+            raise ValueError(msg)
+        return cropped
+
     def crop_sequence_window(
         self,
         data: Tokenized,

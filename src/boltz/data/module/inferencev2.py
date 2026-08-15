@@ -227,6 +227,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         affinity_structure_free_single_sequence: bool = False,
         affinity_sequence_window_start: int = 0,
         affinity_ligand_ref_pos_mode: str = "etkdg",
+        affinity_require_full_input: bool = False,
     ) -> None:
         """Initialize the training dataset.
 
@@ -267,6 +268,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         )
         self.affinity_sequence_window_start = affinity_sequence_window_start
         self.affinity_ligand_ref_pos_mode = affinity_ligand_ref_pos_mode
+        self.affinity_require_full_input = affinity_require_full_input
         if self.affinity:
             self.cropper = AffinityCropper()
 
@@ -327,7 +329,19 @@ class PredictionDataset(torch.utils.data.Dataset):
         if self.affinity:
             if self.affinity_structure_free:
                 crop_indices = self._load_affinity_crop_indices(record.id)
-                if crop_indices is None:
+                if self.affinity_require_full_input:
+                    if (
+                        crop_indices is not None
+                        or self.affinity_sequence_window_start != 0
+                    ):
+                        msg = "Full-screen inference does not accept crop overrides."
+                        raise ValueError(msg)
+                    tokenized = self.cropper.crop_full_screen(
+                        tokenized,
+                        max_tokens=256,
+                        max_atoms=2048,
+                    )
+                elif crop_indices is None:
                     tokenized = self.cropper.crop_sequence_window(
                         tokenized,
                         protein_start=self.affinity_sequence_window_start,
@@ -452,6 +466,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         affinity_structure_free_single_sequence: bool = False,
         affinity_sequence_window_start: int = 0,
         affinity_ligand_ref_pos_mode: str = "etkdg",
+        affinity_require_full_input: bool = False,
         pin_memory: bool = True,
     ) -> None:
         """Initialize the DataModule.
@@ -504,6 +519,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         )
         self.affinity_sequence_window_start = affinity_sequence_window_start
         self.affinity_ligand_ref_pos_mode = affinity_ligand_ref_pos_mode
+        self.affinity_require_full_input = affinity_require_full_input
         self.pin_memory = pin_memory
 
     def predict_dataloader(self) -> DataLoader:
@@ -532,6 +548,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             ),
             affinity_sequence_window_start=self.affinity_sequence_window_start,
             affinity_ligand_ref_pos_mode=self.affinity_ligand_ref_pos_mode,
+            affinity_require_full_input=self.affinity_require_full_input,
         )
         return DataLoader(
             dataset,

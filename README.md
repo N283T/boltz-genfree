@@ -16,12 +16,10 @@ artifacts.
 
 ## Status
 
-`boltz-stfree screen` is the primary interface. It accepts one protein target,
-a ligand library, output and chunking settings, and prediction options in one
-YAML file. It generates ordinary Boltz affinity inputs, runs recoverable
-structure-free chunks, and aggregates the compact JSON results into one
-`scores.csv`. The lower-level `predict` command remains available for runtime
-compatibility and research interventions.
+`boltz-stfree screen` is the only prediction interface. It accepts one protein
+target and a ligand library, expands the library into independent 1:1
+protein-ligand records, runs recoverable structure-free chunks, and aggregates
+the compact JSON results into one `scores.csv`.
 
 Until the first tagged release, install from a pinned Git commit and expect the
 interface to evolve.
@@ -69,7 +67,6 @@ options:
   seed: 20260718
   num_workers: 2
   affinity_recycling_steps: 0
-  affinity_batch_size: 1
 ```
 
 Then run:
@@ -133,29 +130,28 @@ CSV and TSV libraries accept configurable `id_column`, `smiles_column`, and
 one-character `delimiter` fields. All source paths are resolved relative to the
 screen config.
 
-### Prediction options
+### Runtime options
 
-Keys below `options` may use `snake_case` or CLI-style hyphenated names and are
-validated against the existing `predict` command. Relative path options are
-also resolved from the screen config directory.
-
-The `screen` command manages these route-defining values and rejects different
-overrides:
+Keys below `options` may use `snake_case` or CLI-style hyphenated names.
+Boltz-StFree deliberately exposes only settings that do not change the
+structure-free method:
 
 ```text
-model = boltz2
-affinity_structure_free = true
-affinity_structure_free_fast = true
-affinity_screening_minimal_output = true
-affinity_distogram_mode = zero_distogram_features
-sampling_steps_affinity = 1
-diffusion_samples_affinity = 1
+cache, affinity_checkpoint
+devices, accelerator, num_workers, preprocessing_threads
+seed, override
+max_msa_seqs, subsample_msa, num_subsampled_msa
+no_kernels, flash_attn
+affinity_mw_correction, affinity_recycling_steps
+msa_server_url, msa_pairing_strategy and MSA authentication settings
 ```
 
+Every run uses Boltz-2, the affinity checkpoint, complete-input receptor
+selection, ETKDG ligand reference coordinates, zero distogram features, one
+record per affinity batch, one nominal diffusion sample, no structure
+sampling, and compact output. These route-defining values cannot be overridden.
 Affinity recycling defaults to 0 but remains configurable from 0 through 5.
-CUDA kernels remain enabled unless `options.no_kernels` is true. The paper's
-complete 49,980-compound ALR screen used batch size 1, an MSA, ETKDG ligand
-reference coordinates, and the other managed settings above.
+CUDA kernels remain enabled unless `options.no_kernels` is true.
 
 Minimal output writes one score JSON per record plus shared run metadata. It
 suppresses structure files, full distogram artifacts, and Lightning logs.
@@ -175,9 +171,9 @@ Small-molecule ligand tokens are counted after the same standardization and
 hydrogen removal used by Boltz affinity parsing. Ligands from 57 through 128
 tokens are accepted with a warning because 56 was the maximum during training.
 Any hard-limit failure names the affected ligand and stops the whole screen;
-`screen` does not crop or silently skip it. Explicit affinity crop options are
-therefore rejected by this command. The lower-level `predict` command remains
-available for research runs that intentionally use external crops.
+`screen` does not crop or silently skip it. The runtime verifies after
+tokenization that every token was retained and fails if an input would be
+truncated.
 
 CCD inputs are checked against the Boltz-2 component cache. A normal `screen`
 run downloads that cache when needed. Offline `--prepare-only` validation
@@ -192,9 +188,10 @@ default generated-pose route. These measurements establish feasibility for the
 tested hardware, target, inputs, and settings; they are not general performance
 or accuracy guarantees.
 
-Experimental modes such as all-zero ligand reference coordinates, affinity
-batching, query-only inputs, and MSA-module bypass remain available for research
-but are not the recommended default screening route.
+Generated crops, external crops, complex structure sampling, structure-derived
+distograms, structure files, Boltz-1, multi-chain complexes, and research
+interventions are intentionally not exposed by this product runtime. They remain
+available only in the separate research/reproduction repository.
 
 ## Provenance
 
@@ -210,6 +207,8 @@ The code history is preserved rather than squashed:
 
 Checkpoint fallback URLs still refer to the Boltz and boltz-community model
 hosts because this project does not redistribute the released model weights.
+The screen runtime downloads the Boltz-2 affinity checkpoint and component
+dictionary, but not the structure checkpoint.
 
 The inherited code is licensed under the [MIT License](LICENSE), and existing
 copyright notices are retained. See [CITATION.cff](CITATION.cff) for the
