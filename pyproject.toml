@@ -76,6 +76,7 @@ boltz-stfree-fix-macos-libomp = "boltz.scripts.fix_macos_libomp:main"
 [project.optional-dependencies]
 lint = ["ruff"]
 test = ["pytest", "requests"]
+package = ["build>=1.2.2", "twine>=5.1.1"]
 cuda = [
     "cuequivariance_ops_cu13>=0.5.0",
     "cuequivariance_ops_torch_cu13>=0.5.0",
