@@ -37,6 +37,14 @@ class ReferenceLigandSelector:
     ccd: str | None = None
 
 
+@dataclass(frozen=True)
+class _ProteinCandidate:
+    chain: gemmi.Chain
+    residues: tuple[gemmi.Residue, ...]
+    sequence: str
+    sequence_indices: tuple[int, ...]
+
+
 def protein_atom_counts(sequence: str) -> tuple[int, ...]:
     """Return Boltz heavy-atom counts for canonical protein residue tokens."""
     return tuple(
@@ -57,6 +65,68 @@ def _protein_sequence(residues: list[gemmi.Residue]) -> str:
     return "".join(
         gemmi.find_tabulated_residue(residue.name).one_letter_code or "X"
         for residue in residues
+    ).upper()
+
+
+def _monomer_sequence(monomers: list[str]) -> str:
+    return "".join(
+        gemmi.find_tabulated_residue(monomer).one_letter_code or "X"
+        for monomer in monomers
+    ).upper()
+
+
+def _protein_candidate(
+    structure: gemmi.Structure,
+    chain: gemmi.Chain,
+) -> _ProteinCandidate | None:
+    residues = tuple(_protein_residues(chain))
+    if not residues:
+        return None
+    observed_sequence = _protein_sequence(list(residues))
+    entity_ids = {residue.entity_id for residue in residues if residue.entity_id}
+    if len(entity_ids) != 1:
+        return _ProteinCandidate(
+            chain=chain,
+            residues=residues,
+            sequence=observed_sequence,
+            sequence_indices=tuple(range(len(residues))),
+        )
+    entity = structure.get_entity(next(iter(entity_ids)))
+    if entity is None or not entity.full_sequence:
+        return _ProteinCandidate(
+            chain=chain,
+            residues=residues,
+            sequence=observed_sequence,
+            sequence_indices=tuple(range(len(residues))),
+        )
+    sequence = _monomer_sequence(list(entity.full_sequence))
+    if any(residue.label_seq is None for residue in residues):
+        msg = (
+            f"Reference protein chain {chain.name!r} declares a full polymer "
+            "sequence but lacks label_seq_id mapping for observed residues."
+        )
+        raise ValueError(msg)
+    sequence_indices = tuple(int(residue.label_seq) - 1 for residue in residues)
+    if len(set(sequence_indices)) != len(sequence_indices) or any(
+        index < 0 or index >= len(sequence) for index in sequence_indices
+    ):
+        msg = (
+            f"Reference protein chain {chain.name!r} has invalid label_seq_id "
+            "mapping to its declared polymer sequence."
+        )
+        raise ValueError(msg)
+    mapped_observed = "".join(sequence[index] for index in sequence_indices)
+    if mapped_observed != observed_sequence:
+        msg = (
+            f"Reference protein chain {chain.name!r} observed residues do not "
+            "match its declared polymer sequence at label_seq_id positions."
+        )
+        raise ValueError(msg)
+    return _ProteinCandidate(
+        chain=chain,
+        residues=residues,
+        sequence=sequence,
+        sequence_indices=sequence_indices,
     )
 
 
@@ -82,23 +152,30 @@ def _residue_center(residue: gemmi.Residue) -> np.ndarray | None:
 
 
 def _choose_protein_chain(
+    structure: gemmi.Structure,
     model: gemmi.Model,
     sequence: str,
     requested: str | None,
-) -> tuple[gemmi.Chain, list[gemmi.Residue]]:
+) -> _ProteinCandidate:
     candidates = [
-        (chain, residues) for chain in model if (residues := _protein_residues(chain))
+        candidate
+        for chain in model
+        if (candidate := _protein_candidate(structure, chain)) is not None
     ]
     if requested is not None:
-        candidates = [item for item in candidates if item[0].name == requested]
+        candidates = [item for item in candidates if item.chain.name == requested]
         if not candidates:
             msg = f"Reference protein chain {requested!r} was not found."
             raise ValueError(msg)
-    exact = [item for item in candidates if _protein_sequence(item[1]) == sequence]
+    exact = [item for item in candidates if item.sequence == sequence]
     if len(exact) != 1:
         available = (
             ", ".join(
-                f"{chain.name}({len(residues)} aa)" for chain, residues in candidates
+                (
+                    f"{item.chain.name}({len(item.sequence)} declared, "
+                    f"{len(item.residues)} observed)"
+                )
+                for item in candidates
             )
             or "none"
         )
@@ -106,7 +183,7 @@ def _choose_protein_chain(
             f"chain {requested!r}" if requested is not None else "exactly one chain"
         )
         msg = (
-            f"Reference must contain {qualifier} whose observed protein sequence "
+            f"Reference must contain {qualifier} whose declared polymer sequence "
             f"exactly matches target.sequence; candidates: {available}."
         )
         raise ValueError(msg)
@@ -223,7 +300,8 @@ def load_reference_crop(
         msg = f"Crop reference contains no coordinate model: {path}"
         raise ValueError(msg)
     model = structure[0]
-    selected_protein, residues = _choose_protein_chain(
+    selected_protein = _choose_protein_chain(
+        structure,
         model,
         sequence,
         protein_chain,
@@ -233,7 +311,7 @@ def load_reference_crop(
         ligand,
     )
     ligand_coords = _heavy_atom_coords([selected_ligand])
-    centers = [_residue_center(residue) for residue in residues]
+    centers = [_residue_center(residue) for residue in selected_protein.residues]
     resolved = [index for index, center in enumerate(centers) if center is not None]
     if not resolved:
         msg = "Reference protein contains no resolved heavy atoms."
@@ -243,15 +321,19 @@ def load_reference_crop(
         for index in resolved
     ]
     seed_order = tuple(
-        index
-        for _, index in sorted(
-            zip(distances, resolved, strict=True),
+        sequence_index
+        for _, sequence_index in sorted(
+            zip(
+                distances,
+                (selected_protein.sequence_indices[index] for index in resolved),
+                strict=True,
+            ),
             key=lambda item: (item[0], item[1]),
         )
     )
     blocks = tuple(_block_around(seed, len(sequence)) for seed in seed_order)
     return ReferenceCrop(
-        protein_chain=selected_protein.name,
+        protein_chain=selected_protein.chain.name,
         ligand_chain=ligand.chain,
         ligand_residue=selected_ligand.seqid.num,
         ligand_ccd=selected_ligand.name.upper(),

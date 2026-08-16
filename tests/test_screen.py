@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import pickle
 from collections.abc import Callable
 from pathlib import Path
 
 import click
+import gemmi
 import pytest
 import yaml
 from click.testing import CliRunner
@@ -91,6 +93,61 @@ def _write_reference(
     lines.append("END")
     path = tmp_path / "reference.pdb"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def _write_mmcif_reference_with_missing_residues(
+    tmp_path: Path,
+    *,
+    length: int,
+    observed_positions: tuple[int, ...],
+    ligand_position: int,
+) -> Path:
+    structure = gemmi.Structure()
+    structure.name = "missing-residue-reference"
+    protein_entity = gemmi.Entity("1")
+    protein_entity.entity_type = gemmi.EntityType.Polymer
+    protein_entity.polymer_type = gemmi.PolymerType.PeptideL
+    protein_entity.full_sequence = ["ALA"] * length
+    structure.entities.append(protein_entity)
+    ligand_entity = gemmi.Entity("2")
+    ligand_entity.entity_type = gemmi.EntityType.NonPolymer
+    structure.entities.append(ligand_entity)
+
+    model = gemmi.Model("1")
+    protein_chain = gemmi.Chain("A")
+    for position in observed_positions:
+        residue = gemmi.Residue()
+        residue.name = "ALA"
+        residue.seqid = gemmi.SeqId(position, " ")
+        residue.label_seq = position
+        residue.entity_id = "1"
+        residue.entity_type = gemmi.EntityType.Polymer
+        atom = gemmi.Atom()
+        atom.name = "CA"
+        atom.element = gemmi.Element("C")
+        atom.pos = gemmi.Position(float(position), 0.0, 0.0)
+        residue.add_atom(atom)
+        protein_chain.add_residue(residue)
+    model.add_chain(protein_chain)
+
+    ligand_chain = gemmi.Chain("L")
+    ligand = gemmi.Residue()
+    ligand.name = "LIG"
+    ligand.seqid = gemmi.SeqId(1, " ")
+    ligand.entity_id = "2"
+    ligand.entity_type = gemmi.EntityType.NonPolymer
+    atom = gemmi.Atom()
+    atom.name = "C1"
+    atom.element = gemmi.Element("C")
+    atom.pos = gemmi.Position(float(ligand_position), 1.0, 0.0)
+    ligand.add_atom(atom)
+    ligand_chain.add_residue(ligand)
+    model.add_chain(ligand_chain)
+    structure.add_model(model)
+
+    path = tmp_path / "missing-residue-reference.cif"
+    structure.make_mmcif_document().write_file(str(path))
     return path
 
 
@@ -369,6 +426,50 @@ def test_reference_crop_accepts_long_target_and_records_provenance(
     ]
 
 
+def test_reference_crop_records_adjacent_bootstrap_provenance(tmp_path: Path) -> None:
+    reference = _write_reference(tmp_path, 230)
+    reference_sha256 = hashlib.sha256(reference.read_bytes()).hexdigest()
+    result_path = tmp_path / "bootstrap_result.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "state": "complete",
+                "reference": str(reference.resolve()),
+                "reference_sha256": reference_sha256,
+                "checkpoint": "/models/boltz2_conf.ckpt",
+                "checkpoint_sha256": "a" * 64,
+                "selected_confidence": 0.8,
+                "target_chain": "A",
+                "anchor_chain": "L",
+            }
+        ),
+        encoding="utf-8",
+    )
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        sequence="A" * 230,
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_protein": "A",
+        "reference_ligand": "L",
+        "budget": "library_fixed",
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+
+    source = manifest["target"]["crop"]["reference_source"]
+    assert source["type"] == "predicted_holo"
+    assert source["result"] == str(result_path)
+    assert source["checkpoint_sha256"] == "a" * 64
+    assert source["selected_confidence"] == 0.8
+
+
 @pytest.mark.parametrize("seed", [0, 1, 5, 50, 94, 98, 99])
 def test_reference_crop_blocks_are_exactly_ten_contiguous_residues(seed: int) -> None:
     block = reference_crop_module._block_around(seed, 100)
@@ -376,6 +477,38 @@ def test_reference_crop_blocks_are_exactly_ten_contiguous_residues(seed: int) ->
     assert len(block) == 10
     assert seed in block
     assert block == tuple(range(block[0], block[0] + 10))
+
+
+def test_reference_sequence_normalizes_modified_residue_codes() -> None:
+    residue = gemmi.Residue()
+    residue.name = "MSE"
+
+    assert reference_crop_module._protein_sequence([residue]) == "M"
+
+
+def test_reference_crop_maps_observed_residues_to_declared_sequence(
+    tmp_path: Path,
+) -> None:
+    reference = _write_mmcif_reference_with_missing_residues(
+        tmp_path,
+        length=30,
+        observed_positions=tuple(range(11, 31)),
+        ligand_position=21,
+    )
+
+    crop = reference_crop_module.load_reference_crop(
+        reference,
+        "A" * 30,
+        protein_chain="A",
+        ligand=reference_crop_module.ReferenceLigandSelector(
+            chain="L",
+            residue=1,
+            ccd="LIG",
+        ),
+    )
+
+    assert crop.seed_order[0] == 20
+    assert crop.blocks[0] == tuple(range(15, 25))
 
 
 def test_reference_crop_library_fixed_uses_one_receptor_selection(
@@ -760,6 +893,50 @@ def test_screen_cli_prepare_only_never_runs_inference(tmp_path: Path) -> None:
     assert status["completed"] == 0
 
 
+def test_bootstrap_reference_prepare_only_stages_one_holo_input(
+    tmp_path: Path,
+) -> None:
+    config = {
+        "version": 1,
+        "target": {"sequence": "A" * 30, "msa": "empty"},
+        "anchor": {"id": "B", "smiles": "CCO"},
+        "output_dir": "./reference-output",
+        "options": {"diffusion_samples": 1, "seed": 7},
+    }
+    config_path = tmp_path / "bootstrap.yaml"
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["bootstrap-reference", str(config_path), "--prepare-only"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "no model was loaded and no GPU work was started" in result.output
+    output = tmp_path / "reference-output"
+    staged = yaml.safe_load(
+        (output / ".boltz-stfree/input/anchor.yaml").read_text(encoding="utf-8")
+    )
+    assert staged["sequences"] == [
+        {
+            "protein": {
+                "id": "A",
+                "sequence": "A" * 30,
+                "msa": "empty",
+            }
+        },
+        {"ligand": {"id": "B", "smiles": "CCO"}},
+    ]
+    status = json.loads(
+        (output / "bootstrap_status.json").read_text(encoding="utf-8")
+    )
+    assert status["state"] == "prepared"
+    assert not (output / "reference.pdb").exists()
+
+
 def test_screen_cli_prepare_only_validates_stfree_options(tmp_path: Path) -> None:
     config_path = _write_config(
         tmp_path,
@@ -885,11 +1062,12 @@ def test_screen_cli_publishes_failure_status(
     assert status["message"] == "RuntimeError: GPU stopped"
 
 
-def test_cli_exposes_only_screen() -> None:
+def test_cli_exposes_product_commands_without_upstream_predict() -> None:
     result = CliRunner().invoke(cli, ["--help"])
 
     assert result.exit_code == 0
     assert "screen" in result.output
+    assert "bootstrap-reference" in result.output
     assert "predict" not in result.output
 
 

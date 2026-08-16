@@ -1,11 +1,13 @@
 import torch
 from torch import Tensor, nn
+from torch.nn.functional import one_hot
 
 from boltz.data import const
 from boltz.model.layers.outer_product_mean import OuterProductMean
 from boltz.model.layers.pair_averaging import PairWeightedAveraging
 from boltz.model.layers.pairformer import (
     PairformerNoSeqLayer,
+    PairformerNoSeqModule,
     get_dropout_mask,
 )
 from boltz.model.layers.transition import Transition
@@ -14,6 +16,7 @@ from boltz.model.modules.encodersv2 import (
     AtomEncoder,
     FourierEmbedding,
 )
+from boltz.model.modules.utils import autocast_device_type
 
 
 class ContactConditioning(nn.Module):
@@ -204,6 +207,321 @@ class InputEmbedder(nn.Module):
             s = s + self.mol_type_conditioning_init(feats["mol_type"])
 
         return s
+
+
+class TemplateModule(nn.Module):
+    """Template module."""
+
+    def __init__(
+        self,
+        token_z: int,
+        template_dim: int,
+        template_blocks: int,
+        dropout: float = 0.25,
+        pairwise_head_width: int = 32,
+        pairwise_num_heads: int = 4,
+        post_layer_norm: bool = False,
+        activation_checkpointing: bool = False,
+        min_dist: float = 3.25,
+        max_dist: float = 50.75,
+        num_bins: int = 38,
+        **kwargs,
+    ) -> None:
+        """Initialize the template module.
+
+        Parameters
+        ----------
+        token_z : int
+            The token pairwise embedding size.
+
+        """
+        super().__init__()
+        self.min_dist = min_dist
+        self.max_dist = max_dist
+        self.num_bins = num_bins
+        self.relu = nn.ReLU()
+        self.z_norm = nn.LayerNorm(token_z)
+        self.v_norm = nn.LayerNorm(template_dim)
+        self.z_proj = nn.Linear(token_z, template_dim, bias=False)
+        self.a_proj = nn.Linear(
+            const.num_tokens * 2 + num_bins + 5,
+            template_dim,
+            bias=False,
+        )
+        self.u_proj = nn.Linear(template_dim, token_z, bias=False)
+        self.pairformer = PairformerNoSeqModule(
+            template_dim,
+            num_blocks=template_blocks,
+            dropout=dropout,
+            pairwise_head_width=pairwise_head_width,
+            pairwise_num_heads=pairwise_num_heads,
+            post_layer_norm=post_layer_norm,
+            activation_checkpointing=activation_checkpointing,
+        )
+
+    def forward(
+        self,
+        z: Tensor,
+        feats: dict[str, Tensor],
+        pair_mask: Tensor,
+        use_kernels: bool = False,
+        use_flash_attn: bool = False,
+    ) -> Tensor:
+        """Perform the forward pass.
+
+        Parameters
+        ----------
+        z : Tensor
+            The pairwise embeddings
+        feats : dict[str, Tensor]
+            Input features
+        pair_mask : Tensor
+            The pair mask
+        use_kernels : bool
+            Whether to use cuequivariance kernels
+        use_flash_attn : bool
+            Whether to use PyTorch SDPA (FlashAttention-2) backend
+
+        Returns
+        -------
+        Tensor
+            The updated pairwise embeddings.
+
+        """
+        # Load relevant features
+        asym_id = feats["asym_id"]
+        res_type = feats["template_restype"]
+        frame_rot = feats["template_frame_rot"]
+        frame_t = feats["template_frame_t"]
+        frame_mask = feats["template_mask_frame"]
+        cb_coords = feats["template_cb"]
+        ca_coords = feats["template_ca"]
+        cb_mask = feats["template_mask_cb"]
+        template_mask = feats["template_mask"].any(dim=2).float()
+        num_templates = template_mask.sum(dim=1)
+        num_templates = num_templates.clamp(min=1)
+
+        # Compute pairwise masks
+        b_cb_mask = cb_mask[:, :, :, None] * cb_mask[:, :, None, :]
+        b_frame_mask = frame_mask[:, :, :, None] * frame_mask[:, :, None, :]
+
+        b_cb_mask = b_cb_mask[..., None]
+        b_frame_mask = b_frame_mask[..., None]
+
+        # Compute asym mask, template features only attend within the same chain
+        B, T = res_type.shape[:2]  # noqa: N806
+        asym_mask = (asym_id[:, :, None] == asym_id[:, None, :]).float()
+        asym_mask = asym_mask[:, None].expand(-1, T, -1, -1)
+
+        # Compute template features
+        with torch.autocast(device_type=autocast_device_type(cb_coords.device.type), enabled=False):
+            # Compute distogram
+            cb_dists = torch.cdist(cb_coords, cb_coords)
+            boundaries = torch.linspace(self.min_dist, self.max_dist, self.num_bins - 1)
+            boundaries = boundaries.to(cb_dists.device)
+            distogram = (cb_dists[..., None] > boundaries).sum(dim=-1).long()
+            distogram = one_hot(distogram, num_classes=self.num_bins)
+
+            # Compute unit vector in each frame
+            frame_rot = frame_rot.unsqueeze(2).transpose(-1, -2)
+            frame_t = frame_t.unsqueeze(2).unsqueeze(-1)
+            ca_coords = ca_coords.unsqueeze(3).unsqueeze(-1)
+            vector = torch.matmul(frame_rot, (ca_coords - frame_t))
+            norm = torch.norm(vector, dim=-1, keepdim=True)
+            unit_vector = torch.where(norm > 0, vector / norm, torch.zeros_like(vector))
+            unit_vector = unit_vector.squeeze(-1)
+
+            # Concatenate input features
+            a_tij = [distogram, b_cb_mask, unit_vector, b_frame_mask]
+            a_tij = torch.cat(a_tij, dim=-1)
+            a_tij = a_tij * asym_mask.unsqueeze(-1)
+
+            res_type_i = res_type[:, :, :, None]
+            res_type_j = res_type[:, :, None, :]
+            res_type_i = res_type_i.expand(-1, -1, -1, res_type.size(2), -1)
+            res_type_j = res_type_j.expand(-1, -1, res_type.size(2), -1, -1)
+            a_tij = torch.cat([a_tij, res_type_i, res_type_j], dim=-1)
+            a_tij = self.a_proj(a_tij)
+
+        # Expand mask
+        pair_mask = pair_mask[:, None].expand(-1, T, -1, -1)
+        pair_mask = pair_mask.reshape(B * T, *pair_mask.shape[2:])
+
+        # Compute input projections
+        v = self.z_proj(self.z_norm(z[:, None])) + a_tij
+        v = v.view(B * T, *v.shape[2:])
+        v = v + self.pairformer(
+            v, pair_mask, use_kernels=use_kernels, use_flash_attn=use_flash_attn
+        )
+        v = self.v_norm(v)
+        v = v.view(B, T, *v.shape[1:])
+
+        # Aggregate templates
+        template_mask = template_mask[:, :, None, None, None]
+        num_templates = num_templates[:, None, None, None]
+        u = (v * template_mask).sum(dim=1) / num_templates.to(v)
+
+        # Compute output projection
+        u = self.u_proj(self.relu(u))
+        return u
+
+
+class TemplateV2Module(nn.Module):
+    """Template module."""
+
+    def __init__(
+        self,
+        token_z: int,
+        template_dim: int,
+        template_blocks: int,
+        dropout: float = 0.25,
+        pairwise_head_width: int = 32,
+        pairwise_num_heads: int = 4,
+        post_layer_norm: bool = False,
+        activation_checkpointing: bool = False,
+        min_dist: float = 3.25,
+        max_dist: float = 50.75,
+        num_bins: int = 38,
+        **kwargs,
+    ) -> None:
+        """Initialize the template module.
+
+        Parameters
+        ----------
+        token_z : int
+            The token pairwise embedding size.
+
+        """
+        super().__init__()
+        self.min_dist = min_dist
+        self.max_dist = max_dist
+        self.num_bins = num_bins
+        self.relu = nn.ReLU()
+        self.z_norm = nn.LayerNorm(token_z)
+        self.v_norm = nn.LayerNorm(template_dim)
+        self.z_proj = nn.Linear(token_z, template_dim, bias=False)
+        self.a_proj = nn.Linear(
+            const.num_tokens * 2 + num_bins + 5,
+            template_dim,
+            bias=False,
+        )
+        self.u_proj = nn.Linear(template_dim, token_z, bias=False)
+        self.pairformer = PairformerNoSeqModule(
+            template_dim,
+            num_blocks=template_blocks,
+            dropout=dropout,
+            pairwise_head_width=pairwise_head_width,
+            pairwise_num_heads=pairwise_num_heads,
+            post_layer_norm=post_layer_norm,
+            activation_checkpointing=activation_checkpointing,
+        )
+
+    def forward(
+        self,
+        z: Tensor,
+        feats: dict[str, Tensor],
+        pair_mask: Tensor,
+        use_kernels: bool = False,
+        use_flash_attn: bool = False,
+    ) -> Tensor:
+        """Perform the forward pass.
+
+        Parameters
+        ----------
+        z : Tensor
+            The pairwise embeddings
+        feats : dict[str, Tensor]
+            Input features
+        pair_mask : Tensor
+            The pair mask
+        use_kernels : bool
+            Whether to use cuequivariance kernels
+        use_flash_attn : bool
+            Whether to use PyTorch SDPA (FlashAttention-2) backend
+
+        Returns
+        -------
+        Tensor
+            The updated pairwise embeddings.
+
+        """
+        # Load relevant features
+        res_type = feats["template_restype"]
+        frame_rot = feats["template_frame_rot"]
+        frame_t = feats["template_frame_t"]
+        frame_mask = feats["template_mask_frame"]
+        cb_coords = feats["template_cb"]
+        ca_coords = feats["template_ca"]
+        cb_mask = feats["template_mask_cb"]
+        visibility_ids = feats["visibility_ids"]
+        template_mask = feats["template_mask"].any(dim=2).float()
+        num_templates = template_mask.sum(dim=1)
+        num_templates = num_templates.clamp(min=1)
+
+        # Compute pairwise masks
+        b_cb_mask = cb_mask[:, :, :, None] * cb_mask[:, :, None, :]
+        b_frame_mask = frame_mask[:, :, :, None] * frame_mask[:, :, None, :]
+
+        b_cb_mask = b_cb_mask[..., None]
+        b_frame_mask = b_frame_mask[..., None]
+
+        # Compute asym mask, template features only attend within the same chain
+        B, T = res_type.shape[:2]  # noqa: N806
+        tmlp_pair_mask = (
+            visibility_ids[:, :, :, None] == visibility_ids[:, :, None, :]
+        ).float()
+
+        # Compute template features
+        with torch.autocast(device_type=autocast_device_type(cb_coords.device.type), enabled=False):
+            # Compute distogram
+            cb_dists = torch.cdist(cb_coords, cb_coords)
+            boundaries = torch.linspace(self.min_dist, self.max_dist, self.num_bins - 1)
+            boundaries = boundaries.to(cb_dists.device)
+            distogram = (cb_dists[..., None] > boundaries).sum(dim=-1).long()
+            distogram = one_hot(distogram, num_classes=self.num_bins)
+
+            # Compute unit vector in each frame
+            frame_rot = frame_rot.unsqueeze(2).transpose(-1, -2)
+            frame_t = frame_t.unsqueeze(2).unsqueeze(-1)
+            ca_coords = ca_coords.unsqueeze(3).unsqueeze(-1)
+            vector = torch.matmul(frame_rot, (ca_coords - frame_t))
+            norm = torch.norm(vector, dim=-1, keepdim=True)
+            unit_vector = torch.where(norm > 0, vector / norm, torch.zeros_like(vector))
+            unit_vector = unit_vector.squeeze(-1)
+
+            # Concatenate input features
+            a_tij = [distogram, b_cb_mask, unit_vector, b_frame_mask]
+            a_tij = torch.cat(a_tij, dim=-1)
+            a_tij = a_tij * tmlp_pair_mask.unsqueeze(-1)
+
+            res_type_i = res_type[:, :, :, None]
+            res_type_j = res_type[:, :, None, :]
+            res_type_i = res_type_i.expand(-1, -1, -1, res_type.size(2), -1)
+            res_type_j = res_type_j.expand(-1, -1, res_type.size(2), -1, -1)
+            a_tij = torch.cat([a_tij, res_type_i, res_type_j], dim=-1)
+            a_tij = self.a_proj(a_tij)
+
+        # Expand mask
+        pair_mask = pair_mask[:, None].expand(-1, T, -1, -1)
+        pair_mask = pair_mask.reshape(B * T, *pair_mask.shape[2:])
+
+        # Compute input projections
+        v = self.z_proj(self.z_norm(z[:, None])) + a_tij
+        v = v.view(B * T, *v.shape[2:])
+        v = v + self.pairformer(
+            v, pair_mask, use_kernels=use_kernels, use_flash_attn=use_flash_attn
+        )
+        v = self.v_norm(v)
+        v = v.view(B, T, *v.shape[1:])
+
+        # Aggregate templates
+        template_mask = template_mask[:, :, None, None, None]
+        num_templates = num_templates[:, None, None, None]
+        u = (v * template_mask).sum(dim=1) / num_templates.to(v)
+
+        # Compute output projection
+        u = self.u_proj(self.relu(u))
+        return u
 
 
 class MSAModule(nn.Module):
