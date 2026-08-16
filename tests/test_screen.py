@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import pickle
+from collections.abc import Callable
 from pathlib import Path
 
 import click
@@ -105,9 +106,11 @@ def test_prepare_inline_smiles_chunks_and_is_idempotent(tmp_path: Path) -> None:
     )
 
     prepared = prepare_screen(config_path)
+    first_plan = prepared.plan_path.read_text(encoding="utf-8")
     repeated = prepare_screen(config_path)
 
     assert prepared == repeated
+    assert repeated.plan_path.read_text(encoding="utf-8") == first_plan
     assert [path.name for path in prepared.chunk_dirs] == [
         "chunk_00000",
         "chunk_00001",
@@ -738,7 +741,22 @@ def test_screen_cli_prepare_only_never_runs_inference(tmp_path: Path) -> None:
 
     assert result.exit_code == 0, result.output
     assert "Prepared 1 chunk(s)" in result.output
+    assert "Screen plan:" in result.output
+    assert "Library: 2 records" in result.output
     assert "Manifest:" in result.output
+    plan = json.loads((tmp_path / "output/screen_plan.json").read_text())
+    assert plan["library"] == {
+        "source": {"type": "smiles"},
+        "records": 2,
+        "ligand_tokens_min": 3,
+        "ligand_tokens_max": 3,
+        "above_training_token_limit": 0,
+    }
+    assert plan["execution"]["chunks"] == [{"name": "chunk_00000", "records": 2}]
+    status = json.loads((tmp_path / "output/screen_status.json").read_text())
+    assert status["state"] == "prepared"
+    assert status["expected"] == 2
+    assert status["completed"] == 0
 
 
 def test_screen_cli_prepare_only_validates_stfree_options(tmp_path: Path) -> None:
@@ -773,6 +791,7 @@ def test_screen_cli_runs_chunks_with_stfree_runtime(
         out_dir: Path,
         options: object,
         receptor_crop_indices_dir: Path | None,
+        progress_callback: Callable[[list[str], bool], None],
     ) -> None:
         calls.append(
             {
@@ -799,6 +818,7 @@ def test_screen_cli_runs_chunks_with_stfree_runtime(
                 ),
                 encoding="utf-8",
             )
+            progress_callback([input_path.stem], False)
 
     monkeypatch.setattr(stfree_runtime, "run_stfree_chunk", fake_run_stfree_chunk)
 
@@ -809,6 +829,31 @@ def test_screen_cli_runs_chunks_with_stfree_runtime(
     assert all(call["options"].num_workers == 3 for call in calls)
     assert (tmp_path / "output/scores.csv").is_file()
     assert "Screen complete" in result.output
+    status = json.loads((tmp_path / "output/screen_status.json").read_text())
+    assert status["state"] == "complete"
+    assert status["completed"] == 2
+    assert status["pending"] == 0
+    assert all(chunk["state"] == "complete" for chunk in status["chunks"])
+
+
+def test_screen_cli_publishes_failure_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_config(tmp_path, {"smiles": ["CCO"]})
+
+    def fail_run(**kwargs: object) -> None:  # noqa: ARG001
+        raise RuntimeError("GPU stopped")
+
+    monkeypatch.setattr(stfree_runtime, "run_stfree_chunk", fail_run)
+
+    result = CliRunner().invoke(cli, ["screen", str(config_path)])
+
+    assert result.exit_code == 1
+    status = json.loads((tmp_path / "output/screen_status.json").read_text())
+    assert status["state"] == "failed"
+    assert status["completed"] == 0
+    assert status["message"] == "RuntimeError: GPU stopped"
 
 
 def test_cli_exposes_only_screen() -> None:

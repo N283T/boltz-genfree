@@ -9,6 +9,7 @@ import math
 import os
 import platform
 import warnings
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -449,6 +450,7 @@ def run_stfree_chunk(
     out_dir: Path,
     options: StFreeRuntimeOptions,
     receptor_crop_indices_dir: Path | None = None,
+    progress_callback: Callable[[list[str], bool], None] | None = None,
 ) -> None:
     """Score one chunk without generating or loading complex coordinates."""
     import torch
@@ -475,9 +477,7 @@ def run_stfree_chunk(
     _patch_torch_checkpoint_loading(torch)
     if options.ligand_reference_conformer not in _LIGAND_CONFORMER_MODES:
         choices = ", ".join(sorted(_LIGAND_CONFORMER_MODES))
-        raise click.UsageError(
-            f"ligand_reference_conformer must be one of: {choices}."
-        )
+        raise click.UsageError(f"ligand_reference_conformer must be one of: {choices}.")
     if options.accelerator == "cpu":
         click.echo("Running on CPU; affinity scoring will be slow.")
     if options.accelerator == "mps" and not torch.backends.mps.is_available():
@@ -619,6 +619,7 @@ def run_stfree_chunk(
         output_tag=None,
         screening_minimal_output=True,
         experiment_metadata=experiment_metadata,
+        progress_callback=progress_callback,
     )
     callbacks = [writer]
     if options.subsample_msa and options.seed is not None:
