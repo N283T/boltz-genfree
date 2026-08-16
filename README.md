@@ -257,29 +257,6 @@ existing affinity crop behavior
 (`neighborhood_size: 10`). The complete screened ligand is always reserved
 first and is never truncated.
 
-If pocket residues are already known, `pocket` can replace the structure
-reference. Residue numbers are 1-based target-sequence positions, and each
-one-letter residue name is checked against `target.sequence` to catch numbering
-or isoform mistakes:
-
-```yaml
-target:
-  sequence: YOUR_PROTEIN_SEQUENCE
-  msa: ./target.a3m
-  crop:
-    pocket:
-      - residue: 42
-        name: E
-      - residue: 67
-        name: Y
-    budget: per_ligand
-```
-
-Each listed residue seeds one contiguous 10-residue block, in the listed order.
-At least one residue is required; duplicate positions, out-of-range positions,
-and residue-name mismatches are rejected. `reference` and `pocket` are mutually
-exclusive.
-
 Two budget policies are supported:
 
 - `per_ligand` (default) applies the 256-token, 2048-atom, and 200-protein-token
@@ -288,11 +265,10 @@ Two budget policies are supported:
 - `library_fixed` reserves capacity for the largest ligand in the library and
   uses exactly the same receptor crop for every record.
 
-The reference checksum and chain selection, or the explicit pocket residue
-list, are stored in the screen manifest. Each record also stores its receptor
-token indices, reserved ligand size, crop policy, and retained receptor-token
-count under `.boltz-stfree/crops/`. These files are included in resume
-provenance and summarized in `scores.csv`.
+The reference checksum and chain selection are stored in the screen manifest.
+Each record also stores its receptor token indices, reserved ligand size, crop
+policy, and retained receptor-token count under `.boltz-stfree/crops/`. These
+files are included in resume provenance and summarized in `scores.csv`.
 
 CCD inputs are checked against the Boltz-2 component cache. A normal `screen`
 run downloads that cache when needed. Offline `--prepare-only` validation

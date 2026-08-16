@@ -20,12 +20,8 @@ from rdkit import Chem
 from boltz.data.mol import load_molecules
 from boltz.data.parse.schema import standardize
 from boltz.reference_crop import (
-    ReferenceCrop,
     ReferenceLigandSelector,
-    SequencePocketCrop,
-    SequencePocketResidue,
     load_reference_crop,
-    load_sequence_pocket_crop,
     select_receptor_tokens,
 )
 from boltz.stfree_runtime import StFreeRuntimeOptions
@@ -40,14 +36,12 @@ _TOP_LEVEL_KEYS = {
 }
 _TARGET_KEYS = {"id", "sequence", "msa", "crop"}
 _CROP_KEYS = {
-    "pocket",
     "reference",
     "reference_protein",
     "reference_ligand",
     "budget",
 }
 _REFERENCE_LIGAND_KEYS = {"chain", "residue", "ccd"}
-_POCKET_RESIDUE_KEYS = {"residue", "name"}
 _LIGAND_SOURCE_KEYS = {"smiles", "csv", "sdf", "ccd"}
 _MAX_SEQUENCE_PREFIX_TOKENS = 200
 _MAX_AFFINITY_TOKENS = 256
@@ -565,7 +559,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     ligands, ligand_provenance = _load_ligands(ligands_config, base_dir)
     crop_config_value = target.get("crop")
     crop_config: dict[str, Any] | None = None
-    crop_reference: ReferenceCrop | SequencePocketCrop | None = None
+    crop_reference = None
     crop_reference_path: Path | None = None
     crop_reference_sha256: str | None = None
     crop_reference_provenance: dict[str, object] | None = None
@@ -576,131 +570,89 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         if unknown_crop:
             names = ", ".join(sorted(unknown_crop))
             raise click.UsageError(f"Unknown target.crop settings: {names}")
+        if "reference" not in crop_config:
+            raise click.UsageError("target.crop.reference is required.")
+        crop_reference_path = _resolve_path(
+            crop_config["reference"],
+            base_dir,
+            "target.crop.reference",
+        )
+        if not crop_reference_path.is_file():
+            raise click.UsageError(
+                f"Crop reference does not exist: {crop_reference_path}"
+            )
         crop_policy = crop_config.get("budget", "per_ligand")
         if crop_policy not in {"per_ligand", "library_fixed"}:
             raise click.UsageError(
                 "target.crop.budget must be per_ligand or library_fixed."
             )
-        has_reference = "reference" in crop_config
-        has_pocket = "pocket" in crop_config
-        if has_reference == has_pocket:
+        protein_chain = crop_config.get("reference_protein")
+        if protein_chain is not None and (
+            not isinstance(protein_chain, str) or not protein_chain
+        ):
             raise click.UsageError(
-                "target.crop must specify exactly one of reference or pocket."
+                "target.crop.reference_protein must be a non-empty string."
             )
-        if has_reference:
-            crop_reference_path = _resolve_path(
-                crop_config["reference"],
-                base_dir,
-                "target.crop.reference",
-            )
-            if not crop_reference_path.is_file():
+        reference_ligand_value = crop_config.get("reference_ligand")
+        if isinstance(reference_ligand_value, str):
+            if not reference_ligand_value:
                 raise click.UsageError(
-                    f"Crop reference does not exist: {crop_reference_path}"
+                    "target.crop.reference_ligand must not be empty."
                 )
-            protein_chain = crop_config.get("reference_protein")
-            if protein_chain is not None and (
-                not isinstance(protein_chain, str) or not protein_chain
-            ):
-                raise click.UsageError(
-                    "target.crop.reference_protein must be a non-empty string."
-                )
-            reference_ligand_value = crop_config.get("reference_ligand")
-            if isinstance(reference_ligand_value, str):
-                if not reference_ligand_value:
-                    raise click.UsageError(
-                        "target.crop.reference_ligand must not be empty."
-                    )
-                ligand_selector = ReferenceLigandSelector(
-                    chain=reference_ligand_value,
-                )
-            else:
-                reference_ligand = _mapping(
-                    reference_ligand_value,
-                    "target.crop.reference_ligand",
-                )
-                unknown_ligand = set(reference_ligand) - _REFERENCE_LIGAND_KEYS
-                if unknown_ligand:
-                    names = ", ".join(sorted(unknown_ligand))
-                    raise click.UsageError(
-                        f"Unknown target.crop.reference_ligand settings: {names}"
-                    )
-                missing_ligand = _REFERENCE_LIGAND_KEYS - set(reference_ligand)
-                if missing_ligand:
-                    names = ", ".join(sorted(missing_ligand))
-                    raise click.UsageError(
-                        f"target.crop.reference_ligand is missing: {names}"
-                    )
-                ligand_chain = reference_ligand["chain"]
-                ligand_residue = reference_ligand["residue"]
-                ligand_ccd = reference_ligand["ccd"]
-                if not isinstance(ligand_chain, str) or not ligand_chain:
-                    raise click.UsageError(
-                        "target.crop.reference_ligand.chain must be a non-empty "
-                        "string."
-                    )
-                if not isinstance(ligand_residue, int) or isinstance(
-                    ligand_residue, bool
-                ):
-                    raise click.UsageError(
-                        "target.crop.reference_ligand.residue must be an integer."
-                    )
-                if not isinstance(ligand_ccd, str) or not ligand_ccd:
-                    raise click.UsageError(
-                        "target.crop.reference_ligand.ccd must be a non-empty string."
-                    )
-                ligand_selector = ReferenceLigandSelector(
-                    chain=ligand_chain,
-                    residue=ligand_residue,
-                    ccd=ligand_ccd.upper(),
-                )
-            try:
-                crop_reference = load_reference_crop(
-                    crop_reference_path,
-                    sequence,
-                    protein_chain=protein_chain,
-                    ligand=ligand_selector,
-                )
-            except ValueError as error:
-                raise click.UsageError(str(error)) from error
-            crop_reference_sha256 = _sha256(crop_reference_path)
-            crop_reference_provenance = _crop_reference_provenance(
-                crop_reference_path,
-                crop_reference_sha256,
+            ligand_selector = ReferenceLigandSelector(
+                chain=reference_ligand_value,
             )
         else:
-            if {"reference_protein", "reference_ligand"} & crop_config.keys():
+            reference_ligand = _mapping(
+                reference_ligand_value,
+                "target.crop.reference_ligand",
+            )
+            unknown_ligand = set(reference_ligand) - _REFERENCE_LIGAND_KEYS
+            if unknown_ligand:
+                names = ", ".join(sorted(unknown_ligand))
                 raise click.UsageError(
-                    "target.crop.reference_protein and reference_ligand require "
-                    "target.crop.reference."
+                    f"Unknown target.crop.reference_ligand settings: {names}"
                 )
-            pocket_value = crop_config["pocket"]
-            if not isinstance(pocket_value, list):
-                raise click.UsageError("target.crop.pocket must be a list.")
-            pocket: list[SequencePocketResidue] = []
-            for index, value in enumerate(pocket_value):
-                label = f"target.crop.pocket[{index}]"
-                item = _mapping(value, label)
-                unknown_item = set(item) - _POCKET_RESIDUE_KEYS
-                missing_item = _POCKET_RESIDUE_KEYS - set(item)
-                if unknown_item:
-                    names = ", ".join(sorted(unknown_item))
-                    raise click.UsageError(f"Unknown {label} settings: {names}")
-                if missing_item:
-                    names = ", ".join(sorted(missing_item))
-                    raise click.UsageError(f"{label} is missing: {names}")
-                residue = item["residue"]
-                name = item["name"]
-                if not isinstance(residue, int) or isinstance(residue, bool):
-                    raise click.UsageError(f"{label}.residue must be an integer.")
-                if not isinstance(name, str) or not name:
-                    raise click.UsageError(
-                        f"{label}.name must be a non-empty string."
-                    )
-                pocket.append(SequencePocketResidue(residue=residue, name=name))
-            try:
-                crop_reference = load_sequence_pocket_crop(sequence, tuple(pocket))
-            except ValueError as error:
-                raise click.UsageError(str(error)) from error
+            missing_ligand = _REFERENCE_LIGAND_KEYS - set(reference_ligand)
+            if missing_ligand:
+                names = ", ".join(sorted(missing_ligand))
+                raise click.UsageError(
+                    f"target.crop.reference_ligand is missing: {names}"
+                )
+            ligand_chain = reference_ligand["chain"]
+            ligand_residue = reference_ligand["residue"]
+            ligand_ccd = reference_ligand["ccd"]
+            if not isinstance(ligand_chain, str) or not ligand_chain:
+                raise click.UsageError(
+                    "target.crop.reference_ligand.chain must be a non-empty string."
+                )
+            if not isinstance(ligand_residue, int) or isinstance(ligand_residue, bool):
+                raise click.UsageError(
+                    "target.crop.reference_ligand.residue must be an integer."
+                )
+            if not isinstance(ligand_ccd, str) or not ligand_ccd:
+                raise click.UsageError(
+                    "target.crop.reference_ligand.ccd must be a non-empty string."
+                )
+            ligand_selector = ReferenceLigandSelector(
+                chain=ligand_chain,
+                residue=ligand_residue,
+                ccd=ligand_ccd.upper(),
+            )
+        try:
+            crop_reference = load_reference_crop(
+                crop_reference_path,
+                sequence,
+                protein_chain=protein_chain,
+                ligand=ligand_selector,
+            )
+        except ValueError as error:
+            raise click.UsageError(str(error)) from error
+        crop_reference_sha256 = _sha256(crop_reference_path)
+        crop_reference_provenance = _crop_reference_provenance(
+            crop_reference_path,
+            crop_reference_sha256,
+        )
     ligand_token_counts = _validate_full_screen(
         sequence,
         ligands,
@@ -805,36 +757,21 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             crop_document = {
                 "schema_version": 1,
                 "record_id": record_id,
+                "selection": "reference_contiguous_blocks",
                 "budget": crop_policy,
                 "neighborhood_size": 10,
+                "reference": str(crop_reference_path),
+                "reference_sha256": crop_reference_sha256,
+                "reference_source": crop_reference_provenance,
+                "reference_protein": crop_reference.protein_chain,
+                "reference_ligand": {
+                    "chain": crop_reference.ligand_chain,
+                    "residue": crop_reference.ligand_residue,
+                    "ccd": crop_reference.ligand_ccd,
+                },
                 "ligand_tokens_reserved": reserved_ligand_tokens,
                 "receptor_token_idx": list(receptor_indices),
             }
-            if isinstance(crop_reference, ReferenceCrop):
-                crop_document.update(
-                    {
-                        "selection": "reference_contiguous_blocks",
-                        "reference": str(crop_reference_path),
-                        "reference_sha256": crop_reference_sha256,
-                        "reference_source": crop_reference_provenance,
-                        "reference_protein": crop_reference.protein_chain,
-                        "reference_ligand": {
-                            "chain": crop_reference.ligand_chain,
-                            "residue": crop_reference.ligand_residue,
-                            "ccd": crop_reference.ligand_ccd,
-                        },
-                    }
-                )
-            else:
-                crop_document.update(
-                    {
-                        "selection": "sequence_pocket_blocks",
-                        "pocket": [
-                            {"residue": item.residue, "name": item.name}
-                            for item in crop_reference.pocket
-                        ],
-                    }
-                )
             expected_files[crop_path] = json.dumps(crop_document, indent=2) + "\n"
             record["crop"] = {
                 "budget": crop_policy,
@@ -876,37 +813,21 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         "records": records,
     }
     if crop_reference is not None:
-        crop_manifest: dict[str, object] = {
+        assert crop_reference_path is not None
+        manifest["target"]["crop"] = {
+            "selection": "reference_contiguous_blocks",
+            "reference": str(crop_reference_path),
+            "reference_sha256": crop_reference_sha256,
+            "reference_source": crop_reference_provenance,
+            "protein_chain": crop_reference.protein_chain,
+            "ligand": {
+                "chain": crop_reference.ligand_chain,
+                "residue": crop_reference.ligand_residue,
+                "ccd": crop_reference.ligand_ccd,
+            },
             "budget": crop_policy,
             "neighborhood_size": 10,
         }
-        if isinstance(crop_reference, ReferenceCrop):
-            assert crop_reference_path is not None
-            crop_manifest.update(
-                {
-                    "selection": "reference_contiguous_blocks",
-                    "reference": str(crop_reference_path),
-                    "reference_sha256": crop_reference_sha256,
-                    "reference_source": crop_reference_provenance,
-                    "protein_chain": crop_reference.protein_chain,
-                    "ligand": {
-                        "chain": crop_reference.ligand_chain,
-                        "residue": crop_reference.ligand_residue,
-                        "ccd": crop_reference.ligand_ccd,
-                    },
-                }
-            )
-        else:
-            crop_manifest.update(
-                {
-                    "selection": "sequence_pocket_blocks",
-                    "pocket": [
-                        {"residue": item.residue, "name": item.name}
-                        for item in crop_reference.pocket
-                    ],
-                }
-            )
-        manifest["target"]["crop"] = crop_manifest
     if manifest_path.is_file():
         existing = json.loads(manifest_path.read_text(encoding="utf-8"))
         if existing != manifest:
@@ -1266,24 +1187,13 @@ def build_screen_plan(
     crop = target.get("crop")
     if isinstance(crop, dict):
         receptor_selection = {
-            "mode": (
-                "reference_crop"
-                if crop["selection"] == "reference_contiguous_blocks"
-                else "sequence_pocket_crop"
-            ),
+            "mode": "reference_crop",
             "budget": crop["budget"],
             "receptor_tokens_min": min(receptor_counts),
             "receptor_tokens_max": max(receptor_counts),
+            "reference": crop["reference"],
+            "reference_sha256": crop["reference_sha256"],
         }
-        if crop["selection"] == "reference_contiguous_blocks":
-            receptor_selection.update(
-                {
-                    "reference": crop["reference"],
-                    "reference_sha256": crop["reference_sha256"],
-                }
-            )
-        else:
-            receptor_selection["pocket"] = crop["pocket"]
     else:
         receptor_selection = {
             "mode": "complete_input",
