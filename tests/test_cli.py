@@ -96,10 +96,10 @@ class TestCheckInputs:
         assert check_inputs(input_path) == [input_path]
 
     def test_directory_filters_valid_extensions(self, tmp_path: Path) -> None:
-        (tmp_path / "a.yaml").write_text("y")
         (tmp_path / "b.fasta").write_text("f")
+        (tmp_path / "a.yaml").write_text("y")
 
-        names = sorted(path.name for path in check_inputs(tmp_path))
+        names = [path.name for path in check_inputs(tmp_path)]
 
         assert names == ["a.yaml", "b.fasta"]
 

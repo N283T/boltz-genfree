@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
         write_affinity_representations: bool = False,
         output_tag: Optional[str] = None,
         screening_minimal_output: bool = False,
+        progress_callback: Callable[[list[str], bool], None] | None = None,
     ) -> None:
         """Initialize the writer.
 
@@ -42,6 +44,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
         self.write_affinity_representations = write_affinity_representations
         self.output_tag = output_tag
         self.screening_minimal_output = screening_minimal_output
+        self.progress_callback = progress_callback
         self.run_metadata_path: Optional[Path] = None
         if self.screening_minimal_output:
             tag_suffix = f"__run_{self.output_tag}" if self.output_tag else ""
@@ -83,14 +86,13 @@ class BoltzAffinityWriter(BasePredictionWriter):
         record_idx: int = 0,
     ) -> dict[str, object]:
         """Build the legacy scalar affinity summary for one prediction."""
+
         def scalar(key: str) -> float:
             return prediction[key].reshape(-1)[record_idx].item()
 
         summary: dict[str, object] = {
             "affinity_pred_value": scalar("affinity_pred_value"),
-            "affinity_probability_binary": scalar(
-                "affinity_probability_binary"
-            ),
+            "affinity_probability_binary": scalar("affinity_probability_binary"),
         }
         if record.affinity and record.affinity.chain_name:
             summary["binder_chain"] = record.affinity.chain_name
@@ -122,7 +124,13 @@ class BoltzAffinityWriter(BasePredictionWriter):
         """Write the predictions to disk."""
         if prediction["exception"]:
             self.failed += 1
+            if self.progress_callback is not None:
+                self.progress_callback(
+                    [record.id for record in batch["record"]],
+                    True,
+                )
             return
+        completed_record_ids = []
         for record_idx, record in enumerate(batch["record"]):
             struct_dir = self.output_dir / record.id
             struct_dir.mkdir(exist_ok=True)
@@ -152,12 +160,20 @@ class BoltzAffinityWriter(BasePredictionWriter):
                 bins = None
                 pair_mask = None
                 if not self.screening_minimal_output:
-                    bins = mode_prediction["affinity_distogram_bins"][
-                        record_idx : record_idx + 1
-                    ].detach().cpu()
-                    pair_mask = mode_prediction[
-                        "affinity_distogram_intervened_pair_mask"
-                    ][record_idx : record_idx + 1].detach().cpu()
+                    bins = (
+                        mode_prediction["affinity_distogram_bins"][
+                            record_idx : record_idx + 1
+                        ]
+                        .detach()
+                        .cpu()
+                    )
+                    pair_mask = (
+                        mode_prediction["affinity_distogram_intervened_pair_mask"][
+                            record_idx : record_idx + 1
+                        ]
+                        .detach()
+                        .cpu()
+                    )
                     num_bins = max(int(bins.max().item()) + 1, 64)
                     histogram = torch.bincount(
                         bins.reshape(-1),
@@ -184,9 +200,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
                     )
                 if self.write_affinity_representations:
                     representations = {
-                        key.removeprefix("affinity_representation_"): value[
-                            record_idx
-                        ]
+                        key.removeprefix("affinity_representation_"): value[record_idx]
                         .detach()
                         .float()
                         .cpu()
@@ -197,10 +211,12 @@ class BoltzAffinityWriter(BasePredictionWriter):
                     np.savez_compressed(
                         struct_dir / f"{mode_stem}__pooled_representations.npz",
                         **representations,
-                        representation_stage=np.asarray(
-                            "affinity_cross_pair_mean"
-                        ),
+                        representation_stage=np.asarray("affinity_cross_pair_mean"),
                     )
+            completed_record_ids.append(record.id)
+
+        if self.progress_callback is not None:
+            self.progress_callback(completed_record_ids, False)
 
         if self.write_embeddings and "s" in prediction and "z" in prediction:
             token_mask = batch["token_pad_mask"][0].detach().cpu().bool()
@@ -228,9 +244,7 @@ class BoltzAffinityWriter(BasePredictionWriter):
                         "affinity_crop_mode",
                         (
                             "explicit_token_indices"
-                            if self.experiment_metadata.get(
-                                "affinity_crop_indices_dir"
-                            )
+                            if self.experiment_metadata.get("affinity_crop_indices_dir")
                             else "prepared_geometry"
                         ),
                     )

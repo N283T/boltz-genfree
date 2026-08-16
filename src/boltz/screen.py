@@ -9,6 +9,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +92,8 @@ class PreparedScreen:
     output_dir: Path
     runs_dir: Path
     manifest_path: Path
+    plan_path: Path
+    status_path: Path
     chunk_dirs: tuple[Path, ...]
     options: dict[str, Any]
     screen_options: ScreenOptions
@@ -110,6 +113,18 @@ class ScreenOptions:
     msa_server_password: str | None = None
     api_key_header: str | None = None
     api_key_value: str | None = None
+
+
+def _utc_now() -> str:
+    """Return an RFC 3339 timestamp in UTC."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    """Atomically publish a JSON document for concurrent readers."""
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -622,6 +637,8 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     )
     runs_dir = output_dir / "runs"
     manifest_path = state_dir / "screen_manifest.json"
+    plan_path = output_dir / "screen_plan.json"
+    status_path = output_dir / "screen_status.json"
     auto_msa_path = state_dir / "msa" / "target.csv" if auto_msa else None
     if auto_msa_path is not None:
         msa_provenance["path"] = str(auto_msa_path)
@@ -803,12 +820,13 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     runs_dir.mkdir(parents=True, exist_ok=True)
-
-    return PreparedScreen(
+    prepared = PreparedScreen(
         config_path=config_path,
         output_dir=output_dir,
         runs_dir=runs_dir,
         manifest_path=manifest_path,
+        plan_path=plan_path,
+        status_path=status_path,
         chunk_dirs=tuple(chunk_dirs),
         options=options,
         screen_options=screen_options,
@@ -816,6 +834,8 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         auto_msa_path=auto_msa_path,
         receptor_crop_indices_dir=receptor_crop_indices_dir,
     )
+    _atomic_write_json(plan_path, build_screen_plan(prepared, manifest))
+    return prepared
 
 
 def ensure_auto_msa(
@@ -1082,6 +1102,294 @@ def build_screen_options(
     )
 
 
+def _screen_score_matches(
+    runs_dir: Path,
+    record: dict[str, object],
+) -> list[Path]:
+    """Return structure-free score files for one screen manifest record."""
+    prediction_dir = (
+        runs_dir
+        / f"boltz_results_{record['chunk']}"
+        / "predictions"
+        / str(record["record_id"])
+    )
+    return sorted(
+        prediction_dir.glob("affinity_*__distogram_zero_distogram_features*.json")
+    )
+
+
+def build_screen_plan(
+    prepared: PreparedScreen,
+    manifest: dict[str, object],
+) -> dict[str, object]:
+    """Build the durable, non-secret execution plan for a prepared screen."""
+    records = manifest["records"]
+    assert isinstance(records, list)
+    token_counts = [int(record["ligand_tokens"]) for record in records]
+    chunk_counts: dict[str, int] = {}
+    receptor_counts: list[int] = []
+    for record in records:
+        chunk = str(record["chunk"])
+        chunk_counts[chunk] = chunk_counts.get(chunk, 0) + 1
+        crop = record.get("crop")
+        if isinstance(crop, dict):
+            receptor_counts.append(int(crop["receptor_tokens"]))
+
+    runtime = prepared.screen_options.runtime
+    target = manifest["target"]
+    assert isinstance(target, dict)
+    ligand_source = manifest["ligand_source"]
+    assert isinstance(ligand_source, dict)
+    receptor_selection: dict[str, object]
+    crop = target.get("crop")
+    if isinstance(crop, dict):
+        receptor_selection = {
+            "mode": "reference_crop",
+            "budget": crop["budget"],
+            "receptor_tokens_min": min(receptor_counts),
+            "receptor_tokens_max": max(receptor_counts),
+            "reference": crop["reference"],
+            "reference_sha256": crop["reference_sha256"],
+        }
+    else:
+        receptor_selection = {
+            "mode": "complete_input",
+            "receptor_tokens": target["length"],
+        }
+
+    checkpoint = runtime.affinity_checkpoint or runtime.cache / "boltz2_aff.ckpt"
+    return {
+        "schema_version": 1,
+        "config": str(prepared.config_path),
+        "manifest": str(prepared.manifest_path),
+        "target": {
+            "id": target["id"],
+            "sequence_length": target["length"],
+            "msa": target["msa"],
+            "receptor_selection": receptor_selection,
+        },
+        "library": {
+            "source": ligand_source,
+            "records": len(records),
+            "ligand_tokens_min": min(token_counts),
+            "ligand_tokens_max": max(token_counts),
+            "above_training_token_limit": sum(
+                count > _MAX_TRAINING_LIGAND_TOKENS for count in token_counts
+            ),
+        },
+        "execution": {
+            "chunk_size": manifest["chunk_size"],
+            "chunk_count": len(chunk_counts),
+            "chunks": [
+                {"name": name, "records": count} for name, count in chunk_counts.items()
+            ],
+            "accelerator": runtime.accelerator,
+            "devices": runtime.devices,
+            "num_workers": runtime.num_workers,
+            "preprocessing_workers": runtime.preprocessing_threads,
+            "seed": runtime.seed,
+            "subsample_msa": runtime.subsample_msa,
+            "num_subsampled_msa": runtime.num_subsampled_msa,
+            "affinity_recycling_steps": runtime.affinity_recycling_steps,
+            "ligand_reference_conformer": runtime.ligand_reference_conformer,
+            "checkpoint": str(checkpoint.expanduser().resolve()),
+        },
+        "outputs": {
+            "directory": str(prepared.output_dir),
+            "status": str(prepared.status_path),
+            "scores": str(prepared.output_dir / "scores.csv"),
+        },
+    }
+
+
+def format_screen_plan(plan: dict[str, object]) -> tuple[str, ...]:
+    """Format a concise terminal summary of a screen plan."""
+    target = plan["target"]
+    library = plan["library"]
+    execution = plan["execution"]
+    outputs = plan["outputs"]
+    assert isinstance(target, dict)
+    assert isinstance(library, dict)
+    assert isinstance(execution, dict)
+    assert isinstance(outputs, dict)
+    receptor = target["receptor_selection"]
+    msa = target["msa"]
+    assert isinstance(receptor, dict)
+    assert isinstance(msa, dict)
+    receptor_label = str(receptor["mode"])
+    if receptor_label == "reference_crop":
+        receptor_label += (
+            f" ({receptor['receptor_tokens_min']}-"
+            f"{receptor['receptor_tokens_max']} receptor tokens)"
+        )
+    else:
+        receptor_label += f" ({receptor['receptor_tokens']} receptor tokens)"
+    return (
+        f"Target: {target['sequence_length']} residues, {receptor_label}, "
+        f"MSA {msa['mode']}",
+        f"Library: {library['records']} records, ligand tokens "
+        f"{library['ligand_tokens_min']}-{library['ligand_tokens_max']}, "
+        f"{library['above_training_token_limit']} above training limit",
+        f"Execution: {execution['chunk_count']} chunk(s) of at most "
+        f"{execution['chunk_size']}, {execution['accelerator']} on "
+        f"{execution['devices']}, seed {execution['seed']}",
+        f"Status: {outputs['status']}",
+    )
+
+
+class ScreenProgress:
+    """Publish resumable screen progress as an atomic JSON snapshot."""
+
+    def __init__(
+        self,
+        prepared: PreparedScreen,
+        *,
+        ignore_existing: bool = False,
+    ) -> None:
+        self.prepared = prepared
+        self.manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+        records = self.manifest["records"]
+        self.records = {str(record["record_id"]): record for record in records}
+        self.chunk_order = [path.name for path in prepared.chunk_dirs]
+        self.record_chunks = {
+            record_id: str(record["chunk"])
+            for record_id, record in self.records.items()
+        }
+        self.chunk_record_ids = {chunk: [] for chunk in self.chunk_order}
+        for record_id, chunk in self.record_chunks.items():
+            self.chunk_record_ids[chunk].append(record_id)
+        self.chunk_completed = {chunk: 0 for chunk in self.chunk_order}
+        self.chunk_failed = {chunk: 0 for chunk in self.chunk_order}
+        self.completed: set[str] = set()
+        self.failed: set[str] = set()
+        if not ignore_existing:
+            for record_id, record in self.records.items():
+                if len(_screen_score_matches(prepared.runs_dir, record)) == 1:
+                    self._set_record_state(record_id, failed=False)
+        self.state = "prepared"
+        self.message: str | None = None
+        self.current_chunk: str | None = None
+        self.started_at: str | None = None
+        self._publish()
+
+    def _set_record_state(self, record_id: str, *, failed: bool) -> None:
+        chunk = self.record_chunks[record_id]
+        if failed:
+            if record_id in self.completed:
+                self.completed.remove(record_id)
+                self.chunk_completed[chunk] -= 1
+            if record_id not in self.failed:
+                self.failed.add(record_id)
+                self.chunk_failed[chunk] += 1
+        else:
+            if record_id not in self.completed:
+                self.completed.add(record_id)
+                self.chunk_completed[chunk] += 1
+            if record_id in self.failed:
+                self.failed.remove(record_id)
+                self.chunk_failed[chunk] -= 1
+
+    def _refresh_chunk(self, chunk: str) -> None:
+        for record_id in self.chunk_record_ids[chunk]:
+            record = self.records[record_id]
+            matches = _screen_score_matches(self.prepared.runs_dir, record)
+            if len(matches) == 1:
+                self._set_record_state(record_id, failed=False)
+
+    def _snapshot(self) -> dict[str, object]:
+        chunks = []
+        for chunk in self.chunk_order:
+            expected = len(self.chunk_record_ids[chunk])
+            completed = self.chunk_completed[chunk]
+            failed = self.chunk_failed[chunk]
+            if completed == expected:
+                state = "complete"
+            elif chunk == self.current_chunk:
+                state = "running"
+            elif completed or failed:
+                state = "partial"
+            else:
+                state = "pending"
+            chunks.append(
+                {
+                    "name": chunk,
+                    "state": state,
+                    "expected": expected,
+                    "completed": completed,
+                    "failed": failed,
+                }
+            )
+        expected = len(self.records)
+        completed = len(self.completed)
+        failed = len(self.failed)
+        return {
+            "schema_version": 1,
+            "state": self.state,
+            "message": self.message,
+            "started_at": self.started_at,
+            "updated_at": _utc_now(),
+            "expected": expected,
+            "completed": completed,
+            "failed": failed,
+            "pending": expected - completed,
+            "percent_complete": round(100 * completed / expected, 2),
+            "current_chunk": self.current_chunk,
+            "chunks": chunks,
+            "plan": str(self.prepared.plan_path),
+            "scores": str(self.prepared.output_dir / "scores.csv"),
+        }
+
+    def _publish(self) -> None:
+        _atomic_write_json(self.prepared.status_path, self._snapshot())
+
+    def set_stage(self, state: str, message: str | None = None) -> None:
+        """Publish a screen-level stage transition."""
+        if self.started_at is None and state != "prepared":
+            self.started_at = _utc_now()
+        self.state = state
+        self.message = message
+        self._publish()
+
+    def start_chunk(self, chunk: str) -> None:
+        """Mark one chunk as active."""
+        self.current_chunk = chunk
+        self.set_stage("running", f"Running {chunk}")
+
+    def record_batch(self, record_ids: list[str], failed: bool) -> None:
+        """Publish completion or failure for a prediction batch."""
+        for record_id in record_ids:
+            if record_id not in self.records:
+                raise ValueError(
+                    f"Unknown screen record in progress update: {record_id}"
+                )
+            self._set_record_state(record_id, failed=failed)
+        self._publish()
+
+    def finish_chunk(self, chunk: str) -> None:
+        """Rescan a finished chunk and publish its durable result count."""
+        self._refresh_chunk(chunk)
+        self.current_chunk = None
+        self._publish()
+
+    def complete(self, scores_path: Path) -> None:
+        """Publish successful screen completion."""
+        self.completed = set(self.records)
+        self.failed.clear()
+        self.chunk_completed = {
+            chunk: len(record_ids)
+            for chunk, record_ids in self.chunk_record_ids.items()
+        }
+        self.chunk_failed = {chunk: 0 for chunk in self.chunk_order}
+        self.current_chunk = None
+        self.set_stage("complete", f"Scores written to {scores_path}")
+
+    def fail(self, error: BaseException) -> None:
+        """Publish a terminal failure or interruption without hiding the error."""
+        self.current_chunk = None
+        state = "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
+        self.set_stage(state, f"{type(error).__name__}: {error}")
+
+
 def invalidate_screen_aggregates(prepared: PreparedScreen) -> None:
     """Remove published aggregates before an explicit override starts."""
     for name in (
@@ -1109,15 +1417,7 @@ def collect_screen_scores(prepared: PreparedScreen) -> Path:
     rows: list[dict[str, object]] = []
     missing: list[str] = []
     for record in manifest["records"]:
-        prediction_dir = (
-            prepared.runs_dir
-            / f"boltz_results_{record['chunk']}"
-            / "predictions"
-            / record["record_id"]
-        )
-        matches = sorted(
-            prediction_dir.glob("affinity_*__distogram_zero_distogram_features*.json")
-        )
+        matches = _screen_score_matches(prepared.runs_dir, record)
         if not matches:
             missing.append(record["record_id"])
             continue

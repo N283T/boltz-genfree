@@ -231,9 +231,7 @@ def test_affinity_writer_minimal_screening_output_deduplicates_run_metadata(
         "exception": False,
         "affinity_pred_value": torch.tensor(1.25),
         "affinity_probability_binary": torch.tensor(0.75),
-        "affinity_by_distogram_mode": {
-            "zero_distogram_features": mode_prediction
-        },
+        "affinity_by_distogram_mode": {"zero_distogram_features": mode_prediction},
     }
 
     writer.write_on_batch_end(
@@ -251,8 +249,7 @@ def test_affinity_writer_minimal_screening_output_deduplicates_run_metadata(
     out_dir = tmp_path / "out"
     record_dir = out_dir / "record_a"
     mode_path = record_dir / (
-        "affinity_record_a_L2__distogram_zero_distogram_features"
-        "__run_minimal.json"
+        "affinity_record_a_L2__distogram_zero_distogram_features__run_minimal.json"
     )
     summary = json.loads(mode_path.read_text())
     run_metadata = json.loads(
@@ -263,9 +260,7 @@ def test_affinity_writer_minimal_screening_output_deduplicates_run_metadata(
     assert summary["experiment"]["input_source"] == str(input_a)
     assert "input_sources" not in summary["experiment"]
     assert "effective_distogram" not in summary
-    assert summary["experiment"]["output_layout"] == (
-        "affinity_screening_minimal_v1"
-    )
+    assert summary["experiment"]["output_layout"] == ("affinity_screening_minimal_v1")
     assert summary["experiment"]["run_metadata_file"] == (
         "../affinity_run_metadata__run_minimal.json"
     )
@@ -308,9 +303,7 @@ def test_affinity_writer_minimal_output_supports_batches(tmp_path: Path):
             key: mode_prediction[key]
             for key in ("affinity_pred_value", "affinity_probability_binary")
         },
-        "affinity_by_distogram_mode": {
-            "zero_distogram_features": mode_prediction
-        },
+        "affinity_by_distogram_mode": {"zero_distogram_features": mode_prediction},
     }
 
     writer.write_on_batch_end(
@@ -343,3 +336,49 @@ def test_affinity_writer_minimal_output_supports_batches(tmp_path: Path):
         0.75,
         0.5,
     ]
+
+
+def test_affinity_writer_reports_completed_and_failed_batches(tmp_path: Path) -> None:
+    updates: list[tuple[list[str], bool]] = []
+    writer = BoltzAffinityWriter(
+        data_dir=str(tmp_path / "data"),
+        output_dir=str(tmp_path / "out"),
+        progress_callback=lambda record_ids, failed: updates.append(
+            (record_ids, failed)
+        ),
+    )
+    record = _make_record(
+        "record_a",
+        affinity=AffinityInfo(
+            chain_id=0,
+            mw=123.4,
+            chain_name="L2",
+            output_id="record_a_L2",
+        ),
+    )
+    successful = {
+        "exception": False,
+        "affinity_pred_value": torch.tensor(1.25),
+        "affinity_probability_binary": torch.tensor(0.75),
+    }
+
+    writer.write_on_batch_end(
+        None,
+        None,
+        successful,
+        [],
+        {"record": [record]},
+        0,
+        0,
+    )
+    writer.write_on_batch_end(
+        None,
+        None,
+        {"exception": True},
+        [],
+        {"record": [record]},
+        1,
+        0,
+    )
+
+    assert updates == [(["record_a"], False), (["record_a"], True)]

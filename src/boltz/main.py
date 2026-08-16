@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pickle
 import platform
@@ -330,7 +331,7 @@ def check_inputs(data: Path, skip_bad_inputs: bool = False) -> list[Path]:
 
     # Check if data is a directory
     if data.is_dir():
-        data: list[Path] = list(data.glob("*"))
+        data: list[Path] = sorted(data.glob("*"))
 
         # Filter out non .fasta or .yaml files
         valid = []
@@ -604,9 +605,7 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
                 ccd,
                 mol_dir,
                 boltz2,
-                skip_ligand_conformer_generation=(
-                    skip_ligand_conformer_generation
-                ),
+                skip_ligand_conformer_generation=(skip_ligand_conformer_generation),
             )
         elif path.is_dir():
             msg = f"Found directory {path} instead of .fasta or .yaml, skipping."
@@ -798,7 +797,7 @@ def process_inputs(
     records_dir = out_dir / "processed" / "records"
     if records_dir.exists():
         # Load existing records
-        existing = [Record.load(p) for p in records_dir.glob("*.json")]
+        existing = [Record.load(p) for p in sorted(records_dir.glob("*.json"))]
         processed_ids = {record.id for record in existing}
 
         # Filter to missing only
@@ -886,15 +885,13 @@ def process_inputs(
             click.echo(f"  {msg}")
 
     # Load all records and write manifest
-    records = [Record.load(p) for p in records_dir.glob("*.json")]
+    records = [Record.load(p) for p in sorted(records_dir.glob("*.json"))]
     manifest = Manifest(records)
     manifest.dump(out_dir / "processed" / "manifest.json")
 
 
 @click.group()
-@click.version_option(
-    version=_runtime_version(), prog_name="boltz-stfree"
-)
+@click.version_option(version=_runtime_version(), prog_name="boltz-stfree")
 def cli() -> None:
     """Boltz-StFree structure-free affinity screening runtime."""
     return
@@ -913,8 +910,10 @@ def cli() -> None:
 def screen(config: Path, prepare_only: bool) -> None:
     """Screen one protein target against a ligand library."""
     from boltz.screen import (
+        ScreenProgress,
         collect_screen_scores,
         ensure_auto_msa,
+        format_screen_plan,
         invalidate_screen_aggregates,
         prepare_screen,
     )
@@ -926,37 +925,54 @@ def screen(config: Path, prepare_only: bool) -> None:
     )
     screen_options = prepared.screen_options
     click.echo(
-        f"Prepared {len(prepared.chunk_dirs)} chunk(s) in "
-        f"{prepared.output_dir}."
+        f"Prepared {len(prepared.chunk_dirs)} chunk(s) in {prepared.output_dir}."
     )
+    plan = json.loads(prepared.plan_path.read_text(encoding="utf-8"))
+    click.echo(f"Screen plan: {prepared.plan_path}")
+    for line in format_screen_plan(plan):
+        click.echo(f"  {line}")
     if prepare_only:
+        ScreenProgress(prepared)
         click.echo(f"Manifest: {prepared.manifest_path}")
         return
 
     if screen_options.runtime.override:
         invalidate_screen_aggregates(prepared)
+    progress = ScreenProgress(
+        prepared,
+        ignore_existing=screen_options.runtime.override,
+    )
+    click.echo(f"Live status: {prepared.status_path}")
+    try:
+        if prepared.auto_msa_path is not None:
+            progress.set_stage("preparing_msa", "Preparing shared target MSA")
+            click.echo("Preparing one shared target MSA for all screen chunks.")
+            ensure_auto_msa(
+                prepared,
+                screen_options=screen_options,
+                compute_msa_fn=compute_msa,
+            )
 
-    if prepared.auto_msa_path is not None:
-        click.echo("Preparing one shared target MSA for all screen chunks.")
-        ensure_auto_msa(
-            prepared,
-            screen_options=screen_options,
-            compute_msa_fn=compute_msa,
-        )
-
-    for index, chunk_dir in enumerate(prepared.chunk_dirs, start=1):
-        click.echo(
-            f"Running screen chunk {index}/{len(prepared.chunk_dirs)}: "
-            f"{chunk_dir.name}"
-        )
-        run_stfree_chunk(
-            data=chunk_dir,
-            out_dir=prepared.runs_dir,
-            options=screen_options.runtime,
-            receptor_crop_indices_dir=prepared.receptor_crop_indices_dir,
-        )
-    scores_path = collect_screen_scores(prepared)
-    click.echo(f"Screen complete: {scores_path}")
+        for index, chunk_dir in enumerate(prepared.chunk_dirs, start=1):
+            progress.start_chunk(chunk_dir.name)
+            click.echo(
+                f"Running screen chunk {index}/{len(prepared.chunk_dirs)}: "
+                f"{chunk_dir.name}"
+            )
+            run_stfree_chunk(
+                data=chunk_dir,
+                out_dir=prepared.runs_dir,
+                options=screen_options.runtime,
+                receptor_crop_indices_dir=prepared.receptor_crop_indices_dir,
+                progress_callback=progress.record_batch,
+            )
+            progress.finish_chunk(chunk_dir.name)
+        scores_path = collect_screen_scores(prepared)
+        progress.complete(scores_path)
+        click.echo(f"Screen complete: {scores_path}")
+    except BaseException as error:
+        progress.fail(error)
+        raise
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import json
 import pickle
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +28,7 @@ from boltz.data.types import (
     StructureV2,
     Tokenized,
 )
+from boltz.seed import record_seed
 
 
 def prepare_ligand_reference_conformers(
@@ -240,6 +242,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         affinity_sequence_window_start: int = 0,
         affinity_ligand_ref_pos_mode: str = "etkdg",
         affinity_ligand_ref_pos_seed: int | None = None,
+        affinity_random_seed: int | None = None,
         affinity_require_full_input: bool = False,
     ) -> None:
         """Initialize the training dataset.
@@ -283,6 +286,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.affinity_sequence_window_start = affinity_sequence_window_start
         self.affinity_ligand_ref_pos_mode = affinity_ligand_ref_pos_mode
         self.affinity_ligand_ref_pos_seed = affinity_ligand_ref_pos_seed
+        self.affinity_random_seed = affinity_random_seed
         self.affinity_require_full_input = affinity_require_full_input
         if self.affinity:
             self.cropper = AffinityCropper()
@@ -458,25 +462,42 @@ class PredictionDataset(torch.utils.data.Dataset):
         random = np.random.default_rng(seed)
 
         # Compute features
-        features = self.featurizer.process(
-            tokenized,
-            molecules=molecules,
-            random=random,
-            training=False,
-            max_atoms=None,
-            max_tokens=None,
-            max_seqs=const.max_msa_seqs,
-            pad_to_max_seqs=False,
-            single_sequence_prop=0.0,
-            compute_frames=not self.affinity_structure_free,
-            inference_pocket_constraints=pocket_constraints,
-            inference_contact_constraints=contact_constraints,
-            compute_constraint_features=True,
-            override_method=self.override_method,
-            compute_affinity=self.affinity,
-            compute_distogram_target=not self.affinity_structure_free,
-            use_structure_coordinates=not self.affinity_structure_free,
+        deterministic_features = (
+            self.affinity_structure_free and self.affinity_random_seed is not None
         )
+        feature_rng_context = (
+            torch.random.fork_rng(devices=[])
+            if deterministic_features
+            else nullcontext()
+        )
+        with feature_rng_context:
+            if deterministic_features:
+                torch.random.default_generator.manual_seed(
+                    record_seed(
+                        self.affinity_random_seed,
+                        record.id,
+                        purpose="reference_features",
+                    )
+                )
+            features = self.featurizer.process(
+                tokenized,
+                molecules=molecules,
+                random=random,
+                training=False,
+                max_atoms=None,
+                max_tokens=None,
+                max_seqs=const.max_msa_seqs,
+                pad_to_max_seqs=False,
+                single_sequence_prop=0.0,
+                compute_frames=not self.affinity_structure_free,
+                inference_pocket_constraints=pocket_constraints,
+                inference_contact_constraints=contact_constraints,
+                compute_constraint_features=True,
+                override_method=self.override_method,
+                compute_affinity=self.affinity,
+                compute_distogram_target=not self.affinity_structure_free,
+                use_structure_coordinates=not self.affinity_structure_free,
+            )
         features = apply_ligand_reference_position_intervention(
             features,
             self.affinity_ligand_ref_pos_mode,
@@ -524,6 +545,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         affinity_sequence_window_start: int = 0,
         affinity_ligand_ref_pos_mode: str = "etkdg",
         affinity_ligand_ref_pos_seed: int | None = None,
+        affinity_random_seed: int | None = None,
         affinity_require_full_input: bool = False,
         pin_memory: bool = True,
     ) -> None:
@@ -579,6 +601,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         self.affinity_sequence_window_start = affinity_sequence_window_start
         self.affinity_ligand_ref_pos_mode = affinity_ligand_ref_pos_mode
         self.affinity_ligand_ref_pos_seed = affinity_ligand_ref_pos_seed
+        self.affinity_random_seed = affinity_random_seed
         self.affinity_require_full_input = affinity_require_full_input
         self.pin_memory = pin_memory
 
@@ -612,6 +635,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             affinity_sequence_window_start=self.affinity_sequence_window_start,
             affinity_ligand_ref_pos_mode=self.affinity_ligand_ref_pos_mode,
             affinity_ligand_ref_pos_seed=self.affinity_ligand_ref_pos_seed,
+            affinity_random_seed=self.affinity_random_seed,
             affinity_require_full_input=self.affinity_require_full_input,
         )
         return DataLoader(

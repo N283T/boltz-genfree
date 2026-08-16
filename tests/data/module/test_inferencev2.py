@@ -96,3 +96,23 @@ def test_structure_free_single_sequence_is_forwarded_to_dataset(
 
     dataset = data_module.predict_dataloader().dataset
     assert dataset.affinity_structure_free_single_sequence is True
+
+
+def test_structure_free_random_seed_is_forwarded_to_dataset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("boltz.data.module.inferencev2.load_canonicals", lambda _: {})
+
+    data_module = Boltz2InferenceDataModule(
+        manifest=Manifest(records=[]),
+        target_dir=tmp_path / "structures",
+        msa_dir=tmp_path / "msa",
+        mol_dir=tmp_path / "mols",
+        num_workers=0,
+        affinity=True,
+        affinity_structure_free=True,
+        affinity_random_seed=17,
+    )
+
+    dataset = data_module.predict_dataloader().dataset
+    assert dataset.affinity_random_seed == 17
