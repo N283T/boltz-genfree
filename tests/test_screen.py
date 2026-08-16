@@ -18,6 +18,7 @@ import boltz.stfree_runtime as stfree_runtime
 from boltz import reference_crop as reference_crop_module
 from boltz.main import cli
 from boltz.screen import (
+    ScreenProgress,
     build_screen_options,
     collect_screen_scores,
     ensure_auto_msa,
@@ -771,6 +772,34 @@ def test_screen_cli_prepare_only_validates_stfree_options(tmp_path: Path) -> Non
     assert result.exit_code != 0
     assert "Unknown Boltz-StFree options" in result.output
     assert not (tmp_path / "output").exists()
+
+
+def test_screen_progress_updates_are_idempotent(tmp_path: Path) -> None:
+    prepared = prepare_screen(
+        _write_config(
+            tmp_path,
+            {"smiles": ["CCO", "CCN"]},
+            chunk_size=1,
+        )
+    )
+    progress = ScreenProgress(prepared)
+    manifest = json.loads(prepared.manifest_path.read_text())
+    record_id = manifest["records"][0]["record_id"]
+
+    progress.start_chunk("chunk_00000")
+    progress.record_batch([record_id], False)
+    progress.record_batch([record_id], False)
+    progress.record_batch([record_id], True)
+    failed = json.loads(prepared.status_path.read_text())
+    progress.record_batch([record_id], False)
+    recovered = json.loads(prepared.status_path.read_text())
+
+    assert failed["completed"] == 0
+    assert failed["failed"] == 1
+    assert failed["chunks"][0]["failed"] == 1
+    assert recovered["completed"] == 1
+    assert recovered["failed"] == 0
+    assert recovered["chunks"][0]["completed"] == 1
 
 
 def test_screen_cli_runs_chunks_with_stfree_runtime(

@@ -1251,40 +1251,58 @@ class ScreenProgress:
         records = self.manifest["records"]
         self.records = {str(record["record_id"]): record for record in records}
         self.chunk_order = [path.name for path in prepared.chunk_dirs]
+        self.record_chunks = {
+            record_id: str(record["chunk"])
+            for record_id, record in self.records.items()
+        }
+        self.chunk_record_ids = {chunk: [] for chunk in self.chunk_order}
+        for record_id, chunk in self.record_chunks.items():
+            self.chunk_record_ids[chunk].append(record_id)
+        self.chunk_completed = {chunk: 0 for chunk in self.chunk_order}
+        self.chunk_failed = {chunk: 0 for chunk in self.chunk_order}
         self.completed: set[str] = set()
-        if not ignore_existing:
-            self.completed = {
-                record_id
-                for record_id, record in self.records.items()
-                if len(_screen_score_matches(prepared.runs_dir, record)) == 1
-            }
         self.failed: set[str] = set()
+        if not ignore_existing:
+            for record_id, record in self.records.items():
+                if len(_screen_score_matches(prepared.runs_dir, record)) == 1:
+                    self._set_record_state(record_id, failed=False)
         self.state = "prepared"
         self.message: str | None = None
         self.current_chunk: str | None = None
         self.started_at: str | None = None
         self._publish()
 
+    def _set_record_state(self, record_id: str, *, failed: bool) -> None:
+        chunk = self.record_chunks[record_id]
+        if failed:
+            if record_id in self.completed:
+                self.completed.remove(record_id)
+                self.chunk_completed[chunk] -= 1
+            if record_id not in self.failed:
+                self.failed.add(record_id)
+                self.chunk_failed[chunk] += 1
+        else:
+            if record_id not in self.completed:
+                self.completed.add(record_id)
+                self.chunk_completed[chunk] += 1
+            if record_id in self.failed:
+                self.failed.remove(record_id)
+                self.chunk_failed[chunk] -= 1
+
     def _refresh_chunk(self, chunk: str) -> None:
-        for record_id, record in self.records.items():
-            if record["chunk"] != chunk:
-                continue
+        for record_id in self.chunk_record_ids[chunk]:
+            record = self.records[record_id]
             matches = _screen_score_matches(self.prepared.runs_dir, record)
             if len(matches) == 1:
-                self.completed.add(record_id)
-                self.failed.discard(record_id)
+                self._set_record_state(record_id, failed=False)
 
     def _snapshot(self) -> dict[str, object]:
         chunks = []
         for chunk in self.chunk_order:
-            record_ids = [
-                record_id
-                for record_id, record in self.records.items()
-                if record["chunk"] == chunk
-            ]
-            completed = len(set(record_ids) & self.completed)
-            failed = len(set(record_ids) & self.failed)
-            if completed == len(record_ids):
+            expected = len(self.chunk_record_ids[chunk])
+            completed = self.chunk_completed[chunk]
+            failed = self.chunk_failed[chunk]
+            if completed == expected:
                 state = "complete"
             elif chunk == self.current_chunk:
                 state = "running"
@@ -1296,7 +1314,7 @@ class ScreenProgress:
                 {
                     "name": chunk,
                     "state": state,
-                    "expected": len(record_ids),
+                    "expected": expected,
                     "completed": completed,
                     "failed": failed,
                 }
@@ -1344,12 +1362,7 @@ class ScreenProgress:
                 raise ValueError(
                     f"Unknown screen record in progress update: {record_id}"
                 )
-            if failed:
-                self.failed.add(record_id)
-                self.completed.discard(record_id)
-            else:
-                self.completed.add(record_id)
-                self.failed.discard(record_id)
+            self._set_record_state(record_id, failed=failed)
         self._publish()
 
     def finish_chunk(self, chunk: str) -> None:
@@ -1361,6 +1374,12 @@ class ScreenProgress:
     def complete(self, scores_path: Path) -> None:
         """Publish successful screen completion."""
         self.completed = set(self.records)
+        self.failed.clear()
+        self.chunk_completed = {
+            chunk: len(record_ids)
+            for chunk, record_ids in self.chunk_record_ids.items()
+        }
+        self.chunk_failed = {chunk: 0 for chunk in self.chunk_order}
         self.current_chunk = None
         self.set_stage("complete", f"Scores written to {scores_path}")
 
