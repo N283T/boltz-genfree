@@ -511,6 +511,146 @@ def test_reference_crop_maps_observed_residues_to_declared_sequence(
     assert crop.blocks[0] == tuple(range(15, 25))
 
 
+@pytest.mark.parametrize(
+    ("length", "observed_positions", "ligand_position", "expected_seed"),
+    [
+        pytest.param(
+            33,
+            (*range(1, 11), *range(14, 34)),
+            14,
+            10,
+            id="internal-unobserved-insertion",
+        ),
+        pytest.param(
+            37,
+            tuple(range(8, 38)),
+            8,
+            0,
+            id="terminal-extension",
+        ),
+    ],
+)
+def test_reference_crop_remaps_exact_observed_sequence_to_target_indices(
+    tmp_path: Path,
+    length: int,
+    observed_positions: tuple[int, ...],
+    ligand_position: int,
+    expected_seed: int,
+) -> None:
+    reference = _write_mmcif_reference_with_missing_residues(
+        tmp_path,
+        length=length,
+        observed_positions=observed_positions,
+        ligand_position=ligand_position,
+    )
+    target_sequence = "A" * len(observed_positions)
+
+    crop = reference_crop_module.load_reference_crop(
+        reference,
+        target_sequence,
+        protein_chain="A",
+        ligand=reference_crop_module.ReferenceLigandSelector(
+            chain="L",
+            residue=1,
+            ccd="LIG",
+        ),
+    )
+
+    assert crop.seed_order[0] == expected_seed
+    assert all(0 <= index < len(target_sequence) for index in crop.seed_order)
+    assert all(
+        0 <= index < len(target_sequence)
+        for block in crop.blocks
+        for index in block
+    )
+
+
+def test_reference_crop_rejects_partial_observed_sequence_match(
+    tmp_path: Path,
+) -> None:
+    reference = _write_mmcif_reference_with_missing_residues(
+        tmp_path,
+        length=33,
+        observed_positions=(*range(1, 11), *range(14, 34)),
+        ligand_position=14,
+    )
+
+    with pytest.raises(ValueError, match="exactly matches target.sequence"):
+        reference_crop_module.load_reference_crop(
+            reference,
+            "A" * 29,
+            protein_chain="A",
+            ligand=reference_crop_module.ReferenceLigandSelector(
+                chain="L",
+                residue=1,
+                ccd="LIG",
+            ),
+        )
+
+
+def test_sequence_pocket_crop_uses_one_based_residue_identity_guards() -> None:
+    crop = reference_crop_module.load_sequence_pocket_crop(
+        "ACDEFGHIKLMNPQRSTVWY",
+        (
+            reference_crop_module.SequencePocketResidue(residue=6, name="g"),
+            reference_crop_module.SequencePocketResidue(residue=15, name="R"),
+        ),
+    )
+
+    assert crop.seed_order == (5, 14)
+    assert crop.blocks == (tuple(range(10)), tuple(range(9, 19)))
+    assert [item.name for item in crop.pocket] == ["G", "R"]
+
+
+def test_sequence_pocket_crop_rejects_target_identity_mismatch() -> None:
+    with pytest.raises(ValueError, match="target.sequence contains G"):
+        reference_crop_module.load_sequence_pocket_crop(
+            "AAAAAGAAAA",
+            (reference_crop_module.SequencePocketResidue(residue=6, name="A"),),
+        )
+
+
+def test_sequence_pocket_crop_applies_budget_per_ligand(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO", "C" * 60]},
+        sequence="A" * 230,
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "pocket": [
+            {"residue": residue, "name": "A"}
+            for residue in range(6, 227, 11)
+        ],
+        "budget": "per_ligand",
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    crop_documents = [
+        json.loads(Path(record["crop"]["path"]).read_text(encoding="utf-8"))
+        for record in manifest["records"]
+    ]
+
+    assert manifest["target"]["crop"]["selection"] == "sequence_pocket_blocks"
+    assert crop_documents[0]["selection"] == "sequence_pocket_blocks"
+    assert "reference" not in crop_documents[0]
+    assert (
+        crop_documents[0]["ligand_tokens_reserved"]
+        < crop_documents[1]["ligand_tokens_reserved"]
+    )
+    assert (
+        len(crop_documents[0]["receptor_token_idx"])
+        > len(crop_documents[1]["receptor_token_idx"])
+    )
+    assert all(
+        0 <= index < 230
+        for document in crop_documents
+        for index in document["receptor_token_idx"]
+    )
+
+
 def test_reference_crop_library_fixed_uses_one_receptor_selection(
     tmp_path: Path,
 ) -> None:
