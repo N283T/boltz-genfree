@@ -12,11 +12,18 @@ import warnings
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
+from boltz.seed import record_seed
+
+if TYPE_CHECKING:
+    from pytorch_lightning import Callback
+
 _DISTOGRAM_MODE = "zero_distogram_features"
 _LIGAND_CONFORMER_MODES = {"skip", "etkdg"}
+_RECORD_SEED_SCHEME = "sha256_record_v1"
 _UNUSED_STFREE_MODEL_MODULES = (
     "structure_module",
     "diffusion_conditioning",
@@ -47,6 +54,42 @@ class StFreeRuntimeOptions:
     affinity_recycling_steps: int = 0
     ligand_reference_conformer: str = "skip"
     etkdg_seed: int = 42
+
+
+def _record_msa_seed(base_seed: int, record_id: str) -> int:
+    """Derive a stable CPU RNG seed for one screened record."""
+    return record_seed(base_seed, record_id, purpose="msa_subsample")
+
+
+def _record_seeded_msa_callback(base_seed: int) -> Callback:
+    """Return a callback that makes MSA sampling independent of chunk order."""
+    import torch
+    from pytorch_lightning import Callback
+
+    class RecordSeededMsaCallback(Callback):
+        """Reset the CPU generator from the stable identity of each record."""
+
+        def on_predict_batch_start(
+            self,
+            trainer: object,  # noqa: ARG002
+            pl_module: object,  # noqa: ARG002
+            batch: dict[str, object],
+            batch_idx: int,  # noqa: ARG002
+            dataloader_idx: int = 0,  # noqa: ARG002
+        ) -> None:
+            records = batch.get("record")
+            if not isinstance(records, list) or len(records) != 1:
+                raise RuntimeError(
+                    "Record-seeded MSA sampling requires affinity batch size 1."
+                )
+            record_id = getattr(records[0], "id", None)
+            if not isinstance(record_id, str) or not record_id:
+                raise RuntimeError("Cannot seed MSA sampling without a record ID.")
+            torch.random.default_generator.manual_seed(
+                _record_msa_seed(base_seed, record_id)
+            )
+
+    return RecordSeededMsaCallback()
 
 
 def _patch_torch_checkpoint_loading(torch: object) -> None:
@@ -231,6 +274,14 @@ def _run_provenance(
             "affinity_recycling_steps": options.affinity_recycling_steps,
             "affinity_mw_correction": options.affinity_mw_correction,
             "seed": options.seed,
+            "record_seed_scheme": (
+                _RECORD_SEED_SCHEME if options.seed is not None else None
+            ),
+            "msa_subsample_seed_scheme": (
+                _RECORD_SEED_SCHEME
+                if options.subsample_msa and options.seed is not None
+                else None
+            ),
             "max_msa_seqs": options.max_msa_seqs,
             "subsample_msa": options.subsample_msa,
             "num_subsampled_msa": options.num_subsampled_msa,
@@ -569,10 +620,13 @@ def run_stfree_chunk(
         screening_minimal_output=True,
         experiment_metadata=experiment_metadata,
     )
+    callbacks = [writer]
+    if options.subsample_msa and options.seed is not None:
+        callbacks.insert(0, _record_seeded_msa_callback(options.seed))
     trainer = Trainer(
         default_root_dir=run_dir,
         strategy=strategy,
-        callbacks=[writer],
+        callbacks=callbacks,
         accelerator=options.accelerator,
         devices=devices,
         precision=precision,
@@ -601,6 +655,7 @@ def run_stfree_chunk(
             if options.ligand_reference_conformer == "etkdg"
             else None
         ),
+        affinity_random_seed=options.seed,
         affinity_require_full_input=receptor_crop_indices_dir is None,
         pin_memory=options.accelerator not in ("cpu", "mps"),
     )

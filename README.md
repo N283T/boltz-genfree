@@ -97,6 +97,11 @@ component cache, MSA source, or preprocessing limit is rejected rather than
 mixed into existing screen state. Operational options such as `override` may be
 changed safely.
 
+Set `options.seed` for reproducible screens. Boltz-StFree derives independent
+record-local seeds for reference-feature augmentation and MSA subsampling, so a
+record receives the same score when chunk boundaries, worker scheduling, or a
+resumed run change. Setting `seed: null` leaves those operations stochastic.
+
 With `target.msa: auto`, `screen` calls the configured MSA server exactly once
 for the target and records a checksum beside the shared MSA. Every ligand and
 chunk then references that same file; automatic MSA generation is never

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 import pytest
+import torch
 
 from boltz.data import const
 from boltz.data.types import (
@@ -18,9 +19,12 @@ from boltz.data.types import (
     get_affinity_output_id,
 )
 from boltz.main import download_stfree
+from boltz.seed import record_seed
 from boltz.stfree_runtime import (
     StFreeRuntimeOptions,
     _prune_stfree_model,
+    _record_msa_seed,
+    _record_seeded_msa_callback,
     _run_provenance,
     _validate_one_to_one_manifest,
     _validate_resume_state,
@@ -84,6 +88,44 @@ def test_model_route_never_runs_structure_sampling(tmp_path: Path) -> None:
     assert kwargs["skip_run_structure"] is True
     assert kwargs["skip_confidence_forward"] is True
     assert kwargs["skip_pdistogram_forward"] is True
+
+
+def test_record_msa_seed_is_stable_and_record_specific() -> None:
+    assert _record_msa_seed(17, "record-a") == _record_msa_seed(17, "record-a")
+    assert _record_msa_seed(17, "record-a") != _record_msa_seed(17, "record-b")
+    assert _record_msa_seed(17, "record-a") != _record_msa_seed(18, "record-a")
+    assert _record_msa_seed(17, "record-a") != record_seed(
+        17,
+        "record-a",
+        purpose="reference_features",
+    )
+
+
+def test_record_seeded_msa_callback_ignores_prior_rng_state() -> None:
+    callback = _record_seeded_msa_callback(17)
+    batch = {"record": [_record()]}
+
+    torch.random.default_generator.manual_seed(1)
+    callback.on_predict_batch_start(None, None, batch, 0)
+    first = torch.randperm(128)
+
+    torch.random.default_generator.manual_seed(999)
+    callback.on_predict_batch_start(None, None, batch, 0)
+    second = torch.randperm(128)
+
+    assert torch.equal(first, second)
+
+
+def test_record_seeded_msa_callback_rejects_batched_records() -> None:
+    callback = _record_seeded_msa_callback(17)
+
+    with pytest.raises(RuntimeError, match="batch size 1"):
+        callback.on_predict_batch_start(
+            None,
+            None,
+            {"record": [_record(), _record()]},
+            0,
+        )
 
 
 def test_stfree_model_pruning_removes_only_unreachable_modules() -> None:
@@ -250,7 +292,20 @@ def test_run_provenance_captures_checkpoint_and_method(tmp_path: Path) -> None:
         "reference_positions": "zero",
         "etkdg_seed": None,
     }
+    assert provenance["method"]["record_seed_scheme"] is None
+    assert provenance["method"]["msa_subsample_seed_scheme"] is None
     assert len(provenance["runtime_code_sha256"]) == 64
+
+
+def test_run_provenance_records_record_seeded_msa(tmp_path: Path) -> None:
+    provenance = _run_provenance(
+        StFreeRuntimeOptions(cache=tmp_path, seed=17),
+        runtime_version="test-version",
+        checkpoint_sha256="abc123",
+    )
+
+    assert provenance["method"]["record_seed_scheme"] == "sha256_record_v1"
+    assert provenance["method"]["msa_subsample_seed_scheme"] == "sha256_record_v1"
 
 
 def test_run_provenance_records_seeded_etkdg(tmp_path: Path) -> None:
