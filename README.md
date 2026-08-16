@@ -38,12 +38,18 @@ environment; the package is not yet published on PyPI.
 ```bash
 git clone https://github.com/N283T/boltz-stfree.git
 cd boltz-stfree
-uv venv
-uv pip install ".[cuda]"
+uv sync --frozen --extra cuda
+source .venv/bin/activate
 ```
 
 This distribution installs `boltz-stfree`, not the upstream `boltz` command,
 so the runtime used for a screen is explicit.
+
+The committed `.python-version` and `uv.lock` reproduce the tested Python and
+package set. The default `cuda` extra matches PyTorch's CUDA 13 wheels; systems
+that deliberately use a CUDA 12 PyTorch build can select `--extra cuda12`
+instead. For development, add `--extra test --extra lint`. Update the lock only
+as an explicit maintenance action with `uv lock --upgrade`.
 
 ## Screen a ligand library
 
@@ -89,6 +95,12 @@ chunks without loading checkpoints or running inference:
 boltz-stfree screen screen.yaml --prepare-only
 ```
 
+Preparation also writes `screen_plan.json`. It records the target and MSA mode,
+receptor-selection policy, ligand count and token range, chunk sizes, execution
+settings, checkpoint path, and expected outputs. The same summary is printed to
+the terminal, making `--prepare-only` a reviewable dry run before a large
+screen.
+
 The generated inputs and immutable manifest live under
 `<output_dir>/.boltz-stfree/`; per-chunk runtime artifacts live under
 `<output_dir>/runs/`. Re-running the same input and preprocessing configuration
@@ -101,6 +113,18 @@ Set `options.seed` for reproducible screens. Boltz-StFree derives independent
 record-local seeds for reference-feature augmentation and MSA subsampling, so a
 record receives the same score when chunk boundaries, worker scheduling, or a
 resumed run change. Setting `seed: null` leaves those operations stochastic.
+
+During execution, `screen_status.json` is atomically updated after every
+prediction batch. It remains readable from another terminal and includes the
+screen state, completed/failed/pending counts, percentage, current chunk, and
+per-chunk counts. For example:
+
+```bash
+watch -n 1 cat screen-output/screen_status.json
+```
+
+The final states are `complete`, `failed`, or `interrupted`; a failed or
+interrupted screen retains its completed record count for diagnosis and resume.
 
 With `target.msa: auto`, `screen` calls the configured MSA server exactly once
 for the target and records a checksum beside the shared MSA. Every ligand and

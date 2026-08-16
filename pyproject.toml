@@ -57,6 +57,7 @@ dependencies = [
     "gemmi>=0.6.5",
     "scikit-learn>=1.6.1",
     "chembl_structure_pipeline>=1.2.2",
+    "omegaconf>=2.3.0",
 ]
 
 [project.urls]
@@ -76,6 +77,11 @@ boltz-stfree-fix-macos-libomp = "boltz.scripts.fix_macos_libomp:main"
 lint = ["ruff"]
 test = ["pytest", "requests"]
 cuda = [
+    "cuequivariance_ops_cu13>=0.5.0",
+    "cuequivariance_ops_torch_cu13>=0.5.0",
+    "cuequivariance_torch>=0.5.0",
+]
+cuda12 = [
     "cuequivariance_ops_cu12>=0.5.0",
     "cuequivariance_ops_torch_cu12>=0.5.0",
     "cuequivariance_torch>=0.5.0",
