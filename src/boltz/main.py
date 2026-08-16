@@ -23,6 +23,11 @@ if TYPE_CHECKING:
 
 MOL_URL = "https://huggingface.co/boltz-community/boltz-2/resolve/main/mols.tar"
 
+BOLTZ2_REFERENCE_URL_WITH_FALLBACK = [
+    "https://model-gateway.boltz.bio/boltz2_conf.ckpt",
+    "https://huggingface.co/boltz-community/boltz-2/resolve/main/boltz2_conf.ckpt",
+]
+
 BOLTZ2_AFFINITY_URL_WITH_FALLBACK = [
     "https://model-gateway.boltz.bio/boltz2_aff.ckpt",
     "https://huggingface.co/boltz-community/boltz-2/resolve/main/boltz2_aff.ckpt",
@@ -289,6 +294,32 @@ def download_stfree(
                         f"Last error: {error}"
                     )
                     raise RuntimeError(msg) from error
+
+
+def download_boltz2_reference_assets(cache: Path, checkpoint: Path) -> None:
+    """Ensure assets for an explicitly requested holo reference prediction."""
+    download_boltz2_ccd(cache)
+    default_checkpoint = (cache / "boltz2_conf.ckpt").resolve()
+    checkpoint = checkpoint.expanduser().resolve()
+    if checkpoint != default_checkpoint:
+        _validate_checkpoint_for_load(checkpoint, "Boltz-2 weights")
+        return
+    if not _checkpoint_needs_download(checkpoint, "Boltz-2 weights"):
+        return
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    click.echo(f"Downloading the Boltz-2 structure weights to {checkpoint}.")
+    for index, url in enumerate(BOLTZ2_REFERENCE_URL_WITH_FALLBACK):
+        try:
+            _download(url, str(checkpoint))
+            _validate_checkpoint_for_load(checkpoint, "Boltz-2 weights")
+            return
+        except Exception as error:  # noqa: BLE001
+            if index == len(BOLTZ2_REFERENCE_URL_WITH_FALLBACK) - 1:
+                msg = (
+                    "Failed to download the Boltz-2 structure checkpoint from "
+                    f"all URLs. Last error: {error}"
+                )
+                raise RuntimeError(msg) from error
 
 
 def get_cache_path() -> str:
@@ -973,6 +1004,37 @@ def screen(config: Path, prepare_only: bool) -> None:
     except BaseException as error:
         progress.fail(error)
         raise
+
+
+@cli.command(name="bootstrap-reference", context_settings={"show_default": True})
+@click.argument(
+    "config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "--prepare-only",
+    is_flag=True,
+    help="Validate and stage the holo input without loading a model or using a GPU.",
+)
+def bootstrap_reference(config: Path, prepare_only: bool) -> None:
+    """Create one reusable crop reference from a target and anchor ligand."""
+    from boltz.reference_bootstrap import (
+        format_bootstrap_plan,
+        prepare_bootstrap_reference,
+        run_bootstrap_reference,
+    )
+
+    prepared = prepare_bootstrap_reference(config)
+    plan = json.loads(prepared.plan_path.read_text(encoding="utf-8"))
+    click.echo(f"Bootstrap plan: {prepared.plan_path}")
+    for line in format_bootstrap_plan(plan):
+        click.echo(f"  {line}")
+    if prepare_only:
+        click.echo("Prepared only; no model was loaded and no GPU work was started.")
+        click.echo(f"Manifest: {prepared.manifest_path}")
+        return
+    reference = run_bootstrap_reference(prepared)
+    click.echo(f"Reference complete: {reference}")
 
 
 if __name__ == "__main__":

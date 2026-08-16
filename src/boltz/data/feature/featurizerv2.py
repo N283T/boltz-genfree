@@ -1,6 +1,7 @@
 import math
-from typing import Optional
 from collections import deque
+from typing import Optional
+
 import numba
 import numpy as np
 import numpy.typing as npt
@@ -24,6 +25,7 @@ from boltz.data.types import (
     MSADeletion,
     MSAResidue,
     MSASequence,
+    TemplateInfo,
     Tokenized,
 )
 from boltz.model.modules.utils import center_random_augmentation
@@ -1800,6 +1802,183 @@ def process_msa_features(
         }
 
 
+def load_dummy_templates_features(tdim: int, num_tokens: int) -> dict:
+    """Load dummy templates for v2."""
+    # Allocate features
+    res_type = np.zeros((tdim, num_tokens), dtype=np.int64)
+    frame_rot = np.zeros((tdim, num_tokens, 3, 3), dtype=np.float32)
+    frame_t = np.zeros((tdim, num_tokens, 3), dtype=np.float32)
+    cb_coords = np.zeros((tdim, num_tokens, 3), dtype=np.float32)
+    ca_coords = np.zeros((tdim, num_tokens, 3), dtype=np.float32)
+    frame_mask = np.zeros((tdim, num_tokens), dtype=np.float32)
+    cb_mask = np.zeros((tdim, num_tokens), dtype=np.float32)
+    template_mask = np.zeros((tdim, num_tokens), dtype=np.float32)
+    query_to_template = np.zeros((tdim, num_tokens), dtype=np.int64)
+    visibility_ids = np.zeros((tdim, num_tokens), dtype=np.float32)
+
+    # Convert to one-hot
+    res_type = torch.from_numpy(res_type)
+    res_type = one_hot(res_type, num_classes=const.num_tokens)
+
+    return {
+        "template_restype": res_type,
+        "template_frame_rot": torch.from_numpy(frame_rot),
+        "template_frame_t": torch.from_numpy(frame_t),
+        "template_cb": torch.from_numpy(cb_coords),
+        "template_ca": torch.from_numpy(ca_coords),
+        "template_mask_cb": torch.from_numpy(cb_mask),
+        "template_mask_frame": torch.from_numpy(frame_mask),
+        "template_mask": torch.from_numpy(template_mask),
+        "query_to_template": torch.from_numpy(query_to_template),
+        "visibility_ids": torch.from_numpy(visibility_ids),
+    }
+
+
+def compute_template_features(
+    query_tokens: Tokenized,
+    tmpl_tokens: list[dict],
+    num_tokens: int,
+) -> dict:
+    """Compute the template features."""
+    # Allocate features
+    res_type = np.zeros((num_tokens,), dtype=np.int64)
+    frame_rot = np.zeros((num_tokens, 3, 3), dtype=np.float32)
+    frame_t = np.zeros((num_tokens, 3), dtype=np.float32)
+    cb_coords = np.zeros((num_tokens, 3), dtype=np.float32)
+    ca_coords = np.zeros((num_tokens, 3), dtype=np.float32)
+    frame_mask = np.zeros((num_tokens,), dtype=np.float32)
+    cb_mask = np.zeros((num_tokens,), dtype=np.float32)
+    template_mask = np.zeros((num_tokens,), dtype=np.float32)
+    query_to_template = np.zeros((num_tokens,), dtype=np.int64)
+    visibility_ids = np.zeros((num_tokens,), dtype=np.float32)
+
+    # Now create features per token
+    asym_id_to_pdb_id = {}
+
+    for token_dict in tmpl_tokens:
+        idx = token_dict["q_idx"]
+        pdb_id = token_dict["pdb_id"]
+        token = token_dict["token"]
+        query_token = query_tokens.tokens[idx]
+        asym_id_to_pdb_id[query_token["asym_id"]] = pdb_id
+        res_type[idx] = token["res_type"]
+        frame_rot[idx] = token["frame_rot"].reshape(3, 3)
+        frame_t[idx] = token["frame_t"]
+        cb_coords[idx] = token["disto_coords"]
+        ca_coords[idx] = token["center_coords"]
+        cb_mask[idx] = token["disto_mask"]
+        frame_mask[idx] = token["frame_mask"]
+        template_mask[idx] = 1.0
+
+    # Set visibility_id for templated chains
+    for asym_id, pdb_id in asym_id_to_pdb_id.items():
+        indices = (query_tokens.tokens["asym_id"] == asym_id).nonzero()
+        visibility_ids[indices] = pdb_id
+
+    # Set visibility for non templated chain + olygomerics
+    for asym_id in np.unique(query_tokens.structure.chains["asym_id"]):
+        if asym_id not in asym_id_to_pdb_id:
+            # We hack the chain id to be negative to not overlap with the above
+            indices = (query_tokens.tokens["asym_id"] == asym_id).nonzero()
+            visibility_ids[indices] = -1 - asym_id
+
+    # Convert to one-hot
+    res_type = torch.from_numpy(res_type)
+    res_type = one_hot(res_type, num_classes=const.num_tokens)
+
+    return {
+        "template_restype": res_type,
+        "template_frame_rot": torch.from_numpy(frame_rot),
+        "template_frame_t": torch.from_numpy(frame_t),
+        "template_cb": torch.from_numpy(cb_coords),
+        "template_ca": torch.from_numpy(ca_coords),
+        "template_mask_cb": torch.from_numpy(cb_mask),
+        "template_mask_frame": torch.from_numpy(frame_mask),
+        "template_mask": torch.from_numpy(template_mask),
+        "query_to_template": torch.from_numpy(query_to_template),
+        "visibility_ids": torch.from_numpy(visibility_ids),
+    }
+
+
+def process_template_features(
+    data: Tokenized,
+    max_tokens: int,
+) -> dict[str, torch.Tensor]:
+    """Load the given input data.
+
+    Parameters
+    ----------
+    data : Tokenized
+        The input to the model.
+    max_tokens : int
+        The maximum number of tokens.
+
+    Returns
+    -------
+    dict[str, torch.Tensor]
+        The loaded template features.
+
+    """
+    # Group templates by name
+    name_to_templates: dict[str, list[TemplateInfo]] = {}
+    for template_info in data.record.templates:
+        name_to_templates.setdefault(template_info.name, []).append(template_info)
+
+    # Map chain name to asym_id
+    chain_name_to_asym_id = {}
+    for chain in data.structure.chains:
+        chain_name_to_asym_id[chain["name"]] = chain["asym_id"]
+
+    # Compute the offset
+    template_features = []
+    for template_id, (template_name, templates) in enumerate(name_to_templates.items()):
+        row_tokens = []
+        template_structure = data.templates[template_name]
+        template_tokens = data.template_tokens[template_name]
+        tmpl_chain_name_to_asym_id = {}
+        for chain in template_structure.chains:
+            tmpl_chain_name_to_asym_id[chain["name"]] = chain["asym_id"]
+
+        for template in templates:
+            offset = template.template_st - template.query_st
+            query_templated_segments = set(range(template.query_st, template.query_en))
+
+            # Get query and template tokens to map residues
+            query_tokens = data.tokens
+            chain_id = chain_name_to_asym_id[template.query_chain]
+            q_tokens = query_tokens[query_tokens["asym_id"] == chain_id]
+            q_indices = dict(zip(q_tokens["res_idx"], q_tokens["token_idx"]))
+
+            # Get the template tokens at the query residues
+            chain_id = tmpl_chain_name_to_asym_id[template.template_chain]
+            toks = template_tokens[template_tokens["asym_id"] == chain_id]
+            toks = [t for t in toks if t["res_idx"] - offset in query_templated_segments]
+            for t in toks:
+                q_idx = q_indices[t["res_idx"] - offset]
+                row_tokens.append(
+                    {
+                        "token": t,
+                        "pdb_id": template_id,
+                        "q_idx": q_idx,
+                    }
+                )
+
+        # Compute template features for each row
+        row_features = compute_template_features(data, row_tokens, max_tokens)
+        row_features["template_force"] = torch.tensor(template.force)
+        row_features["template_force_threshold"] = torch.tensor(
+            template.threshold if template.threshold is not None else float("inf"),
+            dtype=torch.float32,
+        )
+        template_features.append(row_features)
+
+    # Stack each feature
+    out = {}
+    for k in template_features[0]:
+        out[k] = torch.stack([f[k] for f in template_features])
+    return out
+
+
 def process_symmetry_features(
     cropped: Tokenized, symmetries: dict
 ) -> dict[str, Tensor]:
@@ -2277,6 +2456,23 @@ class Boltz2Featurizer:
         if compute_affinity:
             ligand_to_mw["affinity_mw"] = data.record.affinity.mw
 
+        # Structure checkpoints include the template module and require these
+        # tensors even when no template was supplied. Affinity-only inference
+        # does not use that module, so keep its optimized feature path lean.
+        template_features = {}
+        if not compute_affinity:
+            num_tokens = data.tokens.shape[0] if max_tokens is None else max_tokens
+            if data.templates:
+                template_features = process_template_features(
+                    data=data,
+                    max_tokens=num_tokens,
+                )
+            else:
+                template_features = load_dummy_templates_features(
+                    tdim=1,
+                    num_tokens=num_tokens,
+                )
+
         # Compute symmetry features
         symmetry_features = {}
         if compute_symmetries:
@@ -2301,6 +2497,7 @@ class Boltz2Featurizer:
             **atom_features,
             **msa_features,
             **msa_features_affinity,
+            **template_features,
             **symmetry_features,
             **ensemble_features,
             **residue_constraint_features,

@@ -16,10 +16,13 @@ artifacts.
 
 ## Status
 
-`boltz-stfree screen` is the only prediction interface. It accepts one protein
-target and a ligand library, expands the library into independent 1:1
+`boltz-stfree screen` is the structure-free screening interface. It accepts one
+protein target and a ligand library, expands the library into independent 1:1
 protein-ligand records, runs recoverable structure-free chunks, and aggregates
-the compact JSON results into one `scores.csv`.
+the compact JSON results into one `scores.csv`. When no suitable holo reference
+exists for receptor selection, the separate `bootstrap-reference` command can
+predict one reusable reference from the target and an explicitly supplied
+anchor ligand.
 
 Until the first tagged release, install from a pinned Git commit and expect the
 interface to evolve.
@@ -227,7 +230,12 @@ tokenization that every token was retained and fails if an input would be
 truncated.
 
 For a longer receptor, set `target.crop.reference` to a PDB or mmCIF complex.
-The observed sequence of `reference_protein` must exactly match `target.sequence`.
+For mmCIF references, the declared polymer sequence of `reference_protein` must
+exactly match `target.sequence`. Coordinate-observed residues may be incomplete;
+their `_atom_site.label_seq_id` values map ligand-distance seeds back to the
+declared full-sequence positions. References without declared polymer mapping,
+such as plain PDB files, still require the observed sequence to exactly match
+`target.sequence`.
 When `reference_ligand` is an author chain ID and that chain contains exactly
 one non-polymer residue, the residue is selected automatically. If the chain
 contains multiple candidates, specify one explicitly:
@@ -266,6 +274,62 @@ CCD inputs are checked against the Boltz-2 component cache. A normal `screen`
 run downloads that cache when needed. Offline `--prepare-only` validation
 requires an existing cache, selected with `options.cache` or `BOLTZ_CACHE`.
 
+### Bootstrap a missing holo reference
+
+Reference bootstrapping is an explicit, separate operation so `screen` and
+`screen --prepare-only` never start structure generation implicitly. Supply a
+target sequence and one anchor ligand:
+
+```yaml
+version: 1
+
+target:
+  id: A
+  sequence: YOUR_PROTEIN_SEQUENCE
+  msa: auto  # or empty / a local MSA path
+
+anchor:
+  id: B
+  smiles: YOUR_ANCHOR_SMILES
+
+output_dir: ./target-reference
+
+options:
+  seed: 20260718
+  diffusion_samples: 1
+  recycling_steps: 3
+  sampling_steps: 200
+```
+
+Stage and review the exact input without loading a checkpoint or using a GPU:
+
+```bash
+boltz-stfree bootstrap-reference bootstrap.yaml --prepare-only
+```
+
+After review, omit `--prepare-only` to run the single Boltz-2 holo prediction.
+The highest-confidence diffusion sample is published as `reference.pdb` with a
+checkpoint checksum, reference checksum, selected confidence, and chain IDs in
+`bootstrap_result.json`. Re-running an unchanged completed bootstrap reuses the
+reference; changed configuration is rejected against the immutable manifest.
+
+Use the result as an ordinary crop reference. Chain `A` is the protein and
+chain `B` is the unambiguous anchor ligand in this example:
+
+```yaml
+target:
+  sequence: YOUR_PROTEIN_SEQUENCE
+  crop:
+    reference: ./target-reference/reference.pdb
+    reference_protein: A
+    reference_ligand: B
+    budget: library_fixed
+```
+
+The anchor is a user-supplied pocket-localization input. Selecting a potent
+compound is one possible policy, not a requirement or an inference performed
+by the tool.
+
 ## Measured scope
 
 On one NVIDIA GeForce RTX 5080, the measured route completed 49,980 ALR
@@ -275,9 +339,10 @@ default generated-pose route. These measurements establish feasibility for the
 tested hardware, target, inputs, and settings; they are not general performance
 or accuracy guarantees.
 
-Arbitrary external token crops, complex structure sampling, structure-derived
-distograms, structure files, Boltz-1, multi-chain prediction inputs, and
-research interventions are intentionally not exposed by this product runtime.
+Arbitrary external token crops, structure-derived distograms, Boltz-1,
+multi-chain screening inputs, and research interventions are intentionally not
+exposed by this product runtime. Complex structure generation is limited to the
+explicit single-target/single-anchor reference-bootstrap operation above.
 They remain available only in the separate research/reproduction repository.
 
 ## Provenance
@@ -295,7 +360,8 @@ The code history is preserved rather than squashed:
 Checkpoint fallback URLs still refer to the Boltz and boltz-community model
 hosts because this project does not redistribute the released model weights.
 The screen runtime downloads the Boltz-2 affinity checkpoint and component
-dictionary, but not the structure checkpoint.
+dictionary. The structure checkpoint is downloaded only by an explicitly
+started `bootstrap-reference` run, never by preparation or screening.
 
 The inherited code is licensed under the [MIT License](LICENSE), and existing
 copyright notices are retained. See [CITATION.cff](CITATION.cff) for the

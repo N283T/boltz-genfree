@@ -157,6 +157,42 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _crop_reference_provenance(path: Path, reference_sha256: str) -> dict[str, object]:
+    """Identify and validate an adjacent predicted-holo bootstrap result."""
+    result_path = path.parent / "bootstrap_result.json"
+    if not result_path.is_file():
+        return {"type": "supplied_complex"}
+    try:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise click.UsageError(
+            f"Could not read crop bootstrap provenance {result_path}: {error}"
+        ) from error
+    if result.get("state") != "complete":
+        raise click.UsageError(
+            f"Crop bootstrap provenance is not complete: {result_path}"
+        )
+    result_reference = result.get("reference")
+    if not isinstance(result_reference, str) or Path(result_reference).resolve() != path:
+        raise click.UsageError(
+            f"Crop bootstrap provenance references a different file: {result_path}"
+        )
+    if result.get("reference_sha256") != reference_sha256:
+        raise click.UsageError(
+            f"Crop reference checksum does not match bootstrap provenance: {path}"
+        )
+    return {
+        "type": "predicted_holo",
+        "result": str(result_path),
+        "result_sha256": _sha256(result_path),
+        "checkpoint": result.get("checkpoint"),
+        "checkpoint_sha256": result.get("checkpoint_sha256"),
+        "selected_confidence": result.get("selected_confidence"),
+        "target_chain": result.get("target_chain"),
+        "anchor_chain": result.get("anchor_chain"),
+    }
+
+
 def _safe_record_id(identifier: str, index: int) -> str:
     suffix = re.sub(r"[^A-Za-z0-9_.-]+", "_", identifier).strip("._-")
     if not suffix:
@@ -526,6 +562,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     crop_reference = None
     crop_reference_path: Path | None = None
     crop_reference_sha256: str | None = None
+    crop_reference_provenance: dict[str, object] | None = None
     crop_policy: str | None = None
     if crop_config_value is not None:
         crop_config = _mapping(crop_config_value, "target.crop")
@@ -612,6 +649,10 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         except ValueError as error:
             raise click.UsageError(str(error)) from error
         crop_reference_sha256 = _sha256(crop_reference_path)
+        crop_reference_provenance = _crop_reference_provenance(
+            crop_reference_path,
+            crop_reference_sha256,
+        )
     ligand_token_counts = _validate_full_screen(
         sequence,
         ligands,
@@ -721,6 +762,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
                 "neighborhood_size": 10,
                 "reference": str(crop_reference_path),
                 "reference_sha256": crop_reference_sha256,
+                "reference_source": crop_reference_provenance,
                 "reference_protein": crop_reference.protein_chain,
                 "reference_ligand": {
                     "chain": crop_reference.ligand_chain,
@@ -776,6 +818,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             "selection": "reference_contiguous_blocks",
             "reference": str(crop_reference_path),
             "reference_sha256": crop_reference_sha256,
+            "reference_source": crop_reference_provenance,
             "protein_chain": crop_reference.protein_chain,
             "ligand": {
                 "chain": crop_reference.ligand_chain,
