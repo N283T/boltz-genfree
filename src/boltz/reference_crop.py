@@ -38,23 +38,6 @@ class ReferenceLigandSelector:
 
 
 @dataclass(frozen=True)
-class SequencePocketResidue:
-    """One 1-based target-sequence pocket residue with an identity guard."""
-
-    residue: int
-    name: str
-
-
-@dataclass(frozen=True)
-class SequencePocketCrop:
-    """Sequence-declared receptor block priority without a structure reference."""
-
-    pocket: tuple[SequencePocketResidue, ...]
-    seed_order: tuple[int, ...]
-    blocks: tuple[tuple[int, ...], ...]
-
-
-@dataclass(frozen=True)
 class _ProteinCandidate:
     chain: gemmi.Chain
     residues: tuple[gemmi.Residue, ...]
@@ -317,47 +300,6 @@ def _block_around(seed: int, sequence_length: int) -> tuple[int, ...]:
     return tuple(range(start, start + _NEIGHBORHOOD_SIZE))
 
 
-def load_sequence_pocket_crop(
-    sequence: str,
-    pocket: tuple[SequencePocketResidue, ...],
-) -> SequencePocketCrop:
-    """Validate explicit pocket residues and form target-sequence blocks."""
-    if not pocket:
-        msg = "target.crop.pocket must contain at least one residue."
-        raise ValueError(msg)
-    positions = [item.residue for item in pocket]
-    if len(set(positions)) != len(positions):
-        msg = "target.crop.pocket contains duplicate residue numbers."
-        raise ValueError(msg)
-    seed_order: list[int] = []
-    normalized: list[SequencePocketResidue] = []
-    for item in pocket:
-        name = item.name.upper()
-        if len(name) != 1:
-            msg = "target.crop.pocket residue names must be one-letter codes."
-            raise ValueError(msg)
-        if item.residue < 1 or item.residue > len(sequence):
-            msg = (
-                f"target.crop.pocket residue {item.residue} is outside the "
-                f"1..{len(sequence)} target sequence range."
-            )
-            raise ValueError(msg)
-        target_name = sequence[item.residue - 1]
-        if name != target_name:
-            msg = (
-                f"target.crop.pocket residue {item.residue} is {name}, but "
-                f"target.sequence contains {target_name}."
-            )
-            raise ValueError(msg)
-        seed_order.append(item.residue - 1)
-        normalized.append(SequencePocketResidue(residue=item.residue, name=name))
-    return SequencePocketCrop(
-        pocket=tuple(normalized),
-        seed_order=tuple(seed_order),
-        blocks=tuple(_block_around(seed, len(sequence)) for seed in seed_order),
-    )
-
-
 def load_reference_crop(
     path: Path,
     sequence: str,
@@ -418,7 +360,7 @@ def load_reference_crop(
 
 
 def select_receptor_tokens(
-    crop: ReferenceCrop | SequencePocketCrop,
+    crop: ReferenceCrop,
     sequence: str,
     *,
     ligand_tokens: int,
@@ -426,7 +368,7 @@ def select_receptor_tokens(
     max_atoms: int = 2048,
     max_protein_tokens: int = 200,
 ) -> tuple[int, ...]:
-    """Apply the affinity crop budget to prioritized receptor blocks."""
+    """Apply the affinity crop budget without ever truncating the ligand."""
     atom_counts = protein_atom_counts(sequence)
     selected: set[int] = set()
     selected_atoms = 0
@@ -443,7 +385,7 @@ def select_receptor_tokens(
         selected_atoms += new_atoms
     if not selected:
         msg = (
-            "No receptor crop block fits after reserving the complete "
+            "No reference-derived receptor block fits after reserving the complete "
             f"{ligand_tokens}-token ligand."
         )
         raise ValueError(msg)

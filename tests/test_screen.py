@@ -588,69 +588,6 @@ def test_reference_crop_rejects_partial_observed_sequence_match(
         )
 
 
-def test_sequence_pocket_crop_uses_one_based_residue_identity_guards() -> None:
-    crop = reference_crop_module.load_sequence_pocket_crop(
-        "ACDEFGHIKLMNPQRSTVWY",
-        (
-            reference_crop_module.SequencePocketResidue(residue=6, name="g"),
-            reference_crop_module.SequencePocketResidue(residue=15, name="R"),
-        ),
-    )
-
-    assert crop.seed_order == (5, 14)
-    assert crop.blocks == (tuple(range(10)), tuple(range(9, 19)))
-    assert [item.name for item in crop.pocket] == ["G", "R"]
-
-
-def test_sequence_pocket_crop_rejects_target_identity_mismatch() -> None:
-    with pytest.raises(ValueError, match="target.sequence contains G"):
-        reference_crop_module.load_sequence_pocket_crop(
-            "AAAAAGAAAA",
-            (reference_crop_module.SequencePocketResidue(residue=6, name="A"),),
-        )
-
-
-def test_sequence_pocket_crop_applies_budget_per_ligand(tmp_path: Path) -> None:
-    config_path = _write_config(
-        tmp_path,
-        {"smiles": ["CCO", "C" * 60]},
-        sequence="A" * 230,
-    )
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    config["target"]["crop"] = {
-        "pocket": [
-            {"residue": residue, "name": "A"}
-            for residue in range(6, 227, 11)
-        ],
-        "budget": "per_ligand",
-    }
-    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-
-    prepared = prepare_screen(config_path)
-    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
-    crop_documents = [
-        json.loads(Path(record["crop"]["path"]).read_text(encoding="utf-8"))
-        for record in manifest["records"]
-    ]
-
-    assert manifest["target"]["crop"]["selection"] == "sequence_pocket_blocks"
-    assert crop_documents[0]["selection"] == "sequence_pocket_blocks"
-    assert "reference" not in crop_documents[0]
-    assert (
-        crop_documents[0]["ligand_tokens_reserved"]
-        < crop_documents[1]["ligand_tokens_reserved"]
-    )
-    assert (
-        len(crop_documents[0]["receptor_token_idx"])
-        > len(crop_documents[1]["receptor_token_idx"])
-    )
-    assert all(
-        0 <= index < 230
-        for document in crop_documents
-        for index in document["receptor_token_idx"]
-    )
-
-
 def test_reference_crop_library_fixed_uses_one_receptor_selection(
     tmp_path: Path,
 ) -> None:
