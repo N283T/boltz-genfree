@@ -811,16 +811,20 @@ def test_screen_options_are_yaml_driven_and_limited(tmp_path: Path) -> None:
         {
             "devices": 1,
             "num_workers": 4,
+            "affinity_batch_size": 4,
             "cache": "./cache",
             "affinity_recycling_steps": 3,
+            "subsample_msa": False,
         },
         config_dir=tmp_path,
     )
 
     assert options.runtime.devices == 1
     assert options.runtime.num_workers == 4
+    assert options.runtime.affinity_batch_size == 4
     assert options.runtime.cache == (tmp_path / "cache").resolve()
     assert options.runtime.affinity_recycling_steps == 3
+    assert options.runtime.subsample_msa is False
     assert options.runtime.ligand_reference_conformer == "skip"
     assert options.runtime.etkdg_seed == 42
     model_options = stfree_model_kwargs(options.runtime)
@@ -841,6 +845,14 @@ def test_screen_options_allow_seeded_etkdg(tmp_path: Path) -> None:
 
     assert options.runtime.ligand_reference_conformer == "etkdg"
     assert options.runtime.etkdg_seed == 17
+
+
+def test_screen_options_reject_batched_msa_subsampling(tmp_path: Path) -> None:
+    with pytest.raises(click.UsageError, match="requires subsample_msa: false"):
+        build_screen_options(
+            {"affinity_batch_size": 4},
+            config_dir=tmp_path,
+        )
 
 
 def test_screen_options_reject_unknown_ligand_conformer(tmp_path: Path) -> None:
@@ -964,6 +976,9 @@ def test_screen_cli_prepare_only_never_runs_inference(tmp_path: Path) -> None:
         "above_training_token_limit": 0,
     }
     assert plan["execution"]["chunks"] == [{"name": "chunk_00000", "records": 2}]
+    assert plan["execution"]["runtime_layout"] == "unified"
+    assert plan["execution"]["preprocessing_passes"] == 1
+    assert plan["execution"]["prediction_passes"] == 1
     status = json.loads((tmp_path / "output/screen_status.json").read_text())
     assert status["state"] == "prepared"
     assert status["expected"] == 2
@@ -1056,37 +1071,64 @@ def test_screen_progress_updates_are_idempotent(tmp_path: Path) -> None:
     assert recovered["chunks"][0]["completed"] == 1
 
 
-def test_screen_cli_runs_chunks_with_stfree_runtime(
+def test_screen_cli_runs_one_unified_stfree_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = _write_config(
         tmp_path,
         {"smiles": ["CCO", "CCN"]},
-        options={"num_workers": 3},
+        options={
+            "num_workers": 3,
+            "affinity_batch_size": 2,
+            "subsample_msa": False,
+        },
         chunk_size=1,
     )
     calls: list[dict[str, object]] = []
+    events: list[str] = []
+    shared_session = object()
 
-    def fake_run_stfree_chunk(
+    def fake_prepare_stfree_inputs(
         *,
-        data: Path,
-        out_dir: Path,
+        input_paths: list[Path],
+        run_dir: Path,
+        options: object,  # noqa: ARG001
+    ) -> None:
+        events.append(f"prepare:{len(input_paths)}")
+        assert run_dir.name == "boltz_results_screen"
+        assert {path.parent.name for path in input_paths} == {
+            "chunk_00000",
+            "chunk_00001",
+        }
+
+    def fake_create_stfree_runtime_session(options: object) -> object:  # noqa: ARG001
+        events.append("load_model")
+        return shared_session
+
+    def fake_run_stfree_inputs(
+        *,
+        input_paths: list[Path],
+        run_dir: Path,
         options: object,
         receptor_crop_indices_dir: Path | None,
         progress_callback: Callable[[list[str], bool], None],
+        session: object,
+        preprocess: bool,
     ) -> None:
+        events.append(f"run:{len(input_paths)}")
         calls.append(
             {
-                "data": data,
-                "out_dir": out_dir,
+                "input_paths": input_paths,
+                "run_dir": run_dir,
                 "options": options,
                 "receptor_crop_indices_dir": receptor_crop_indices_dir,
+                "session": session,
+                "preprocess": preprocess,
             }
         )
-        data_dir = data
-        prediction_root = out_dir / f"boltz_results_{data_dir.stem}" / "predictions"
-        for input_path in data_dir.glob("*.yaml"):
+        prediction_root = run_dir / "predictions"
+        for input_path in input_paths:
             record_dir = prediction_root / input_path.stem
             record_dir.mkdir(parents=True)
             score_path = (
@@ -1103,13 +1145,31 @@ def test_screen_cli_runs_chunks_with_stfree_runtime(
             )
             progress_callback([input_path.stem], False)
 
-    monkeypatch.setattr(stfree_runtime, "run_stfree_chunk", fake_run_stfree_chunk)
+    monkeypatch.setattr(
+        stfree_runtime,
+        "prepare_stfree_inputs",
+        fake_prepare_stfree_inputs,
+    )
+    monkeypatch.setattr(
+        stfree_runtime,
+        "create_stfree_runtime_session",
+        fake_create_stfree_runtime_session,
+    )
+    monkeypatch.setattr(stfree_runtime, "run_stfree_inputs", fake_run_stfree_inputs)
 
     result = CliRunner().invoke(cli, ["screen", str(config_path)])
 
     assert result.exit_code == 0, result.output
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert all(call["options"].num_workers == 3 for call in calls)
+    assert all(call["options"].affinity_batch_size == 2 for call in calls)
+    assert all(call["session"] is shared_session for call in calls)
+    assert all(call["preprocess"] is False for call in calls)
+    assert events == [
+        "prepare:2",
+        "load_model",
+        "run:2",
+    ]
     assert (tmp_path / "output/scores.csv").is_file()
     assert "Screen complete" in result.output
     status = json.loads((tmp_path / "output/screen_status.json").read_text())
@@ -1128,7 +1188,13 @@ def test_screen_cli_publishes_failure_status(
     def fail_run(**kwargs: object) -> None:  # noqa: ARG001
         raise RuntimeError("GPU stopped")
 
-    monkeypatch.setattr(stfree_runtime, "run_stfree_chunk", fail_run)
+    monkeypatch.setattr(stfree_runtime, "prepare_stfree_inputs", lambda **kwargs: None)
+    monkeypatch.setattr(
+        stfree_runtime,
+        "create_stfree_runtime_session",
+        lambda options: object(),
+    )
+    monkeypatch.setattr(stfree_runtime, "run_stfree_inputs", fail_run)
 
     result = CliRunner().invoke(cli, ["screen", str(config_path)])
 

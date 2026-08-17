@@ -81,6 +81,7 @@ chunk_size: 1000
 options:
   seed: 20260718
   num_workers: 2
+  affinity_batch_size: 1
   affinity_recycling_steps: 0
   ligand_reference_conformer: skip
 ```
@@ -105,12 +106,14 @@ the terminal, making `--prepare-only` a reviewable dry run before a large
 screen.
 
 The generated inputs and immutable manifest live under
-`<output_dir>/.boltz-stfree/`; per-chunk runtime artifacts live under
-`<output_dir>/runs/`. Re-running the same input and preprocessing configuration
-resumes through provenance-checked outputs. A changed target, ligand source,
-component cache, MSA source, or preprocessing limit is rejected rather than
-mixed into existing screen state. Operational options such as `override` may be
-changed safely.
+`<output_dir>/.boltz-stfree/`; unified runtime artifacts live under
+`<output_dir>/runs/`. Logical chunks are combined into one `process_inputs`
+call, one processed manifest, and one prediction pass. The model is loaded once
+after that complete preprocessing pass. Re-running the same input and
+preprocessing configuration resumes through provenance-checked outputs. A
+changed target, ligand source, component cache, MSA source, or preprocessing
+limit is rejected rather than mixed into existing screen state. Operational
+options such as `override` may be changed safely.
 
 Set `options.seed` for reproducible screens. Boltz-StFree derives independent
 record-local seeds for reference-feature augmentation and MSA subsampling, so a
@@ -178,7 +181,7 @@ Boltz-StFree keeps the method surface deliberately small:
 
 ```text
 cache, affinity_checkpoint
-devices, accelerator, num_workers, preprocessing_threads
+devices, accelerator, num_workers, affinity_batch_size, preprocessing_threads
 seed, override
 max_msa_seqs, subsample_msa, num_subsampled_msa
 no_kernels, flash_attn
@@ -186,6 +189,9 @@ affinity_mw_correction, affinity_recycling_steps
 ligand_reference_conformer, etkdg_seed
 msa_server_url, msa_pairing_strategy and MSA authentication settings
 ```
+
+`affinity_batch_size` values above 1 require `subsample_msa: false`. This keeps
+MSA features stable when a partially completed screen is resumed.
 
 Every run uses Boltz-2, the affinity checkpoint, complete-input receptor
 selection or a reference-derived receptor crop, zero distogram features, one

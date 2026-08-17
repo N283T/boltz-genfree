@@ -43,6 +43,7 @@ class StFreeRuntimeOptions:
     devices: int | list[int] = 1
     accelerator: str = "gpu"
     num_workers: int = 2
+    affinity_batch_size: int = 1
     override: bool = False
     seed: int | None = None
     preprocessing_threads: int = 1
@@ -55,6 +56,17 @@ class StFreeRuntimeOptions:
     affinity_recycling_steps: int = 0
     ligand_reference_conformer: str = "skip"
     etkdg_seed: int = 42
+
+
+@dataclass
+class StFreeRuntimeSession:
+    """Model and immutable resources shared by every chunk in one screen."""
+
+    affinity_checkpoint: Path
+    checkpoint_sha256: str
+    runtime_version: str
+    mol_dir: Path
+    model: object
 
 
 def _record_msa_seed(base_seed: int, record_id: str) -> int:
@@ -273,6 +285,7 @@ def _run_provenance(
             },
             "structure_generation_active": False,
             "affinity_recycling_steps": options.affinity_recycling_steps,
+            "affinity_batch_size": options.affinity_batch_size,
             "affinity_mw_correction": options.affinity_mw_correction,
             "seed": options.seed,
             "record_seed_scheme": (
@@ -444,56 +457,26 @@ def stfree_model_kwargs(options: StFreeRuntimeOptions) -> dict[str, object]:
     }
 
 
-def run_stfree_chunk(
+def prepare_stfree_inputs(
     *,
-    data: Path,
-    out_dir: Path,
+    input_paths: list[Path],
+    run_dir: Path,
     options: StFreeRuntimeOptions,
-    receptor_crop_indices_dir: Path | None = None,
-    progress_callback: Callable[[list[str], bool], None] | None = None,
 ) -> None:
-    """Score one chunk without generating or loading complex coordinates."""
-    import torch
-    from pytorch_lightning import Trainer, seed_everything
+    """Preprocess every supplied input in one shared runtime directory."""
     from rdkit import Chem
 
-    from boltz.data.module.inferencev2 import Boltz2InferenceDataModule
-    from boltz.data.types import Manifest
-    from boltz.data.write.writer import BoltzAffinityWriter
     from boltz.main import (
-        BoltzProcessedInput,
         _configure_wsl_multiprocessing_tempdir,
-        _resolved_input_sources,
-        _runtime_version,
-        _validate_checkpoint_for_load,
-        check_inputs,
         download_stfree,
-        filter_inputs_affinity,
         process_inputs,
     )
-    from boltz.model.models.boltz2 import Boltz2
 
     _configure_wsl_multiprocessing_tempdir(options.num_workers)
-    _patch_torch_checkpoint_loading(torch)
     if options.ligand_reference_conformer not in _LIGAND_CONFORMER_MODES:
         choices = ", ".join(sorted(_LIGAND_CONFORMER_MODES))
         raise click.UsageError(f"ligand_reference_conformer must be one of: {choices}.")
-    if options.accelerator == "cpu":
-        click.echo("Running on CPU; affinity scoring will be slow.")
-    if options.accelerator == "mps" and not torch.backends.mps.is_available():
-        raise click.UsageError("MPS was requested but is not available.")
-
-    warnings.filterwarnings(
-        "ignore",
-        ".*that has Tensor Cores. To properly utilize them.*",
-    )
-    torch.set_grad_enabled(False)
-    torch.set_float32_matmul_precision("highest")
     Chem.SetDefaultPickleProperties(Chem.PropertyPickleOptions.AllProps)
-    if options.seed is not None:
-        seed_everything(options.seed)
-    for key in ("CUEQ_DEFAULT_CONFIG", "CUEQ_DISABLE_AOT_TUNING"):
-        os.environ[key] = os.environ.get(key, "1")
 
     cache = options.cache.expanduser().resolve()
     cache.mkdir(parents=True, exist_ok=True)
@@ -501,14 +484,8 @@ def run_stfree_chunk(
         cache,
         include_default_affinity=options.affinity_checkpoint is None,
     )
-    affinity_checkpoint = (
-        options.affinity_checkpoint or cache / "boltz2_aff.ckpt"
-    ).expanduser()
-    _validate_checkpoint_for_load(affinity_checkpoint, "Boltz-2 affinity weights")
-    checkpoint_sha256 = _file_sha256(affinity_checkpoint)
-
-    input_paths = check_inputs(data.expanduser().resolve(), skip_bad_inputs=False)
-    run_dir = out_dir.expanduser().resolve() / f"boltz_results_{data.stem}"
+    input_paths = [path.expanduser().resolve() for path in input_paths]
+    run_dir = run_dir.expanduser().resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     mol_dir = cache / "mols"
     process_inputs(
@@ -533,29 +510,154 @@ def run_stfree_chunk(
         skip_ligand_conformer_generation=True,
     )
 
+
+def prepare_stfree_chunk(
+    *,
+    data: Path,
+    out_dir: Path,
+    options: StFreeRuntimeOptions,
+) -> None:
+    """Backward-compatible wrapper that preprocesses one input chunk."""
+    from boltz.main import check_inputs
+
+    data = data.expanduser().resolve()
+    prepare_stfree_inputs(
+        input_paths=check_inputs(data, skip_bad_inputs=False),
+        run_dir=out_dir.expanduser().resolve() / f"boltz_results_{data.stem}",
+        options=options,
+    )
+
+
+def create_stfree_runtime_session(
+    options: StFreeRuntimeOptions,
+) -> StFreeRuntimeSession:
+    """Load one reusable StFree model after all chunks are preprocessed."""
+    import torch
+    from pytorch_lightning import seed_everything
+
+    from boltz.main import (
+        _configure_wsl_multiprocessing_tempdir,
+        _runtime_version,
+        _validate_checkpoint_for_load,
+        download_stfree,
+    )
+    from boltz.model.models.boltz2 import Boltz2
+
+    _configure_wsl_multiprocessing_tempdir(options.num_workers)
+    _patch_torch_checkpoint_loading(torch)
+    if options.accelerator == "cpu":
+        click.echo("Running on CPU; affinity scoring will be slow.")
+    if options.accelerator == "mps" and not torch.backends.mps.is_available():
+        raise click.UsageError("MPS was requested but is not available.")
+
+    warnings.filterwarnings(
+        "ignore",
+        ".*that has Tensor Cores. To properly utilize them.*",
+    )
+    torch.set_grad_enabled(False)
+    torch.set_float32_matmul_precision("highest")
+    if options.seed is not None:
+        seed_everything(options.seed)
+    for key in ("CUEQ_DEFAULT_CONFIG", "CUEQ_DISABLE_AOT_TUNING"):
+        os.environ[key] = os.environ.get(key, "1")
+
+    cache = options.cache.expanduser().resolve()
+    cache.mkdir(parents=True, exist_ok=True)
+    download_stfree(
+        cache,
+        include_default_affinity=options.affinity_checkpoint is None,
+    )
+    affinity_checkpoint = (
+        options.affinity_checkpoint or cache / "boltz2_aff.ckpt"
+    ).expanduser()
+    _validate_checkpoint_for_load(affinity_checkpoint, "Boltz-2 affinity weights")
+    checkpoint_sha256 = _file_sha256(affinity_checkpoint)
+    predict_args = {
+        "recycling_steps": options.affinity_recycling_steps,
+        "sampling_steps": 1,
+        "diffusion_samples": 1,
+        "max_parallel_samples": 1,
+        "write_confidence_summary": False,
+        "write_full_pae": False,
+        "write_full_pde": False,
+    }
+    model = Boltz2.load_from_checkpoint(
+        affinity_checkpoint,
+        strict=True,
+        predict_args=predict_args,
+        map_location="cpu",
+        ema=False,
+        **stfree_model_kwargs(options),
+    )
+    _prune_stfree_model(model)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    model.eval()
+    return StFreeRuntimeSession(
+        affinity_checkpoint=affinity_checkpoint,
+        checkpoint_sha256=checkpoint_sha256,
+        runtime_version=_runtime_version(),
+        mol_dir=cache / "mols",
+        model=model,
+    )
+
+
+def run_stfree_inputs(
+    *,
+    input_paths: list[Path],
+    run_dir: Path,
+    options: StFreeRuntimeOptions,
+    receptor_crop_indices_dir: Path | None = None,
+    progress_callback: Callable[[list[str], bool], None] | None = None,
+    session: StFreeRuntimeSession | None = None,
+    preprocess: bool = True,
+) -> None:
+    """Score one shared manifest containing every supplied input."""
+    from pytorch_lightning import Trainer
+
+    from boltz.data.module.inferencev2 import Boltz2InferenceDataModule
+    from boltz.data.types import Manifest
+    from boltz.data.write.writer import BoltzAffinityWriter
+    from boltz.main import (
+        BoltzProcessedInput,
+        _resolved_input_sources,
+        filter_inputs_affinity,
+    )
+
+    input_paths = [path.expanduser().resolve() for path in input_paths]
+    run_dir = run_dir.expanduser().resolve()
+    if preprocess:
+        prepare_stfree_inputs(
+            input_paths=input_paths,
+            run_dir=run_dir,
+            options=options,
+        )
+    if session is None:
+        session = create_stfree_runtime_session(options)
+
     processed_dir = run_dir / "processed"
     manifest = Manifest.load(processed_dir / "manifest.json")
     if not manifest.records:
         raise click.ClickException("No valid protein-ligand records were processed.")
     _validate_one_to_one_manifest(manifest)
-    runtime_version = _runtime_version()
     receptor_selection = _receptor_crop_provenance(
         manifest,
         receptor_crop_indices_dir,
     )
     provenance = _run_provenance(
         options,
-        runtime_version=runtime_version,
-        checkpoint_sha256=checkpoint_sha256,
+        runtime_version=session.runtime_version,
+        checkpoint_sha256=session.checkpoint_sha256,
         receptor_selection=receptor_selection,
     )
     experiment_metadata = {
         "runtime": "boltz-stfree",
-        "runtime_version": runtime_version,
+        "runtime_version": session.runtime_version,
         "provenance": provenance,
         "input_sources": _resolved_input_sources(input_paths),
-        "affinity_checkpoint": str(affinity_checkpoint.resolve()),
-        "affinity_checkpoint_sha256": checkpoint_sha256,
+        "affinity_checkpoint": str(session.affinity_checkpoint.resolve()),
+        "affinity_checkpoint_sha256": session.checkpoint_sha256,
         "seed": options.seed,
         "input_contract": "one_protein_one_ligand",
         "receptor_selection": receptor_selection,
@@ -569,7 +671,7 @@ def run_stfree_chunk(
         "affinity_recycling_steps": options.affinity_recycling_steps,
         "affinity_sampling_steps": 1,
         "affinity_diffusion_samples": 1,
-        "affinity_batch_size": 1,
+        "affinity_batch_size": options.affinity_batch_size,
         "use_kernels": not options.no_kernels,
     }
     _validate_resume_state(
@@ -637,9 +739,9 @@ def run_stfree_chunk(
         manifest=processed.manifest,
         target_dir=processed.targets_dir,
         msa_dir=processed.msa_dir,
-        mol_dir=mol_dir,
+        mol_dir=session.mol_dir,
         num_workers=options.num_workers,
-        batch_size=1,
+        batch_size=options.affinity_batch_size,
         constraints_dir=processed.constraints_dir,
         template_dir=None,
         extra_mols_dir=processed.extra_mols_dir,
@@ -660,27 +762,30 @@ def run_stfree_chunk(
         affinity_require_full_input=receptor_crop_indices_dir is None,
         pin_memory=options.accelerator not in ("cpu", "mps"),
     )
-    predict_args = {
-        "recycling_steps": options.affinity_recycling_steps,
-        "sampling_steps": 1,
-        "diffusion_samples": 1,
-        "max_parallel_samples": 1,
-        "write_confidence_summary": False,
-        "write_full_pae": False,
-        "write_full_pde": False,
-    }
-    model = Boltz2.load_from_checkpoint(
-        affinity_checkpoint,
-        strict=True,
-        predict_args=predict_args,
-        map_location="cpu",
-        ema=False,
-        **stfree_model_kwargs(options),
-    )
-    _prune_stfree_model(model)
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    model.eval()
     click.echo(f"Running structure-free affinity for {len(pending.records)} record(s).")
-    trainer.predict(model, datamodule=data_module, return_predictions=False)
+    trainer.predict(session.model, datamodule=data_module, return_predictions=False)
+
+
+def run_stfree_chunk(
+    *,
+    data: Path,
+    out_dir: Path,
+    options: StFreeRuntimeOptions,
+    receptor_crop_indices_dir: Path | None = None,
+    progress_callback: Callable[[list[str], bool], None] | None = None,
+    session: StFreeRuntimeSession | None = None,
+    preprocess: bool = True,
+) -> None:
+    """Backward-compatible wrapper that scores one physical input chunk."""
+    from boltz.main import check_inputs
+
+    data = data.expanduser().resolve()
+    run_stfree_inputs(
+        input_paths=check_inputs(data, skip_bad_inputs=False),
+        run_dir=out_dir.expanduser().resolve() / f"boltz_results_{data.stem}",
+        options=options,
+        receptor_crop_indices_dir=receptor_crop_indices_dir,
+        progress_callback=progress_callback,
+        session=session,
+        preprocess=preprocess,
+    )
