@@ -1,4 +1,5 @@
 import logging
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,6 +52,8 @@ from boltz.data.types import (
 )
 
 logger = logging.getLogger(__name__)
+
+_POLYMER_PARSE_CACHE_SIZE = 16
 
 ####################################################################################################
 # DATACLASSES
@@ -161,6 +164,12 @@ class ParsedChain:
     cyclic_period: int
     sequence: Optional[str] = None
     affinity_mw: Optional[float] = None
+
+
+_POLYMER_PARSE_CACHE: OrderedDict[
+    tuple,
+    tuple[Mapping[str, Mol], ParsedChain],
+] = OrderedDict()
 
 
 @dataclass(frozen=True)
@@ -1034,6 +1043,58 @@ def parse_polymer(
     )
 
 
+def _parse_polymer_cached(
+    sequence: list[str],
+    raw_sequence: str,
+    entity: str,
+    chain_type: str,
+    components: dict[str, Mol],
+    cyclic: bool,
+    mol_dir: Path,
+) -> Optional[ParsedChain]:
+    """Reuse immutable standard-polymer parsing within a preprocessing worker."""
+    if any(residue not in const.tokens for residue in sequence):
+        return parse_polymer(
+            sequence,
+            raw_sequence,
+            entity,
+            chain_type,
+            components,
+            cyclic,
+            mol_dir,
+        )
+
+    cache_key = (
+        tuple(sequence),
+        raw_sequence,
+        entity,
+        chain_type,
+        cyclic,
+        str(mol_dir.resolve()),
+        id(components),
+    )
+    cached = _POLYMER_PARSE_CACHE.get(cache_key)
+    if cached is not None and cached[0] is components:
+        _POLYMER_PARSE_CACHE.move_to_end(cache_key)
+        return cached[1]
+
+    parsed = parse_polymer(
+        sequence,
+        raw_sequence,
+        entity,
+        chain_type,
+        components,
+        cyclic,
+        mol_dir,
+    )
+    if parsed is not None:
+        _POLYMER_PARSE_CACHE[cache_key] = (components, parsed)
+        _POLYMER_PARSE_CACHE.move_to_end(cache_key)
+        while len(_POLYMER_PARSE_CACHE) > _POLYMER_PARSE_CACHE_SIZE:
+            _POLYMER_PARSE_CACHE.popitem(last=False)
+    return parsed
+
+
 def token_spec_to_ids(
     chain_name, residue_index_or_atom_name, chain_to_idx, atom_idx_map, chains
 ):
@@ -1280,7 +1341,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             cyclic = items[0][entity_type].get("cyclic", False)
 
             # Parse a polymer
-            parsed_chain = parse_polymer(
+            parsed_chain = _parse_polymer_cached(
                 sequence=seq,
                 raw_sequence=raw_seq,
                 entity=entity_id,

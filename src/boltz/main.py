@@ -5,23 +5,31 @@ import json
 import os
 import pickle
 import platform
+import socket
 import tarfile
 import tempfile
+import time
+from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 from multiprocessing import Pool
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING, Callable, List, Optional, Union
 
 import click
-
 
 if TYPE_CHECKING:
     from boltz.data.types import Manifest
 
 MOL_URL = "https://huggingface.co/boltz-community/boltz-2/resolve/main/mols.tar"
+
+_PROCESSED_MSA_CACHE_VERSION = 1
+_MSA_HASH_CACHE: dict[tuple[str, int, int, int], str] = {}
+_MSA_LOCK_POLL_SECONDS = 0.05
+_MSA_LOCK_TIMEOUT_SECONDS = 3600.0
+_PROCESS_INPUT_WORKER: Callable[[Path], Optional[str]] | None = None
 
 BOLTZ2_REFERENCE_URL_WITH_FALLBACK = [
     "https://model-gateway.boltz.bio/boltz2_conf.ckpt",
@@ -599,6 +607,144 @@ def compute_msa(
             f.write("\n".join(csv_str))
 
 
+def _msa_content_sha256(path: Path) -> str:
+    """Hash an MSA once per worker while detecting changes during the read."""
+    resolved = path.resolve()
+    before = resolved.stat()
+    cache_key = (
+        str(resolved),
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    cached = _MSA_HASH_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    digest = hashlib.sha256()
+    with resolved.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    after = resolved.stat()
+    if (
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ) != (
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ):
+        msg = f"MSA file changed while it was being read: {resolved}"
+        raise RuntimeError(msg)
+
+    result = digest.hexdigest()
+    _MSA_HASH_CACHE[cache_key] = result
+    return result
+
+
+def _processed_msa_id(msa_path: Path, max_msa_seqs: int) -> str:
+    """Return a content-addressed ID for one processed MSA artifact."""
+    source_digest = _msa_content_sha256(msa_path)
+    provenance = (
+        f"boltz-processed-msa-v{_PROCESSED_MSA_CACHE_VERSION}\0"
+        f"{msa_path.suffix.lower()}\0{max_msa_seqs}\0{source_digest}"
+    )
+    return f"shared_{hashlib.sha256(provenance.encode()).hexdigest()}"
+
+
+def _msa_lock_owner_is_running(lock_path: Path) -> bool:
+    """Return whether a cache lock belongs to a live process on this host."""
+    try:
+        owner = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return True
+    if owner.get("host") != socket.gethostname():
+        return True
+    try:
+        os.kill(int(owner["pid"]), 0)
+    except ProcessLookupError:
+        return False
+    except (OSError, ValueError, TypeError):
+        return True
+    return True
+
+
+def _acquire_msa_cache_lock(lock_path: Path, processed_path: Path) -> int | None:
+    """Acquire an inter-process cache lock, or return after another writer wins."""
+    started = time.monotonic()
+    payload = json.dumps({"pid": os.getpid(), "host": socket.gethostname()}).encode()
+    while True:
+        if processed_path.exists():
+            return None
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if not _msa_lock_owner_is_running(lock_path):
+                with suppress(FileNotFoundError):
+                    lock_path.unlink()
+                continue
+            if time.monotonic() - started >= _MSA_LOCK_TIMEOUT_SECONDS:
+                msg = f"Timed out waiting for shared MSA cache: {processed_path}"
+                raise TimeoutError(msg) from None
+            time.sleep(_MSA_LOCK_POLL_SECONDS)
+            continue
+        try:
+            os.write(descriptor, payload)
+        except BaseException:
+            os.close(descriptor)
+            lock_path.unlink(missing_ok=True)
+            raise
+        return descriptor
+
+
+def _prepare_shared_msa(
+    msa_path: Path,
+    processed_msa_dir: Path,
+    max_msa_seqs: int,
+) -> str:
+    """Parse an MSA into one atomic, content-addressed artifact."""
+    from boltz.data.parse.a3m import parse_a3m  # noqa: PLC0415
+    from boltz.data.parse.csv import parse_csv  # noqa: PLC0415
+
+    msa_id = _processed_msa_id(msa_path, max_msa_seqs)
+    processed = processed_msa_dir / f"{msa_id}.npz"
+    if processed.exists():
+        return msa_id
+
+    lock_path = processed.with_suffix(".lock")
+    descriptor = _acquire_msa_cache_lock(lock_path, processed)
+    if descriptor is None:
+        return msa_id
+
+    temporary_path: Path | None = None
+    try:
+        if msa_path.suffix.lower() == ".a3m":
+            msa = parse_a3m(msa_path, taxonomy=None, max_seqs=max_msa_seqs)
+        elif msa_path.suffix.lower() == ".csv":
+            msa = parse_csv(msa_path, max_seqs=max_msa_seqs)
+        else:
+            msg = f"MSA file {msa_path} not supported, only a3m or csv."
+            raise RuntimeError(msg)
+
+        with tempfile.NamedTemporaryFile(
+            dir=processed_msa_dir,
+            prefix=f".{msa_id}.",
+            suffix=".npz",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+        msa.dump(temporary_path)
+        temporary_path.replace(processed)
+        temporary_path = None
+    finally:
+        os.close(descriptor)
+        lock_path.unlink(missing_ok=True)
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+    return msa_id
+
+
 def process_input(  # noqa: C901, PLR0912, PLR0915, D103
     path: Path,
     ccd: dict,
@@ -651,9 +797,6 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
         from rdkit import Chem
 
         from boltz.data import const
-        from boltz.data.parse.a3m import parse_a3m
-        from boltz.data.parse.csv import parse_csv
-        from boltz.data.types import MSA
 
         # Get target id
         target_id = target.record.id
@@ -696,31 +839,18 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
         # Parse MSA data
         msas = sorted({c.msa_id for c in target.record.chains if c.msa_id != -1})
         msa_id_map = {}
-        for msa_idx, msa_id in enumerate(msas):
+        for msa_id in msas:
             # Check that raw MSA exists
             msa_path = Path(msa_id)
             if not msa_path.exists():
                 msg = f"MSA file {msa_path} not found."
                 raise FileNotFoundError(msg)  # noqa: TRY301
 
-            # Dump processed MSA
-            processed = processed_msa_dir / f"{target_id}_{msa_idx}.npz"
-            msa_id_map[msa_id] = f"{target_id}_{msa_idx}"
-            if not processed.exists():
-                # Parse A3M
-                if msa_path.suffix == ".a3m":
-                    msa: MSA = parse_a3m(
-                        msa_path,
-                        taxonomy=None,
-                        max_seqs=max_msa_seqs,
-                    )
-                elif msa_path.suffix == ".csv":
-                    msa: MSA = parse_csv(msa_path, max_seqs=max_msa_seqs)
-                else:
-                    msg = f"MSA file {msa_path} not supported, only a3m or csv."
-                    raise RuntimeError(msg)  # noqa: TRY301
-
-                msa.dump(processed)
+            msa_id_map[msa_id] = _prepare_shared_msa(
+                msa_path,
+                processed_msa_dir,
+                max_msa_seqs,
+            )
 
         # Modify records to point to processed MSA
         for c in target.record.chains:
@@ -756,6 +886,22 @@ def process_input(  # noqa: C901, PLR0912, PLR0915, D103
         if not skip_bad_inputs:
             raise
         return f"{path.name}: {e}"
+
+
+def _initialize_process_input_worker(
+    worker: Callable[[Path], Optional[str]],
+) -> None:
+    """Retain heavyweight shared preprocessing state once per worker."""
+    global _PROCESS_INPUT_WORKER  # noqa: PLW0603
+    _PROCESS_INPUT_WORKER = worker
+
+
+def _run_process_input_worker(path: Path) -> Optional[str]:
+    """Process one path using worker-local shared receptor and CCD state."""
+    if _PROCESS_INPUT_WORKER is None:
+        msg = "Preprocessing worker was not initialized."
+        raise RuntimeError(msg)
+    return _PROCESS_INPUT_WORKER(path)
 
 
 def process_inputs(
@@ -843,6 +989,7 @@ def process_inputs(
             click.echo("All inputs are already processed.")
             updated_manifest = Manifest(existing)
             updated_manifest.dump(out_dir / "processed" / "manifest.json")
+            return updated_manifest
 
     # Create output directories
     msa_dir = out_dir / "msa"
@@ -901,8 +1048,22 @@ def process_inputs(
     click.echo(f"Processing {len(data)} inputs with {preprocessing_threads} threads.")
 
     if preprocessing_threads > 1 and len(data) > 1:
-        with Pool(preprocessing_threads) as pool:
-            errors = list(tqdm(pool.imap(process_input_partial, data), total=len(data)))
+        # Process one representative before forking. Besides creating the shared
+        # MSA atomically, this primes the immutable receptor cache inherited by
+        # fork-based workers used for large Linux/WSL screens.
+        errors = [process_input_partial(data[0])]
+        remaining = data[1:]
+        with Pool(
+            preprocessing_threads,
+            initializer=_initialize_process_input_worker,
+            initargs=(process_input_partial,),
+        ) as pool:
+            errors.extend(
+                tqdm(
+                    pool.imap(_run_process_input_worker, remaining),
+                    total=len(remaining),
+                )
+            )
     else:
         errors = []
         for path in tqdm(data):
@@ -919,6 +1080,7 @@ def process_inputs(
     records = [Record.load(p) for p in sorted(records_dir.glob("*.json"))]
     manifest = Manifest(records)
     manifest.dump(out_dir / "processed" / "manifest.json")
+    return manifest
 
 
 @click.group()
