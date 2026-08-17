@@ -287,6 +287,7 @@ def test_run_provenance_captures_checkpoint_and_method(tmp_path: Path) -> None:
 
     assert provenance["affinity_checkpoint_sha256"] == "abc123"
     assert provenance["method"]["structure_generation_active"] is False
+    assert provenance["method"]["affinity_batch_size"] == 1
     assert provenance["method"]["ligand_reference_conformer"] == {
         "mode": "skip",
         "reference_positions": "zero",

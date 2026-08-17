@@ -54,6 +54,7 @@ _SCREEN_OPTION_KEYS = {
     "devices",
     "accelerator",
     "num_workers",
+    "affinity_batch_size",
     "override",
     "seed",
     "preprocessing_threads",
@@ -1075,6 +1076,18 @@ def build_screen_options(
         raise click.UsageError(
             "options.ligand_reference_conformer must be skip or etkdg."
         )
+    affinity_batch_size = _integer_option(
+        raw_options,
+        "affinity_batch_size",
+        1,
+        minimum=1,
+    )
+    subsample_msa = _boolean_option(raw_options, "subsample_msa", True)
+    if affinity_batch_size > 1 and subsample_msa:
+        raise click.UsageError(
+            "options.affinity_batch_size above 1 requires subsample_msa: false "
+            "so resumed records keep identical MSA features."
+        )
 
     runtime = StFreeRuntimeOptions(
         cache=cache,
@@ -1082,6 +1095,7 @@ def build_screen_options(
         devices=devices,
         accelerator=accelerator,
         num_workers=_integer_option(raw_options, "num_workers", 2, minimum=0),
+        affinity_batch_size=affinity_batch_size,
         override=_boolean_option(raw_options, "override", False),
         seed=seed,
         preprocessing_threads=_integer_option(
@@ -1096,7 +1110,7 @@ def build_screen_options(
             8192,
             minimum=1,
         ),
-        subsample_msa=_boolean_option(raw_options, "subsample_msa", True),
+        subsample_msa=subsample_msa,
         num_subsampled_msa=_integer_option(
             raw_options,
             "num_subsampled_msa",
@@ -1150,14 +1164,20 @@ def _screen_score_matches(
     record: dict[str, object],
 ) -> list[Path]:
     """Return structure-free score files for one screen manifest record."""
-    prediction_dir = (
+    record_id = str(record["record_id"])
+    prediction_dirs = (
+        runs_dir / "boltz_results_screen" / "predictions" / record_id,
         runs_dir
         / f"boltz_results_{record['chunk']}"
         / "predictions"
-        / str(record["record_id"])
+        / record_id,
     )
     return sorted(
-        prediction_dir.glob("affinity_*__distogram_zero_distogram_features*.json")
+        score
+        for prediction_dir in prediction_dirs
+        for score in prediction_dir.glob(
+            "affinity_*__distogram_zero_distogram_features*.json"
+        )
     )
 
 
@@ -1223,12 +1243,16 @@ def build_screen_plan(
         "execution": {
             "chunk_size": manifest["chunk_size"],
             "chunk_count": len(chunk_counts),
+            "runtime_layout": "unified",
+            "preprocessing_passes": 1,
+            "prediction_passes": 1,
             "chunks": [
                 {"name": name, "records": count} for name, count in chunk_counts.items()
             ],
             "accelerator": runtime.accelerator,
             "devices": runtime.devices,
             "num_workers": runtime.num_workers,
+            "affinity_batch_size": runtime.affinity_batch_size,
             "preprocessing_workers": runtime.preprocessing_threads,
             "seed": runtime.seed,
             "subsample_msa": runtime.subsample_msa,
@@ -1275,7 +1299,8 @@ def format_screen_plan(plan: dict[str, object]) -> tuple[str, ...]:
         f"{library['above_training_token_limit']} above training limit",
         f"Execution: {execution['chunk_count']} chunk(s) of at most "
         f"{execution['chunk_size']}, {execution['accelerator']} on "
-        f"{execution['devices']}, seed {execution['seed']}",
+        f"{execution['devices']}, batch {execution['affinity_batch_size']}, "
+        f"seed {execution['seed']}",
         f"Status: {outputs['status']}",
     )
 
@@ -1400,6 +1425,13 @@ class ScreenProgress:
 
     def record_batch(self, record_ids: list[str], failed: bool) -> None:
         """Publish completion or failure for a prediction batch."""
+        chunks = {
+            self.record_chunks[record_id]
+            for record_id in record_ids
+            if record_id in self.record_chunks
+        }
+        if chunks:
+            self.current_chunk = min(chunks, key=self.chunk_order.index)
         for record_id in record_ids:
             if record_id not in self.records:
                 raise ValueError(

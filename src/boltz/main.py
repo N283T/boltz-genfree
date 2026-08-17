@@ -948,7 +948,11 @@ def screen(config: Path, prepare_only: bool) -> None:
         invalidate_screen_aggregates,
         prepare_screen,
     )
-    from boltz.stfree_runtime import run_stfree_chunk
+    from boltz.stfree_runtime import (
+        create_stfree_runtime_session,
+        prepare_stfree_inputs,
+        run_stfree_inputs,
+    )
 
     prepared = prepare_screen(
         config,
@@ -984,20 +988,33 @@ def screen(config: Path, prepare_only: bool) -> None:
                 compute_msa_fn=compute_msa,
             )
 
-        for index, chunk_dir in enumerate(prepared.chunk_dirs, start=1):
-            progress.start_chunk(chunk_dir.name)
-            click.echo(
-                f"Running screen chunk {index}/{len(prepared.chunk_dirs)}: "
-                f"{chunk_dir.name}"
-            )
-            run_stfree_chunk(
-                data=chunk_dir,
-                out_dir=prepared.runs_dir,
-                options=screen_options.runtime,
-                receptor_crop_indices_dir=prepared.receptor_crop_indices_dir,
-                progress_callback=progress.record_batch,
-            )
-            progress.finish_chunk(chunk_dir.name)
+        input_paths = [
+            input_path
+            for chunk_dir in prepared.chunk_dirs
+            for input_path in sorted(chunk_dir.glob("*.yaml"))
+        ]
+        runtime_dir = prepared.runs_dir / "boltz_results_screen"
+        progress.set_stage("preprocessing_inputs", "Preprocessing all screen inputs")
+        click.echo(f"Preprocessing all {len(input_paths)} screen inputs in one pass.")
+        prepare_stfree_inputs(
+            input_paths=input_paths,
+            run_dir=runtime_dir,
+            options=screen_options.runtime,
+        )
+
+        click.echo("Loading one StFree model for the complete screen.")
+        runtime_session = create_stfree_runtime_session(screen_options.runtime)
+        progress.set_stage("running", "Running complete screen")
+        click.echo(f"Running one unified screen for {len(input_paths)} inputs.")
+        run_stfree_inputs(
+            input_paths=input_paths,
+            run_dir=runtime_dir,
+            options=screen_options.runtime,
+            receptor_crop_indices_dir=prepared.receptor_crop_indices_dir,
+            progress_callback=progress.record_batch,
+            session=runtime_session,
+            preprocess=False,
+        )
         scores_path = collect_screen_scores(prepared)
         progress.complete(scores_path)
         click.echo(f"Screen complete: {scores_path}")
