@@ -559,9 +559,7 @@ def test_reference_crop_remaps_exact_observed_sequence_to_target_indices(
     assert crop.seed_order[0] == expected_seed
     assert all(0 <= index < len(target_sequence) for index in crop.seed_order)
     assert all(
-        0 <= index < len(target_sequence)
-        for block in crop.blocks
-        for index in block
+        0 <= index < len(target_sequence) for block in crop.blocks for index in block
     )
 
 
@@ -913,9 +911,9 @@ def test_screen_options_allow_batched_msa_subsampling(tmp_path: Path) -> None:
 
 
 def test_screen_options_reject_unknown_ligand_conformer(tmp_path: Path) -> None:
-    with pytest.raises(click.UsageError, match="must be skip or etkdg"):
+    with pytest.raises(click.UsageError, match="must be skip, etkdg, or rdkit_2d"):
         build_screen_options(
-            {"ligand_reference_conformer": "rdkit_2d"},
+            {"ligand_reference_conformer": "unknown"},
             config_dir=tmp_path,
         )
 
@@ -1079,9 +1077,7 @@ def test_bootstrap_reference_prepare_only_stages_one_holo_input(
         },
         {"ligand": {"id": "B", "smiles": "CCO"}},
     ]
-    status = json.loads(
-        (output / "bootstrap_status.json").read_text(encoding="utf-8")
-    )
+    status = json.loads((output / "bootstrap_status.json").read_text(encoding="utf-8"))
     assert status["state"] == "prepared"
     assert not (output / "reference.pdb").exists()
 
@@ -1305,3 +1301,48 @@ def test_collect_screen_scores_preserves_library_identity(tmp_path: Path) -> Non
         rows = list(csv.DictReader(handle))
     assert [row["ligand_id"] for row in rows] == ["first", "ligand_000002"]
     assert [row["affinity_pred_value"] for row in rows] == ["1.0", "2.0"]
+
+
+def test_screen_supports_extended_full_input_and_2d(tmp_path: Path) -> None:
+    config = _write_config(
+        tmp_path,
+        {"smiles": ["CCO"]},
+        sequence="A" * 580,
+        options={
+            "allow_extended_full_input": True,
+            "ligand_reference_conformer": "rdkit_2d",
+        },
+    )
+    prepared = prepare_screen(config)
+    plan = json.loads(prepared.plan_path.read_text())
+    assert plan["target"]["receptor_selection"]["receptor_tokens"] == 580
+    assert plan["execution"]["allow_extended_full_input"] is True
+    assert prepared.screen_options.runtime.ligand_reference_conformer == "rdkit_2d"
+    assert prepared.receptor_crop_indices_dir is None
+
+
+def test_extended_input_still_rejects_oversized_ligands(tmp_path: Path) -> None:
+    config = _write_config(
+        tmp_path,
+        {"smiles": ["C" * 129]},
+        sequence="A" * 580,
+        options={"allow_extended_full_input": True},
+    )
+    with pytest.raises(click.UsageError, match="exceeds 128"):
+        prepare_screen(config)
+
+
+def test_extended_input_option_requires_boolean(tmp_path: Path) -> None:
+    with pytest.raises(click.UsageError):
+        build_screen_options({"allow_extended_full_input": "yes"}, config_dir=tmp_path)
+
+
+def test_screen_options_allow_folded_not_narrow(tmp_path: Path) -> None:
+    options = build_screen_options(
+        {"affinity_conditioner_mode": "folded"}, config_dir=tmp_path
+    )
+    assert options.runtime.affinity_conditioner_mode == "folded"
+    with pytest.raises(click.UsageError, match="original or folded"):
+        build_screen_options(
+            {"affinity_conditioner_mode": "narrow"}, config_dir=tmp_path
+        )

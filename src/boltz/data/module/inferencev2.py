@@ -244,6 +244,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         affinity_ligand_ref_pos_seed: int | None = None,
         affinity_random_seed: int | None = None,
         affinity_require_full_input: bool = False,
+        affinity_allow_extended_full_input: bool = False,
     ) -> None:
         """Initialize the training dataset.
 
@@ -288,6 +289,7 @@ class PredictionDataset(torch.utils.data.Dataset):
         self.affinity_ligand_ref_pos_seed = affinity_ligand_ref_pos_seed
         self.affinity_random_seed = affinity_random_seed
         self.affinity_require_full_input = affinity_require_full_input
+        self.affinity_allow_extended_full_input = affinity_allow_extended_full_input
         if self.affinity:
             self.cropper = AffinityCropper()
 
@@ -393,6 +395,7 @@ class PredictionDataset(torch.utils.data.Dataset):
                         tokenized,
                         max_tokens=256,
                         max_atoms=2048,
+                        allow_extended=self.affinity_allow_extended_full_input,
                     )
                 elif receptor_crop_indices is not None:
                     tokenized = self.cropper.crop_by_receptor_token_indices(
@@ -547,6 +550,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         affinity_ligand_ref_pos_seed: int | None = None,
         affinity_random_seed: int | None = None,
         affinity_require_full_input: bool = False,
+        affinity_allow_extended_full_input: bool = False,
         pin_memory: bool = True,
     ) -> None:
         """Initialize the DataModule.
@@ -603,6 +607,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
         self.affinity_ligand_ref_pos_seed = affinity_ligand_ref_pos_seed
         self.affinity_random_seed = affinity_random_seed
         self.affinity_require_full_input = affinity_require_full_input
+        self.affinity_allow_extended_full_input = affinity_allow_extended_full_input
         self.pin_memory = pin_memory
 
     def predict_dataloader(self) -> DataLoader:
@@ -637,6 +642,7 @@ class Boltz2InferenceDataModule(pl.LightningDataModule):
             affinity_ligand_ref_pos_seed=self.affinity_ligand_ref_pos_seed,
             affinity_random_seed=self.affinity_random_seed,
             affinity_require_full_input=self.affinity_require_full_input,
+            affinity_allow_extended_full_input=self.affinity_allow_extended_full_input,
         )
         return DataLoader(
             dataset,

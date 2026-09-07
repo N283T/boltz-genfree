@@ -186,16 +186,17 @@ seed, override
 max_msa_seqs, subsample_msa, num_subsampled_msa
 no_kernels, flash_attn
 affinity_mw_correction, affinity_recycling_steps
-ligand_reference_conformer, etkdg_seed
+ligand_reference_conformer, etkdg_seed, affinity_conditioner_mode
+allow_extended_full_input
 msa_server_url, msa_pairing_strategy and MSA authentication settings
 ```
 
-`affinity_batch_size` values above 1 require `subsample_msa: false`. This keeps
-MSA features stable when a partially completed screen is resumed.
+With a fixed `seed`, MSA rows are selected per record, independently of batch
+size and chunk order. Batched MSA subsampling is supported.
 
 Every run uses Boltz-2, the affinity checkpoint, complete-input receptor
 selection or a reference-derived receptor crop, zero distogram features, one
-record per affinity batch, one nominal diffusion sample, no structure
+or more records per affinity batch, one nominal diffusion sample, no structure
 sampling, and compact output. Ligand conformer generation defaults to `skip`;
 the ligand reference-position tensor is explicitly zeroed in this mode.
 For comparison runs, deterministic ETKDGv3 plus UFF can be enabled with:
@@ -206,7 +207,14 @@ options:
   etkdg_seed: 42
 ```
 
-The mode and effective ETKDG seed are recorded in run provenance, so outputs
+Alternatively, `ligand_reference_conformer: rdkit_2d` generates ligand-local
+2D coordinates without ETKDG. `affinity_conditioner_mode: folded` analytically
+preserves LayerNorm over the full `[pair, zero]` width and both learned
+affine/projection halves, while avoiding the zero-distogram embedding and
+concatenation. The default is `original`; the altered-width `narrow` variant is
+not supported. Folded equivalence is numerical, not guaranteed bitwise equality.
+
+The modes and effective ETKDG seed are recorded in run provenance, so outputs
 from different conformer conditions cannot be resumed together. SDF records
 are canonicalized to SMILES; their supplied coordinates are not reused.
 Affinity recycling defaults to 0 but remains configurable from 0 through 5.
@@ -218,7 +226,7 @@ suppresses structure files, full distogram artifacts, and Lightning logs.
 ## Receptor selection and limits
 
 `screen` validates every library record before generating inputs or starting a
-GPU run. Without `target.crop`, a record passes only when all three conditions
+GPU run. By default, without `target.crop`, a record passes only when all three conditions
 hold:
 
 ```text
@@ -235,7 +243,24 @@ Any hard-limit failure names the affected ligand and stops the whole screen;
 tokenization that every token was retained and fails if an input would be
 truncated.
 
-For a longer receptor, set `target.crop.reference` to a PDB or mmCIF complex.
+For an explicitly uncropped, extended full-receptor run, use:
+
+```yaml
+target:
+  msa: empty  # query-only; the MSA module still runs
+options:
+  allow_extended_full_input: true
+  affinity_recycling_steps: 0
+  ligand_reference_conformer: skip
+  affinity_conditioner_mode: folded
+```
+
+This opt-in removes receptor/combined-token and atom crop budgets, not the
+128-token ligand limit. The runtime must retain every input token. It cannot
+be combined with `target.crop`; memory use depends on the full input size.
+Default limits remain unchanged when the option is absent.
+
+Alternatively, set `target.crop.reference` to a PDB or mmCIF complex.
 For mmCIF references, the declared polymer sequence of `reference_protein` must
 exactly match `target.sequence`. Coordinate-observed residues may be incomplete;
 their `_atom_site.label_seq_id` values map ligand-distance seeds back to the

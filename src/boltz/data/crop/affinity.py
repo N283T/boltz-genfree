@@ -187,9 +187,20 @@ class AffinityCropper(Cropper):
         data: Tokenized,
         max_tokens: int,
         max_atoms: Optional[int] = None,
+        *,
+        allow_extended: bool = False,
     ) -> Tokenized:
         """Select the full receptor and ligand or fail without truncation."""
-        cropped = self.crop_sequence_prefix(
+        cropper = self
+        if allow_extended:
+            # Opt-in full receptor: retain all tokens, without coordinate-based selection.
+            cropper = AffinityCropper(
+                neighborhood_size=self.neighborhood_size,
+                max_tokens_protein=len(data.tokens),
+            )
+            max_tokens = len(data.tokens)
+            max_atoms = None
+        cropped = cropper.crop_sequence_prefix(
             data,
             max_tokens=max_tokens,
             max_atoms=max_atoms,

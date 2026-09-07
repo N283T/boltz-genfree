@@ -325,3 +325,21 @@ def test_run_provenance_records_seeded_etkdg(tmp_path: Path) -> None:
         "reference_positions": "etkdg_v3_uff",
         "etkdg_seed": 17,
     }
+
+
+def test_run_provenance_records_extended_input_and_2d(tmp_path: Path) -> None:
+    provenance = _run_provenance(
+        StFreeRuntimeOptions(
+            cache=tmp_path,
+            ligand_reference_conformer="rdkit_2d",
+            allow_extended_full_input=True,
+        ),
+        runtime_version="test",
+        checkpoint_sha256="abc123",
+    )
+    assert provenance["method"]["allow_extended_full_input"] is True
+    assert provenance["method"]["ligand_reference_conformer"] == {
+        "mode": "rdkit_2d",
+        "reference_positions": "rdkit_2d",
+        "etkdg_seed": None,
+    }
