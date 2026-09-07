@@ -1083,11 +1083,6 @@ def build_screen_options(
         minimum=1,
     )
     subsample_msa = _boolean_option(raw_options, "subsample_msa", True)
-    if affinity_batch_size > 1 and subsample_msa:
-        raise click.UsageError(
-            "options.affinity_batch_size above 1 requires subsample_msa: false "
-            "so resumed records keep identical MSA features."
-        )
 
     runtime = StFreeRuntimeOptions(
         cache=cache,

@@ -847,12 +847,14 @@ def test_screen_options_allow_seeded_etkdg(tmp_path: Path) -> None:
     assert options.runtime.etkdg_seed == 17
 
 
-def test_screen_options_reject_batched_msa_subsampling(tmp_path: Path) -> None:
-    with pytest.raises(click.UsageError, match="requires subsample_msa: false"):
-        build_screen_options(
-            {"affinity_batch_size": 4},
-            config_dir=tmp_path,
-        )
+def test_screen_options_allow_batched_msa_subsampling(tmp_path: Path) -> None:
+    options = build_screen_options(
+        {"affinity_batch_size": 4},
+        config_dir=tmp_path,
+    )
+
+    assert options.runtime.affinity_batch_size == 4
+    assert options.runtime.subsample_msa is True
 
 
 def test_screen_options_reject_unknown_ligand_conformer(tmp_path: Path) -> None:

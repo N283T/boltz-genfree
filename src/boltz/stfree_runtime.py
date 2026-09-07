@@ -75,12 +75,12 @@ def _record_msa_seed(base_seed: int, record_id: str) -> int:
 
 
 def _record_seeded_msa_callback(base_seed: int) -> Callback:
-    """Return a callback that makes MSA sampling independent of chunk order."""
+    """Attach stable per-record MSA seeds to each prediction batch."""
     import torch
     from pytorch_lightning import Callback
 
     class RecordSeededMsaCallback(Callback):
-        """Reset the CPU generator from the stable identity of each record."""
+        """Make MSA sampling independent of batching and chunk order."""
 
         def on_predict_batch_start(
             self,
@@ -91,16 +91,17 @@ def _record_seeded_msa_callback(base_seed: int) -> Callback:
             dataloader_idx: int = 0,  # noqa: ARG002
         ) -> None:
             records = batch.get("record")
-            if not isinstance(records, list) or len(records) != 1:
-                raise RuntimeError(
-                    "Record-seeded MSA sampling requires affinity batch size 1."
-                )
-            record_id = getattr(records[0], "id", None)
-            if not isinstance(record_id, str) or not record_id:
-                raise RuntimeError("Cannot seed MSA sampling without a record ID.")
-            torch.random.default_generator.manual_seed(
-                _record_msa_seed(base_seed, record_id)
-            )
+            if not isinstance(records, list) or not records:
+                raise RuntimeError("Cannot seed MSA sampling without records.")
+            seeds = []
+            for record in records:
+                record_id = getattr(record, "id", None)
+                if not isinstance(record_id, str) or not record_id:
+                    raise RuntimeError(
+                        "Cannot seed MSA sampling without a record ID."
+                    )
+                seeds.append(_record_msa_seed(base_seed, record_id))
+            batch["msa_subsample_seeds"] = torch.tensor(seeds, dtype=torch.int64)
 
     return RecordSeededMsaCallback()
 
