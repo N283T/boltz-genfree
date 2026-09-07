@@ -686,9 +686,10 @@ class Boltz2(LightningModule):
                     else self.msa_module
                 )
                 if not self.skip_msa_forward and msa_module.subsample_msa:
-                    msa_depth = feats["msa"].shape[1]
-                    for _ in range(first_recycling_step):
-                        torch.randperm(msa_depth)
+                    if "msa_subsample_seeds" not in feats:
+                        msa_depth = feats["msa"].shape[1]
+                        for _ in range(first_recycling_step):
+                            torch.randperm(msa_depth)
 
             # Compute pairwise mask
             mask = feats["token_pad_mask"].float()
@@ -726,6 +727,7 @@ class Boltz2(LightningModule):
                             )
 
                         if not self.skip_msa_forward:
+                            feats["msa_subsample_step"] = i
                             if self.is_msa_compiled and not self.training:
                                 msa_module = self.msa_module._orig_mod  # noqa: SLF001
                             else:

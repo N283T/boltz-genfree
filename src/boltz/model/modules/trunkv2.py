@@ -19,6 +19,23 @@ from boltz.model.modules.encodersv2 import (
 from boltz.model.modules.utils import autocast_device_type
 
 
+def _record_seeded_msa_indices(
+    msa_depth: int,
+    sample_count: int,
+    seeds: Tensor,
+    recycling_step: int,
+) -> Tensor:
+    """Return deterministic per-record MSA rows for one recycling step."""
+    row_indices = []
+    for seed in seeds.detach().cpu().tolist():
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(seed)
+        for _ in range(recycling_step + 1):
+            indices = torch.randperm(msa_depth, generator=generator)
+        row_indices.append(indices[:sample_count])
+    return torch.stack(row_indices)
+
+
 class ContactConditioning(nn.Module):
     def __init__(self, token_z: int, cutoff_min: float, cutoff_max: float):
         super().__init__()
@@ -631,25 +648,52 @@ class MSAModule(nn.Module):
 
         # Load relevant features
         msa = feats["msa"]
-        msa = torch.nn.functional.one_hot(msa, num_classes=const.num_tokens)
-        has_deletion = feats["has_deletion"].unsqueeze(-1)
-        deletion_value = feats["deletion_value"].unsqueeze(-1)
-        is_paired = feats["msa_paired"].unsqueeze(-1)
+        has_deletion = feats["has_deletion"]
+        deletion_value = feats["deletion_value"]
+        is_paired = feats["msa_paired"]
         msa_mask = feats["msa_mask"]
         token_mask = feats["token_pad_mask"].float()
         token_mask = token_mask[:, :, None] * token_mask[:, None, :]
+
+        # Subsample before one-hot expansion to keep peak memory proportional
+        # to the requested MSA depth. Record-seeded batches select exactly the
+        # same rows for each record regardless of batch size or chunk order.
+        if self.subsample_msa:
+            sample_count = min(self.num_subsampled_msa, msa.shape[1])
+            seeds = feats.get("msa_subsample_seeds")
+            if seeds is None:
+                msa_indices = torch.randperm(msa.shape[1])[:sample_count]
+                msa = msa[:, msa_indices]
+                has_deletion = has_deletion[:, msa_indices]
+                deletion_value = deletion_value[:, msa_indices]
+                is_paired = is_paired[:, msa_indices]
+                msa_mask = msa_mask[:, msa_indices]
+            else:
+                if seeds.ndim != 1 or seeds.shape[0] != msa.shape[0]:
+                    raise RuntimeError(
+                        "MSA subsample seeds must contain one value per batch row."
+                    )
+                step = int(feats.get("msa_subsample_step", 0))
+                msa_indices = _record_seeded_msa_indices(
+                    msa.shape[1], sample_count, seeds, step
+                ).to(msa.device)
+                batch_indices = torch.arange(msa.shape[0], device=msa.device)[:, None]
+                msa = msa[batch_indices, msa_indices]
+                has_deletion = has_deletion[batch_indices, msa_indices]
+                deletion_value = deletion_value[batch_indices, msa_indices]
+                is_paired = is_paired[batch_indices, msa_indices]
+                msa_mask = msa_mask[batch_indices, msa_indices]
+
+        msa = torch.nn.functional.one_hot(msa, num_classes=const.num_tokens)
+        has_deletion = has_deletion.unsqueeze(-1)
+        deletion_value = deletion_value.unsqueeze(-1)
+        is_paired = is_paired.unsqueeze(-1)
 
         # Compute MSA embeddings
         if self.use_paired_feature:
             m = torch.cat([msa, has_deletion, deletion_value, is_paired], dim=-1)
         else:
             m = torch.cat([msa, has_deletion, deletion_value], dim=-1)
-
-        # Subsample the MSA
-        if self.subsample_msa:
-            msa_indices = torch.randperm(msa.shape[1])[: self.num_subsampled_msa]
-            m = m[:, msa_indices]
-            msa_mask = msa_mask[:, msa_indices]
 
         # Compute input projections
         m = self.msa_proj(m)

@@ -620,6 +620,61 @@ def test_reference_crop_library_fixed_uses_one_receptor_selection(
     assert {item["ligand_tokens_reserved"] for item in crop_documents} == {60}
 
 
+def test_reference_crop_library_fixed_accepts_explicit_library_budget(
+    tmp_path: Path,
+) -> None:
+    reference = _write_reference(tmp_path, 230)
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO", "CCCC"]},
+        sequence="A" * 230,
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_protein": "A",
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
+        "budget": "library_fixed",
+        "library_ligand_tokens": 60,
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    prepared = prepare_screen(config_path)
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    plan = json.loads(prepared.plan_path.read_text(encoding="utf-8"))
+    crop_documents = [
+        json.loads(Path(record["crop"]["path"]).read_text(encoding="utf-8"))
+        for record in manifest["records"]
+    ]
+
+    assert manifest["target"]["crop"]["library_ligand_tokens"] == 60
+    assert plan["target"]["receptor_selection"]["library_ligand_tokens"] == 60
+    assert {item["ligand_tokens_reserved"] for item in crop_documents} == {60}
+
+
+def test_reference_crop_library_fixed_rejects_undersized_explicit_budget(
+    tmp_path: Path,
+) -> None:
+    reference = _write_reference(tmp_path, 230)
+    config_path = _write_config(
+        tmp_path,
+        {"smiles": ["CCO", "C" * 60]},
+        sequence="A" * 230,
+    )
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["target"]["crop"] = {
+        "reference": reference.name,
+        "reference_protein": "A",
+        "reference_ligand": {"chain": "L", "residue": 1, "ccd": "LIG"},
+        "budget": "library_fixed",
+        "library_ligand_tokens": 59,
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(click.UsageError, match="at least the largest ligand"):
+        prepare_screen(config_path)
+
+
 def test_reference_crop_reuses_selection_for_equal_ligand_sizes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -847,12 +902,14 @@ def test_screen_options_allow_seeded_etkdg(tmp_path: Path) -> None:
     assert options.runtime.etkdg_seed == 17
 
 
-def test_screen_options_reject_batched_msa_subsampling(tmp_path: Path) -> None:
-    with pytest.raises(click.UsageError, match="requires subsample_msa: false"):
-        build_screen_options(
-            {"affinity_batch_size": 4},
-            config_dir=tmp_path,
-        )
+def test_screen_options_allow_batched_msa_subsampling(tmp_path: Path) -> None:
+    options = build_screen_options(
+        {"affinity_batch_size": 4},
+        config_dir=tmp_path,
+    )
+
+    assert options.runtime.affinity_batch_size == 4
+    assert options.runtime.subsample_msa is True
 
 
 def test_screen_options_reject_unknown_ligand_conformer(tmp_path: Path) -> None:

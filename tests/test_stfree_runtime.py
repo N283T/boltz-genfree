@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import click
@@ -105,27 +106,26 @@ def test_record_seeded_msa_callback_ignores_prior_rng_state() -> None:
     callback = _record_seeded_msa_callback(17)
     batch = {"record": [_record()]}
 
-    torch.random.default_generator.manual_seed(1)
     callback.on_predict_batch_start(None, None, batch, 0)
-    first = torch.randperm(128)
+    first = batch["msa_subsample_seeds"].clone()
 
-    torch.random.default_generator.manual_seed(999)
     callback.on_predict_batch_start(None, None, batch, 0)
-    second = torch.randperm(128)
+    second = batch["msa_subsample_seeds"].clone()
 
     assert torch.equal(first, second)
 
 
-def test_record_seeded_msa_callback_rejects_batched_records() -> None:
+def test_record_seeded_msa_callback_supports_batched_records() -> None:
     callback = _record_seeded_msa_callback(17)
+    second = replace(_record(), id="record-2")
+    batch = {"record": [_record(), second]}
 
-    with pytest.raises(RuntimeError, match="batch size 1"):
-        callback.on_predict_batch_start(
-            None,
-            None,
-            {"record": [_record(), _record()]},
-            0,
-        )
+    callback.on_predict_batch_start(None, None, batch, 0)
+
+    assert batch["msa_subsample_seeds"].tolist() == [
+        _record_msa_seed(17, "record"),
+        _record_msa_seed(17, "record-2"),
+    ]
 
 
 def test_stfree_model_pruning_removes_only_unreachable_modules() -> None:
