@@ -40,6 +40,7 @@ _CROP_KEYS = {
     "reference_protein",
     "reference_ligand",
     "budget",
+    "library_ligand_tokens",
 }
 _REFERENCE_LIGAND_KEYS = {"chain", "residue", "ccd"}
 _LIGAND_SOURCE_KEYS = {"smiles", "csv", "sdf", "ccd"}
@@ -174,7 +175,10 @@ def _crop_reference_provenance(path: Path, reference_sha256: str) -> dict[str, o
             f"Crop bootstrap provenance is not complete: {result_path}"
         )
     result_reference = result.get("reference")
-    if not isinstance(result_reference, str) or Path(result_reference).resolve() != path:
+    if (
+        not isinstance(result_reference, str)
+        or Path(result_reference).resolve() != path
+    ):
         raise click.UsageError(
             f"Crop bootstrap provenance references a different file: {result_path}"
         )
@@ -565,6 +569,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     crop_reference_sha256: str | None = None
     crop_reference_provenance: dict[str, object] | None = None
     crop_policy: str | None = None
+    configured_library_ligand_tokens: int | None = None
     if crop_config_value is not None:
         crop_config = _mapping(crop_config_value, "target.crop")
         unknown_crop = set(crop_config) - _CROP_KEYS
@@ -587,6 +592,24 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             raise click.UsageError(
                 "target.crop.budget must be per_ligand or library_fixed."
             )
+        configured_library_ligand_tokens = crop_config.get("library_ligand_tokens")
+        if configured_library_ligand_tokens is not None:
+            if crop_policy != "library_fixed":
+                raise click.UsageError(
+                    "target.crop.library_ligand_tokens requires "
+                    "target.crop.budget=library_fixed."
+                )
+            if (
+                not isinstance(configured_library_ligand_tokens, int)
+                or isinstance(configured_library_ligand_tokens, bool)
+                or not 1
+                <= configured_library_ligand_tokens
+                <= _MAX_LIGAND_TOKENS
+            ):
+                raise click.UsageError(
+                    "target.crop.library_ligand_tokens must be an integer "
+                    f"between 1 and {_MAX_LIGAND_TOKENS}."
+                )
         protein_chain = crop_config.get("reference_protein")
         if protein_chain is not None and (
             not isinstance(protein_chain, str) or not protein_chain
@@ -661,6 +684,15 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
         ensure_ccd_cache=ensure_ccd_cache,
         reference_crop=crop_reference is not None,
     )
+    if (
+        configured_library_ligand_tokens is not None
+        and configured_library_ligand_tokens < max(ligand_token_counts)
+    ):
+        raise click.UsageError(
+            "target.crop.library_ligand_tokens must be at least the largest "
+            "ligand in this screen "
+            f"({max(ligand_token_counts)})."
+        )
 
     chunk_size = config.get("chunk_size", 1000)
     if (
@@ -689,7 +721,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
     expected_files: dict[Path, str] = {}
     chunk_dirs: list[Path] = []
     library_ligand_tokens = (
-        max(ligand_token_counts)
+        configured_library_ligand_tokens or max(ligand_token_counts)
         if crop_reference is not None and crop_policy == "library_fixed"
         else None
     )
@@ -829,6 +861,10 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             "budget": crop_policy,
             "neighborhood_size": 10,
         }
+        if library_ligand_tokens is not None:
+            manifest["target"]["crop"]["library_ligand_tokens"] = (
+                library_ligand_tokens
+            )
     if manifest_path.is_file():
         existing = json.loads(manifest_path.read_text(encoding="utf-8"))
         if existing != manifest:
@@ -1209,6 +1245,10 @@ def build_screen_plan(
             "reference": crop["reference"],
             "reference_sha256": crop["reference_sha256"],
         }
+        if "library_ligand_tokens" in crop:
+            receptor_selection["library_ligand_tokens"] = crop[
+                "library_ligand_tokens"
+            ]
     else:
         receptor_selection = {
             "mode": "complete_input",
