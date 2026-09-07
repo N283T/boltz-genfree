@@ -132,3 +132,15 @@ def test_sequence_window_crop_rejects_start_outside_receptor():
             protein_start=4,
             max_tokens=5,
         )
+
+
+def test_extended_full_screen_keeps_all_tokens_despite_default_budgets():
+    data = _sequence_tokenized()
+    cropped = AffinityCropper(max_tokens_protein=2).crop_full_screen(
+        data,
+        max_tokens=3,
+        max_atoms=1,
+        allow_extended=True,
+    )
+    np.testing.assert_array_equal(cropped.tokens, data.tokens)
+    np.testing.assert_array_equal(cropped.bonds, data.bonds)

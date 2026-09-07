@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from pytorch_lightning import Callback
 
 _DISTOGRAM_MODE = "zero_distogram_features"
-_LIGAND_CONFORMER_MODES = {"skip", "etkdg"}
+_LIGAND_CONFORMER_MODES = {"skip", "etkdg", "rdkit_2d"}
 _RECORD_SEED_SCHEME = "sha256_record_v1"
 _UNUSED_STFREE_MODEL_MODULES = (
     "structure_module",
@@ -55,6 +55,8 @@ class StFreeRuntimeOptions:
     affinity_mw_correction: bool = False
     affinity_recycling_steps: int = 0
     ligand_reference_conformer: str = "skip"
+    allow_extended_full_input: bool = False
+    affinity_conditioner_mode: str = "original"
     etkdg_seed: int = 42
 
 
@@ -97,9 +99,7 @@ def _record_seeded_msa_callback(base_seed: int) -> Callback:
             for record in records:
                 record_id = getattr(record, "id", None)
                 if not isinstance(record_id, str) or not record_id:
-                    raise RuntimeError(
-                        "Cannot seed MSA sampling without a record ID."
-                    )
+                    raise RuntimeError("Cannot seed MSA sampling without a record ID.")
                 seeds.append(_record_msa_seed(base_seed, record_id))
             batch["msa_subsample_seeds"] = torch.tensor(seeds, dtype=torch.int64)
 
@@ -276,7 +276,11 @@ def _run_provenance(
                 "reference_positions": (
                     "zero"
                     if options.ligand_reference_conformer == "skip"
-                    else "etkdg_v3_uff"
+                    else (
+                        "rdkit_2d"
+                        if options.ligand_reference_conformer == "rdkit_2d"
+                        else "etkdg_v3_uff"
+                    )
                 ),
                 "etkdg_seed": (
                     options.etkdg_seed
@@ -285,6 +289,8 @@ def _run_provenance(
                 ),
             },
             "structure_generation_active": False,
+            "allow_extended_full_input": options.allow_extended_full_input,
+            "affinity_conditioner_mode": options.affinity_conditioner_mode,
             "affinity_recycling_steps": options.affinity_recycling_steps,
             "affinity_batch_size": options.affinity_batch_size,
             "affinity_mw_correction": options.affinity_mw_correction,
@@ -590,6 +596,13 @@ def create_stfree_runtime_session(
         ema=False,
         **stfree_model_kwargs(options),
     )
+    from boltz.model.modules.affinity import AffinityModule
+
+    if options.affinity_conditioner_mode not in {"original", "folded"}:
+        raise click.UsageError("affinity_conditioner_mode must be original or folded.")
+    for module in model.modules():
+        if isinstance(module, AffinityModule):
+            module.fold_zero_conditioner = options.affinity_conditioner_mode == "folded"
     _prune_stfree_model(model)
     gc.collect()
     if torch.cuda.is_available():
@@ -761,6 +774,7 @@ def run_stfree_inputs(
         ),
         affinity_random_seed=options.seed,
         affinity_require_full_input=receptor_crop_indices_dir is None,
+        affinity_allow_extended_full_input=options.allow_extended_full_input,
         pin_memory=options.accelerator not in ("cpu", "mps"),
     )
     click.echo(f"Running structure-free affinity for {len(pending.records)} record(s).")

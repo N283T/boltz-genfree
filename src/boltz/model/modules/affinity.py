@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 import boltz.model.layers.initialize as init
 from boltz.model.layers.pairformer import PairformerNoSeqModule
@@ -13,6 +14,32 @@ from boltz.model.modules.affinity_distogram import (
 )
 from boltz.model.modules.encodersv2 import PairwiseConditioning
 from boltz.model.modules.utils import LinearNoBias
+
+
+def folded_zero_conditioning(conditioner, z_trunk):
+    """Preserve LayerNorm([P, 0]) and both projection halves without concatenation.
+
+    Uses the full normalization width, including the zero-channel affine terms.
+    This is the folded (not narrow) implementation validated in followup_512.
+    """
+    ln, proj = conditioner.dim_pairwise_init_proj
+    c = z_trunk.shape[-1]
+    if tuple(ln.normalized_shape) != (2 * c,):
+        raise ValueError("Folded zero conditioning requires two equal channel halves.")
+    p = z_trunk.float()
+    mean = p.mean(-1, keepdim=True) / 2
+    var = ((p - mean).square().mean(-1, keepdim=True) + mean.square()) / 2
+    inv = torch.rsqrt(var + ln.eps)
+    wp = proj.weight[:, :c].float() * ln.weight[:c].float()
+    all_gamma = proj.weight.float() * ln.weight.float()
+    bias = F.linear(ln.bias.float(), proj.weight.float())
+    if proj.bias is not None:
+        bias = bias + proj.bias.float()
+    z = (F.linear(p, wp) - mean * all_gamma.sum(-1)) * inv + bias
+    z = z.to(z_trunk.dtype)
+    for transition in conditioner.transitions:
+        z = transition(z) + z
+    return z
 
 
 class GaussianSmearing(torch.nn.Module):
@@ -84,6 +111,7 @@ class AffinityModule(nn.Module):
         super().__init__()
         boundaries = torch.linspace(2, max_dist, num_dist_bins - 1)
         self.register_buffer("boundaries", boundaries)
+        self.fold_zero_conditioner = False
         self.dist_bin_pairwise_embed = nn.Embedding(num_dist_bins, token_z)
         init.gating_init_(self.dist_bin_pairwise_embed.weight)
 
@@ -182,25 +210,35 @@ class AffinityModule(nn.Module):
                 normal_std=random_distance_std,
                 random_pair_scope=random_pair_scope,
             )
-        distogram = self.dist_bin_pairwise_embed(distogram_bins)
-        distogram = intervene_affinity_distogram_features(
-            distogram,
-            self.dist_bin_pairwise_embed.weight,
-            distogram_mode,
+        folded = (
+            self.fold_zero_conditioner and distogram_mode == "zero_distogram_features"
         )
+        if not folded:
+            distogram = self.dist_bin_pairwise_embed(distogram_bins)
+            distogram = intervene_affinity_distogram_features(
+                distogram,
+                self.dist_bin_pairwise_embed.weight,
+                distogram_mode,
+            )
         z, conditioner_z = intervene_affinity_pair_features(z, distogram_mode)
 
         if uses_affinity_conditioning(distogram_mode):
-            conditioner_update = self.pairwise_conditioner(
-                z_trunk=conditioner_z,
-                token_rel_pos_feats=distogram,
-            )
+            if folded:
+                conditioner_update = folded_zero_conditioning(
+                    self.pairwise_conditioner,
+                    conditioner_z,
+                )
+            else:
+                conditioner_update = self.pairwise_conditioner(
+                    z_trunk=conditioner_z,
+                    token_rel_pos_feats=distogram,
+                )
             z = z + conditioner_update
         else:
             conditioner_update = torch.zeros_like(z)
         if capture_representations:
-            representation_output["pooled_conditioner_update"] = (
-                pool_affinity_pairs(conditioner_update, feats, multiplicity)
+            representation_output["pooled_conditioner_update"] = pool_affinity_pairs(
+                conditioner_update, feats, multiplicity
             )
             representation_output["pooled_conditioned"] = pool_affinity_pairs(
                 z, feats, multiplicity
@@ -231,9 +269,7 @@ class AffinityModule(nn.Module):
         out_dict.update(representation_output)
         if return_distogram:
             out_dict["affinity_distogram_bins"] = distogram_bins
-            out_dict["affinity_distogram_intervened_pair_mask"] = (
-                intervened_pair_mask
-            )
+            out_dict["affinity_distogram_intervened_pair_mask"] = intervened_pair_mask
 
         return out_dict
 

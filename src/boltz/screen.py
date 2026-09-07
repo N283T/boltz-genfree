@@ -67,6 +67,8 @@ _SCREEN_OPTION_KEYS = {
     "affinity_mw_correction",
     "affinity_recycling_steps",
     "ligand_reference_conformer",
+    "allow_extended_full_input",
+    "affinity_conditioner_mode",
     "etkdg_seed",
     "msa_server_url",
     "msa_pairing_strategy",
@@ -423,10 +425,15 @@ def _validate_full_screen(
     cache: Path,
     ensure_ccd_cache: Callable[[Path], None] | None,
     reference_crop: bool = False,
+    allow_extended_full_input: bool = False,
 ) -> list[int]:
     """Validate ligand limits and, without a reference, the complete receptor."""
     target_tokens = len(sequence)
-    if not reference_crop and target_tokens > _MAX_SEQUENCE_PREFIX_TOKENS:
+    if (
+        not reference_crop
+        and not allow_extended_full_input
+        and target_tokens > _MAX_SEQUENCE_PREFIX_TOKENS
+    ):
         raise click.UsageError(
             "Full-screen validation failed: "
             f"target_tokens={target_tokens} exceeds the 200-token receptor limit."
@@ -456,7 +463,11 @@ def _validate_full_screen(
         if ligand_tokens > _MAX_LIGAND_TOKENS:
             reasons.append(f"ligand_tokens={ligand_tokens} exceeds 128")
         total_tokens = target_tokens + ligand_tokens
-        if not reference_crop and total_tokens > _MAX_AFFINITY_TOKENS:
+        if (
+            not reference_crop
+            and not allow_extended_full_input
+            and total_tokens > _MAX_AFFINITY_TOKENS
+        ):
             reasons.append(
                 f"target_tokens={target_tokens} + ligand_tokens={ligand_tokens} "
                 f"= {total_tokens} exceeds 256"
@@ -602,9 +613,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             if (
                 not isinstance(configured_library_ligand_tokens, int)
                 or isinstance(configured_library_ligand_tokens, bool)
-                or not 1
-                <= configured_library_ligand_tokens
-                <= _MAX_LIGAND_TOKENS
+                or not 1 <= configured_library_ligand_tokens <= _MAX_LIGAND_TOKENS
             ):
                 raise click.UsageError(
                     "target.crop.library_ligand_tokens must be an integer "
@@ -677,12 +686,17 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             crop_reference_path,
             crop_reference_sha256,
         )
+    if crop_reference is not None and screen_options.runtime.allow_extended_full_input:
+        raise click.UsageError(
+            "allow_extended_full_input cannot be combined with target.crop."
+        )
     ligand_token_counts = _validate_full_screen(
         sequence,
         ligands,
         cache=_screen_cache_path(options, base_dir),
         ensure_ccd_cache=ensure_ccd_cache,
         reference_crop=crop_reference is not None,
+        allow_extended_full_input=screen_options.runtime.allow_extended_full_input,
     )
     if (
         configured_library_ligand_tokens is not None
@@ -862,9 +876,7 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             "neighborhood_size": 10,
         }
         if library_ligand_tokens is not None:
-            manifest["target"]["crop"]["library_ligand_tokens"] = (
-                library_ligand_tokens
-            )
+            manifest["target"]["crop"]["library_ligand_tokens"] = library_ligand_tokens
     if manifest_path.is_file():
         existing = json.loads(manifest_path.read_text(encoding="utf-8"))
         if existing != manifest:
@@ -1108,9 +1120,9 @@ def build_screen_options(
         "ligand_reference_conformer",
         "skip",
     )
-    if ligand_reference_conformer not in {"skip", "etkdg"}:
+    if ligand_reference_conformer not in {"skip", "etkdg", "rdkit_2d"}:
         raise click.UsageError(
-            "options.ligand_reference_conformer must be skip or etkdg."
+            "options.ligand_reference_conformer must be skip, etkdg, or rdkit_2d."
         )
     affinity_batch_size = _integer_option(
         raw_options,
@@ -1120,6 +1132,11 @@ def build_screen_options(
     )
     subsample_msa = _boolean_option(raw_options, "subsample_msa", True)
 
+    conditioner_mode = raw_options.get("affinity_conditioner_mode", "original")
+    if conditioner_mode not in {"original", "folded"}:
+        raise click.UsageError(
+            "options.affinity_conditioner_mode must be original or folded."
+        )
     runtime = StFreeRuntimeOptions(
         cache=cache,
         affinity_checkpoint=checkpoint,
@@ -1163,6 +1180,10 @@ def build_screen_options(
             maximum=5,
         ),
         ligand_reference_conformer=ligand_reference_conformer,
+        affinity_conditioner_mode=conditioner_mode,
+        allow_extended_full_input=_boolean_option(
+            raw_options, "allow_extended_full_input", False
+        ),
         etkdg_seed=_integer_option(
             raw_options,
             "etkdg_seed",
@@ -1198,10 +1219,7 @@ def _screen_score_matches(
     record_id = str(record["record_id"])
     prediction_dirs = (
         runs_dir / "boltz_results_screen" / "predictions" / record_id,
-        runs_dir
-        / f"boltz_results_{record['chunk']}"
-        / "predictions"
-        / record_id,
+        runs_dir / f"boltz_results_{record['chunk']}" / "predictions" / record_id,
     )
     return sorted(
         score
@@ -1246,9 +1264,7 @@ def build_screen_plan(
             "reference_sha256": crop["reference_sha256"],
         }
         if "library_ligand_tokens" in crop:
-            receptor_selection["library_ligand_tokens"] = crop[
-                "library_ligand_tokens"
-            ]
+            receptor_selection["library_ligand_tokens"] = crop["library_ligand_tokens"]
     else:
         receptor_selection = {
             "mode": "complete_input",
@@ -1294,6 +1310,8 @@ def build_screen_plan(
             "num_subsampled_msa": runtime.num_subsampled_msa,
             "affinity_recycling_steps": runtime.affinity_recycling_steps,
             "ligand_reference_conformer": runtime.ligand_reference_conformer,
+            "allow_extended_full_input": runtime.allow_extended_full_input,
+            "affinity_conditioner_mode": runtime.affinity_conditioner_mode,
             "checkpoint": str(checkpoint.expanduser().resolve()),
         },
         "outputs": {
