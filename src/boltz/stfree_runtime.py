@@ -118,7 +118,10 @@ def _patch_torch_checkpoint_loading(torch: object) -> None:
         return
 
     def patched_load(*args: object, **kwargs: object) -> object:
-        kwargs.setdefault("weights_only", False)
+        # Lightning may pass its unspecified default explicitly as None.
+        # Preserve explicit True for the restricted adapter loader.
+        if kwargs.get("weights_only") is None:
+            kwargs["weights_only"] = False
         return torch_load(*args, **kwargs)
 
     patched_load._boltz_patched = True  # type: ignore[attr-defined]

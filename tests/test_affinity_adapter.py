@@ -376,6 +376,16 @@ class UnsafePickle:
         return eval, ("2 + 2",)
 
 
+def test_trusted_lightning_shim_handles_explicit_unspecified_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(torch, "load", lambda *a, **kw: calls.append(kw))
+    _patch_torch_checkpoint_loading(torch)
+    torch.load("unused", weights_only=None)
+    torch.load("unused", weights_only=True)
+    torch.load("unused", weights_only=False)
+    assert [call["weights_only"] for call in calls] == [False, True, False]
+
+
 def test_adapter_restricted_unpickler_is_not_bypassed_by_runtime_shim(
     example, monkeypatch
 ):
