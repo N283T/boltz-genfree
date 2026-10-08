@@ -61,7 +61,7 @@ GenFree contexts and the two complete affinity modules updated while the trunk
 remains frozen. AP and top-100 recovery increased on both targets, but GSK3B
 AUROC decreased. These are exploratory results, not guarantees for other targets.
 
-**Adapter import/loading is implemented and CPU-tested; the training command is
+**Adapter import/loading is CPU-tested and has passed a bounded two-target GPU deployment smoke; the training command is
 not yet integrated.** Convert research head-only weights with
 `boltz-genfree adapter import-heads --checkpoint final_heads.pt --metadata metadata.json --output adapter_dir`,
 and verify them with `boltz-genfree adapter inspect adapter_dir`. The conversion
@@ -80,7 +80,7 @@ alone do not prove that arbitrary user-provided training provenance is true.
 
 Existing NS5/GSK3B weights have passed CPU conversion and cached-context head
 replay against their original serialization with zero output difference.
-This is not a new screening benchmark or full-CLI/GPU validation. There is still
+Full public-CLI CUDA/kernel-enabled scoring passed for two original-library inputs per target at product revision `9ae7e6f` (PBS2523982). This is not a full-screen accuracy benchmark or a general GPU parity guarantee. There is still
 no `boltz-genfree finetune` command: native context extraction and the bounded
 label-safe trainer remain next steps. See the [integration boundary](docs/finetuning.md).
 

@@ -1,7 +1,7 @@
 # Optional GenFree fine-tuning: integration boundary
 
 Status: versioned adapter import/inspection and screening integration are
-implemented and CPU-tested. Native context extraction and a general training
+implemented and CPU-tested, with a bounded two-target public-CLI GPU deployment smoke. Native context extraction and a general training
 command remain pending. No `finetune` command or universal performance guarantee
 is advertised.
 
@@ -46,8 +46,15 @@ adapter loader's explicit restricted-unpickler setting.
 CPU validation includes the existing real NS5/GSK3B weight files (520 tensors
 each), actual architecture settings from the SHA-checked released checkpoint,
 and one previously saved independent context per target. Adapter-loaded and
-original-weight head forwards were bitwise equal on these CPU inputs. Full
-public-CLI trunk execution and actual GPU kernels have not been tested for FT.
+original-weight head forwards were bitwise equal on these CPU inputs. At product
+revision `9ae7e6f`, full public-CLI CUDA/kernel-enabled FT scoring passed for two
+original-library inputs each on NS5/GSK3B (PBS2523982, exit0). Geometry-contract
+hooks verified zero distogram, no generated coordinates, pruned structure
+modules and all 520 adapter tensors. The preceding load failure (PBS2523931)
+was retained and repaired by treating Lightning's unspecified `weights_only=None`
+as the trusted full-checkpoint default, while preserving explicit `True` for
+restricted adapter loads. This deployment smoke is not a new accuracy benchmark,
+unseen-target guarantee or GPU numerical-equivalence claim.
 
 ## Remaining product work
 
