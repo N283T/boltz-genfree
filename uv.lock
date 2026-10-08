@@ -260,7 +260,7 @@ wheels = [
 ]
 
 [[package]]
-name = "boltz-stfree"
+name = "boltz-genfree"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

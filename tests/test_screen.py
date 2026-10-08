@@ -919,7 +919,7 @@ def test_screen_options_reject_unknown_ligand_conformer(tmp_path: Path) -> None:
 
 
 def test_screen_options_reject_structure_route_options(tmp_path: Path) -> None:
-    with pytest.raises(click.UsageError, match="Unknown Boltz-StFree options"):
+    with pytest.raises(click.UsageError, match="Unknown Boltz-GenFree options"):
         build_screen_options(
             {"affinity_distogram_modes": ["control"]},
             config_dir=tmp_path,
@@ -1092,7 +1092,7 @@ def test_screen_cli_prepare_only_validates_stfree_options(tmp_path: Path) -> Non
     result = CliRunner().invoke(cli, ["screen", str(config_path), "--prepare-only"])
 
     assert result.exit_code != 0
-    assert "Unknown Boltz-StFree options" in result.output
+    assert "Unknown Boltz-GenFree options" in result.output
     assert not (tmp_path / "output").exists()
 
 

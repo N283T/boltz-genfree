@@ -44,16 +44,12 @@ BOLTZ2_AFFINITY_URL_WITH_FALLBACK = [
 
 def _runtime_version() -> str:
     """Return this distribution version with source-tree fallbacks."""
-    try:
-        return _pkg_version("boltz-stfree")
-    except PackageNotFoundError:
+    for distribution in ("boltz-genfree", "boltz-stfree", "boltz-community", "boltz"):
         try:
-            return _pkg_version("boltz-community")
+            return _pkg_version(distribution)
         except PackageNotFoundError:
-            try:
-                return _pkg_version("boltz")
-            except PackageNotFoundError:
-                return "0+unknown"
+            continue
+    return "0+unknown"
 
 
 def _resolved_path_for_message(path: Path) -> Path:
@@ -1084,10 +1080,45 @@ def process_inputs(
 
 
 @click.group()
-@click.version_option(version=_runtime_version(), prog_name="boltz-stfree")
+@click.version_option(version=_runtime_version(), prog_name="boltz-genfree")
 def cli() -> None:
-    """Boltz-StFree structure-free affinity screening runtime."""
+    """Boltz-GenFree structure-generation-free affinity screening runtime."""
     return
+
+
+@cli.group("adapter")
+def adapter_cli() -> None:
+    """Import and inspect optional affinity-only adapters (CPU; no inference)."""
+
+
+@adapter_cli.command("import-heads")
+@click.option("--checkpoint", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
+@click.option("--metadata", type=click.Path(exists=True, dir_okay=False, path_type=Path), required=True)
+@click.option("--output", type=click.Path(path_type=Path), required=True)
+def import_heads_cli(checkpoint: Path, metadata: Path, output: Path) -> None:
+    """Convert a research final_heads.pt; never overwrite existing artifacts."""
+    from boltz.affinity_adapter import import_research_heads
+
+    try:
+        adapter = import_research_heads(checkpoint, json.loads(metadata.read_text()), output)
+    except (OSError, ValueError, TypeError) as error:
+        raise click.ClickException(f"Cannot import affinity adapter: {error}") from error
+    click.echo(json.dumps({"adapter": str(adapter.path), "identity": adapter.identity(),
+                           "tensor_count": len(adapter.state), "inference_performed": False}, indent=2))
+
+
+@adapter_cli.command("inspect")
+@click.argument("path", type=click.Path(exists=True, file_okay=False, path_type=Path))
+def inspect_adapter_cli(path: Path) -> None:
+    """Verify manifest, hashes and tensor inventory without a model or GPU."""
+    from boltz.affinity_adapter import load_adapter
+
+    try:
+        adapter = load_adapter(path)
+    except (OSError, ValueError) as error:
+        raise click.ClickException(f"Invalid affinity adapter: {error}") from error
+    click.echo(json.dumps({"identity": adapter.identity(), "manifest": adapter.manifest,
+                           "tensor_count": len(adapter.state), "inference_performed": False}, indent=2))
 
 
 @cli.command(context_settings={"show_default": True})
@@ -1164,7 +1195,7 @@ def screen(config: Path, prepare_only: bool) -> None:
             options=screen_options.runtime,
         )
 
-        click.echo("Loading one StFree model for the complete screen.")
+        click.echo("Loading one GenFree model for the complete screen.")
         runtime_session = create_stfree_runtime_session(screen_options.runtime)
         progress.set_stage("running", "Running complete screen")
         click.echo(f"Running one unified screen for {len(input_paths)} inputs.")

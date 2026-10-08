@@ -3,10 +3,10 @@ requires = ["setuptools >= 77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "boltz-stfree"
+name = "boltz-genfree"
 version = "0.1.0"
 requires-python = ">=3.10"
-description = "Structure-free Boltz-2 affinity screening"
+description = "Structure-generation-free Boltz-2 affinity screening"
 readme = "README.md"
 license = "MIT"
 authors = [
@@ -25,7 +25,7 @@ keywords = [
     "drug-discovery",
     "virtual-screening",
     "binding-affinity",
-    "structure-free",
+    "structure-generation-free",
     "deep-learning",
 ]
 classifiers = [
@@ -61,15 +61,18 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/N283T/boltz-stfree"
-Source = "https://github.com/N283T/boltz-stfree"
-Issues = "https://github.com/N283T/boltz-stfree/issues"
-Changelog = "https://github.com/N283T/boltz-stfree/releases"
+Homepage = "https://github.com/N283T/boltz-genfree"
+Source = "https://github.com/N283T/boltz-genfree"
+Issues = "https://github.com/N283T/boltz-genfree/issues"
+Changelog = "https://github.com/N283T/boltz-genfree/releases"
 Research-Runtime = "https://github.com/N283T/boltz2-affinity-interventions-boltz"
 Community-Upstream = "https://github.com/Novel-Therapeutics/boltz-community"
 Upstream = "https://github.com/jwohlwend/boltz"
 
 [project.scripts]
+boltz-genfree = "boltz.main:cli"
+boltz-genfree-fix-macos-libomp = "boltz.scripts.fix_macos_libomp:main"
+# Legacy entry points remain aliases for existing environments.
 boltz-stfree = "boltz.main:cli"
 boltz-stfree-fix-macos-libomp = "boltz.scripts.fix_macos_libomp:main"
 
