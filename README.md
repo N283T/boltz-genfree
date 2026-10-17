@@ -1,8 +1,8 @@
-# Boltz-StFree
+# Boltz-GenFree
 
-Structure-free Boltz-2 affinity screening without complex structure generation.
+Structure-generation-free Boltz-2 affinity screening.
 
-Boltz-StFree runs the released Boltz-2 affinity trunk and heads directly from
+Boltz-GenFree (GenFree) runs the released Boltz-2 affinity trunk and heads directly from
 processed receptor and ligand inputs. It skips structure sampling, replaces the
 local affinity distogram with coordinate-independent zero features, and writes
 compact scores suitable for recoverable virtual screens.
@@ -16,7 +16,7 @@ artifacts.
 
 ## Status
 
-`boltz-stfree screen` is the structure-free screening interface. It accepts one
+`boltz-genfree screen` is the structure-free screening interface. It accepts one
 protein target and a ligand library, expands the library into independent 1:1
 protein-ligand records, runs recoverable structure-free chunks, and aggregates
 the compact JSON results into one `scores.csv`. When no suitable holo reference
@@ -33,19 +33,70 @@ supplied reference complex. The reference is used only to choose receptor
 sequence blocks. It does not provide a ligand pose or a structure-derived
 distogram to the model.
 
+## Naming and compatibility
+
+GenFree means **structure-generation-free per-candidate screening**, not freedom
+from all geometric or structural prior information. External receptor references,
+MSA inputs and ligand-local coordinates remain explicit input choices. The
+optional `bootstrap-reference` operation generates a reusable structure and must
+be reported separately.
+
+The repository and distribution are now `boltz-genfree`. The legacy commands
+`boltz-stfree` and `boltz-stfree-fix-macos-libomp` remain compatibility aliases.
+Existing `.boltz-stfree/` state directories, serialized runtime identifiers,
+record-seed namespace and internal `boltz.stfree_runtime` API are deliberately
+unchanged to preserve artifact identities and per-record random streams.
+Resume still requires an exact runtime-code fingerprint: pre-migration runs must
+be resumed with their original pinned revision, not silently mixed with this
+revision. Command aliases do not bypass provenance checks. Local checkout
+directories do not need to be renamed.
+
+## Optional fine-tuning: current boundary
+
+The default GenFree screen uses released pretrained affinity weights and needs
+no target labels. With labels, target-specific affinity-module fine-tuning is
+an optional extension, not a prerequisite for GenFree. The research prototype
+has been evaluated on NS5 and GSK3B with a 300-label pool per target, detached
+GenFree contexts and the two complete affinity modules updated while the trunk
+remains frozen. AP and top-100 recovery increased on both targets, but GSK3B
+AUROC decreased. These are exploratory results, not guarantees for other targets.
+
+**Adapter import/loading is CPU-tested and has passed a bounded two-target GPU deployment smoke; the training command is
+not yet integrated.** Convert research head-only weights with
+`boltz-genfree adapter import-heads --checkpoint final_heads.pt --metadata metadata.json --output adapter_dir`,
+and verify them with `boltz-genfree adapter inspect adapter_dir`. The conversion
+uses CPU only, never loads a trunk and refuses to overwrite existing files.
+Set `options.affinity_adapter: /path/to/adapter_dir` for screening; retain a
+compatible full base checkpoint in `options.affinity_checkpoint` (or the default
+released checkpoint). Do not pass raw `final_heads.pt` as a full checkpoint.
+
+The adapter pins the base checkpoint SHA256, target sequence, exact feature
+route, receptor reference/crop configuration and declared training split/seed.
+Wrong target, changed route, malformed/nonfinite tensors or mismatched weights
+are rejected. Adapter identity is included in the screen plan and strict resume
+provenance. Only both complete affinity modules are replaced; the trunk and base
+checkpoint file are unchanged. Metadata documents declared provenance; hashes
+alone do not prove that arbitrary user-provided training provenance is true.
+
+Existing NS5/GSK3B weights have passed CPU conversion and cached-context head
+replay against their original serialization with zero output difference.
+Full public-CLI CUDA/kernel-enabled scoring passed for two original-library inputs per target at product revision `9ae7e6f` (PBS2523982). This is not a full-screen accuracy benchmark or a general GPU parity guarantee. There is still
+no `boltz-genfree finetune` command: native context extraction and the bounded
+label-safe trainer remain next steps. See the [integration boundary](docs/finetuning.md).
+
 ## Install
 
 Python 3.10 or newer is required. Install the repository in an isolated
 environment; the package is not yet published on PyPI.
 
 ```bash
-git clone https://github.com/N283T/boltz-stfree.git
-cd boltz-stfree
+git clone https://github.com/N283T/boltz-genfree.git
+cd boltz-genfree
 uv sync --frozen --extra cuda
 source .venv/bin/activate
 ```
 
-This distribution installs `boltz-stfree`, not the upstream `boltz` command,
+This distribution installs `boltz-genfree`, not the upstream `boltz` command,
 so the runtime used for a screen is explicit.
 
 The committed `.python-version` and `uv.lock` reproduce the tested Python and
@@ -89,14 +140,14 @@ options:
 Then run:
 
 ```bash
-boltz-stfree screen screen.yaml
+boltz-genfree screen screen.yaml
 ```
 
 Use `--prepare-only` to validate the config and inspect the generated Boltz YAML
 chunks without loading checkpoints or running inference:
 
 ```bash
-boltz-stfree screen screen.yaml --prepare-only
+boltz-genfree screen screen.yaml --prepare-only
 ```
 
 Preparation also writes `screen_plan.json`. It records the target and MSA mode,
@@ -115,7 +166,7 @@ changed target, ligand source, component cache, MSA source, or preprocessing
 limit is rejected rather than mixed into existing screen state. Operational
 options such as `override` may be changed safely.
 
-Set `options.seed` for reproducible screens. Boltz-StFree derives independent
+Set `options.seed` for reproducible screens. Boltz-GenFree derives independent
 record-local seeds for reference-feature augmentation and MSA subsampling, so a
 record receives the same score when chunk boundaries, worker scheduling, or a
 resumed run change. Setting `seed: null` leaves those operations stochastic.
@@ -177,10 +228,10 @@ screen config.
 ### Runtime options
 
 Keys below `options` may use `snake_case` or CLI-style hyphenated names.
-Boltz-StFree keeps the method surface deliberately small:
+Boltz-GenFree keeps the method surface deliberately small:
 
 ```text
-cache, affinity_checkpoint
+cache, affinity_checkpoint, affinity_adapter
 devices, accelerator, num_workers, affinity_batch_size, preprocessing_threads
 seed, override
 max_msa_seqs, subsample_msa, num_subsampled_msa
@@ -335,7 +386,7 @@ options:
 Stage and review the exact input without loading a checkpoint or using a GPU:
 
 ```bash
-boltz-stfree bootstrap-reference bootstrap.yaml --prepare-only
+boltz-genfree bootstrap-reference bootstrap.yaml --prepare-only
 ```
 
 After review, omit `--prepare-only` to run the single Boltz-2 holo prediction.
@@ -385,7 +436,7 @@ The code history is preserved rather than squashed:
    supplied the compatibility and maintenance base.
 3. [boltz2-affinity-interventions-boltz](https://github.com/N283T/boltz2-affinity-interventions-boltz)
    added the causal interventions and measured structure-free runtime.
-4. Boltz-StFree starts from that runtime and develops the screening tool as an
+4. Boltz-GenFree starts from that runtime and develops the screening tool as an
    independent repository.
 
 Checkpoint fallback URLs still refer to the Boltz and boltz-community model
@@ -401,7 +452,7 @@ software citation placeholder pending final manuscript metadata.
 ## Development safety
 
 The only writable GitHub target for this repository is
-`N283T/boltz-stfree`. Repository instructions prohibit pull requests and
+`N283T/boltz-genfree`. Repository instructions prohibit pull requests and
 writable remotes targeting the research runtime, boltz-community, or official
 Boltz repositories. Package publishing is also disabled: the included workflow
 builds and validates artifacts manually but cannot upload them to PyPI.
@@ -412,6 +463,7 @@ Run the CPU-focused tests with:
 pytest -q
 ```
 
-Generic structure prediction, training, and intervention workflows are outside
-this product's scope. Their documentation and implementation remain in the
+Generic structure prediction and arbitrary intervention workflows are outside
+this product's scope. Target-specific affinity-module fine-tuning is an optional
+GenFree feature under integration, not a general-purpose training interface. Their documentation and implementation remain in the
 [separate research/reproduction repository](https://github.com/N283T/boltz2-affinity-interventions-boltz).

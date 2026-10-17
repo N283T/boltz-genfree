@@ -1,4 +1,4 @@
-"""Single-route Boltz-StFree affinity runtime."""
+"""Single-route Boltz-GenFree affinity runtime."""
 
 from __future__ import annotations
 
@@ -40,6 +40,10 @@ class StFreeRuntimeOptions:
 
     cache: Path
     affinity_checkpoint: Path | None = None
+    affinity_adapter: Path | None = None
+    target_sequence_sha256: str | None = None
+    receptor_reference_sha256: str | None = None
+    receptor_crop_config_sha256: str | None = None
     devices: int | list[int] = 1
     accelerator: str = "gpu"
     num_workers: int = 2
@@ -69,6 +73,7 @@ class StFreeRuntimeSession:
     runtime_version: str
     mol_dir: Path
     model: object
+    adapter_identity: dict[str, object] | None = None
 
 
 def _record_msa_seed(base_seed: int, record_id: str) -> int:
@@ -113,7 +118,11 @@ def _patch_torch_checkpoint_loading(torch: object) -> None:
         return
 
     def patched_load(*args: object, **kwargs: object) -> object:
-        return torch_load(*args, **{**kwargs, "weights_only": False})
+        # Lightning may pass its unspecified default explicitly as None.
+        # Preserve explicit True for the restricted adapter loader.
+        if kwargs.get("weights_only") is None:
+            kwargs["weights_only"] = False
+        return torch_load(*args, **kwargs)
 
     patched_load._boltz_patched = True  # type: ignore[attr-defined]
     torch.load = patched_load  # type: ignore[attr-defined]
@@ -134,7 +143,7 @@ def _prune_stfree_model(model: object) -> tuple[str, ...]:
     ]
     if invalid:
         names = ", ".join(invalid)
-        raise RuntimeError(f"Cannot prune a non-StFree model; invalid flags: {names}")
+        raise RuntimeError(f"Cannot prune a non-GenFree model; invalid flags: {names}")
 
     removed = []
     for name in _UNUSED_STFREE_MODEL_MODULES:
@@ -185,7 +194,7 @@ def _validate_one_to_one_manifest(manifest: object) -> None:
     if failures:
         names = ", ".join(dict.fromkeys(failures))
         raise click.ClickException(
-            "Boltz-StFree accepts exactly one unconstrained protein and one "
+            "Boltz-GenFree accepts exactly one unconstrained protein and one "
             f"affinity ligand per record; invalid records: {names}"
         )
 
@@ -259,9 +268,16 @@ def _run_provenance(
     runtime_version: str,
     checkpoint_sha256: str,
     receptor_selection: object = "complete_input",
+    adapter_identity: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Build the immutable method identity used to protect resumed screens."""
-    return {
+    if options.affinity_adapter is not None and adapter_identity is None:
+        from boltz.affinity_adapter import load_adapter, validate_contract
+
+        adapter = load_adapter(options.affinity_adapter)
+        validate_contract(adapter, options, base_checkpoint_sha256=checkpoint_sha256)
+        adapter_identity = adapter.identity()
+    provenance = {
         "schema_version": 1,
         "runtime": "boltz-stfree",
         "runtime_version": runtime_version,
@@ -310,6 +326,10 @@ def _run_provenance(
             "flash_attn": options.flash_attn,
         },
     }
+
+    if adapter_identity is not None:
+        provenance["affinity_adapter"] = adapter_identity
+    return provenance
 
 
 def _receptor_crop_provenance(
@@ -427,7 +447,7 @@ def _validate_resume_state(
 
 
 def stfree_model_kwargs(options: StFreeRuntimeOptions) -> dict[str, object]:
-    """Return the fixed model route used by every Boltz-StFree record."""
+    """Return the fixed model route used by every Boltz-GenFree record."""
     from boltz.main import (
         Boltz2DiffusionParams,
         BoltzSteeringParams,
@@ -550,6 +570,16 @@ def create_stfree_runtime_session(
     )
     from boltz.model.models.boltz2 import Boltz2
 
+    adapter = None
+    if options.affinity_adapter is not None:
+        from boltz.affinity_adapter import load_adapter, validate_contract
+
+        try:
+            adapter = load_adapter(options.affinity_adapter)
+            validate_contract(adapter, options)
+        except (OSError, ValueError) as error:
+            raise click.UsageError(f"Invalid affinity adapter: {error}") from error
+
     _configure_wsl_multiprocessing_tempdir(options.num_workers)
     _patch_torch_checkpoint_loading(torch)
     if options.accelerator == "cpu":
@@ -579,6 +609,11 @@ def create_stfree_runtime_session(
     ).expanduser()
     _validate_checkpoint_for_load(affinity_checkpoint, "Boltz-2 affinity weights")
     checkpoint_sha256 = _file_sha256(affinity_checkpoint)
+    if adapter is not None:
+        try:
+            validate_contract(adapter, options, base_checkpoint_sha256=checkpoint_sha256)
+        except ValueError as error:
+            raise click.UsageError(f"Invalid affinity adapter: {error}") from error
     predict_args = {
         "recycling_steps": options.affinity_recycling_steps,
         "sampling_steps": 1,
@@ -596,6 +631,13 @@ def create_stfree_runtime_session(
         ema=False,
         **stfree_model_kwargs(options),
     )
+    if adapter is not None:
+        from boltz.affinity_adapter import apply_adapter
+
+        try:
+            apply_adapter(model, adapter)
+        except ValueError as error:
+            raise click.UsageError(f"Invalid affinity adapter: {error}") from error
     from boltz.model.modules.affinity import AffinityModule
 
     if options.affinity_conditioner_mode not in {"original", "folded"}:
@@ -614,6 +656,7 @@ def create_stfree_runtime_session(
         runtime_version=_runtime_version(),
         mol_dir=cache / "mols",
         model=model,
+        adapter_identity=adapter.identity() if adapter is not None else None,
     )
 
 
@@ -650,6 +693,19 @@ def run_stfree_inputs(
     if session is None:
         session = create_stfree_runtime_session(options)
 
+    if options.affinity_adapter is not None:
+        from boltz.affinity_adapter import load_adapter, validate_contract
+
+        try:
+            current_adapter = load_adapter(options.affinity_adapter)
+            validate_contract(current_adapter, options, base_checkpoint_sha256=session.checkpoint_sha256)
+            if current_adapter.identity() != getattr(session, "adapter_identity", None):
+                raise ValueError("Adapter changed after model loading; create a new session")
+        except (OSError, ValueError) as error:
+            raise click.UsageError(f"Invalid affinity adapter: {error}") from error
+    elif getattr(session, "adapter_identity", None) is not None:
+        raise click.UsageError("Cannot use an adapted session for a no-FT screen")
+
     processed_dir = run_dir / "processed"
     manifest = Manifest.load(processed_dir / "manifest.json")
     if not manifest.records:
@@ -664,6 +720,7 @@ def run_stfree_inputs(
         runtime_version=session.runtime_version,
         checkpoint_sha256=session.checkpoint_sha256,
         receptor_selection=receptor_selection,
+        adapter_identity=getattr(session, "adapter_identity", None),
     )
     experiment_metadata = {
         "runtime": "boltz-stfree",

@@ -8,7 +8,7 @@ import json
 import os
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -52,6 +52,7 @@ _OPTION_ALIASES: dict[str, str] = {}
 _SCREEN_OPTION_KEYS = {
     "cache",
     "affinity_checkpoint",
+    "affinity_adapter",
     "devices",
     "accelerator",
     "num_workers",
@@ -570,6 +571,12 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
             "screen is full-screen-only and does not accept affinity crop options."
         )
     screen_options = build_screen_options(options, config_dir=base_dir)
+    if screen_options.runtime.affinity_adapter is not None:
+        from boltz.affinity_adapter import load_adapter
+
+        adapter = load_adapter(screen_options.runtime.affinity_adapter)
+        if adapter.manifest["target"]["sequence_sha256"] != hashlib.sha256(sequence.encode()).hexdigest():
+            raise click.UsageError("Affinity adapter was trained for a different target sequence.")
 
     ligands_config = _mapping(config.get("ligands"), "ligands")
     ligands, ligand_provenance = _load_ligands(ligands_config, base_dir)
@@ -826,6 +833,22 @@ def prepare_screen(  # noqa: C901, PLR0912, PLR0915
                 "path": str(crop_path),
             }
         records.append(record)
+
+    if screen_options.runtime.affinity_adapter is not None:
+        from boltz.affinity_adapter import load_adapter, validate_contract
+
+        crop_hash = (hashlib.sha256(json.dumps(
+            {key: value for key, value in crop_config.items() if key != "reference"},
+            sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ).encode()).hexdigest() if crop_config is not None else None)
+        screen_options = replace(screen_options, runtime=replace(screen_options.runtime,
+            target_sequence_sha256=hashlib.sha256(sequence.encode()).hexdigest(),
+            receptor_reference_sha256=crop_reference_sha256,
+            receptor_crop_config_sha256=crop_hash))
+        try:
+            validate_contract(load_adapter(screen_options.runtime.affinity_adapter), screen_options.runtime)
+        except ValueError as error:
+            raise click.UsageError(f"Invalid affinity adapter: {error}") from error
 
     input_config = {key: value for key, value in config.items() if key != "options"}
     input_config["preprocessing"] = {
@@ -1088,11 +1111,11 @@ def build_screen_options(
     *,
     config_dir: Path,
 ) -> ScreenOptions:
-    """Validate the deliberately small Boltz-StFree option surface."""
+    """Validate the deliberately small Boltz-GenFree option surface."""
     unknown = set(raw_options) - _SCREEN_OPTION_KEYS
     if unknown:
         names = ", ".join(sorted(unknown))
-        raise click.UsageError(f"Unknown Boltz-StFree options: {names}")
+        raise click.UsageError(f"Unknown Boltz-GenFree options: {names}")
 
     accelerator = raw_options.get("accelerator", "gpu")
     if accelerator not in {"gpu", "cpu", "mps"}:
@@ -1113,6 +1136,11 @@ def build_screen_options(
         raise click.UsageError(
             f"options.affinity_checkpoint does not exist: {checkpoint}"
         )
+    adapter_value = raw_options.get("affinity_adapter")
+    adapter_path = (_resolve_path(adapter_value, config_dir, "options.affinity_adapter")
+                    if adapter_value is not None else None)
+    if adapter_path is not None and not adapter_path.is_dir():
+        raise click.UsageError(f"options.affinity_adapter does not exist: {adapter_path}")
     seed = raw_options.get("seed")
     if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool)):
         raise click.UsageError("options.seed must be an integer or null.")
@@ -1140,6 +1168,7 @@ def build_screen_options(
     runtime = StFreeRuntimeOptions(
         cache=cache,
         affinity_checkpoint=checkpoint,
+        affinity_adapter=adapter_path,
         devices=devices,
         accelerator=accelerator,
         num_workers=_integer_option(raw_options, "num_workers", 2, minimum=0),
@@ -1192,6 +1221,13 @@ def build_screen_options(
             maximum=2_147_483_647,
         ),
     )
+    if adapter_path is not None:
+        from boltz.affinity_adapter import load_adapter, validate_contract
+
+        try:
+            validate_contract(load_adapter(adapter_path), runtime, require_target=False)
+        except (OSError, ValueError) as error:
+            raise click.UsageError(f"Invalid affinity adapter: {error}") from error
     server_url = raw_options.get("msa_server_url", "https://api.colabfold.com")
     pairing = raw_options.get("msa_pairing_strategy", "greedy")
     if not isinstance(server_url, str) or not server_url:
@@ -1271,6 +1307,9 @@ def build_screen_plan(
             "receptor_tokens": target["length"],
         }
 
+    if runtime.affinity_adapter is not None:
+        from boltz.affinity_adapter import load_adapter
+
     checkpoint = runtime.affinity_checkpoint or runtime.cache / "boltz2_aff.ckpt"
     return {
         "schema_version": 1,
@@ -1313,6 +1352,8 @@ def build_screen_plan(
             "allow_extended_full_input": runtime.allow_extended_full_input,
             "affinity_conditioner_mode": runtime.affinity_conditioner_mode,
             "checkpoint": str(checkpoint.expanduser().resolve()),
+            "affinity_adapter": (load_adapter(runtime.affinity_adapter).identity()
+                                 if runtime.affinity_adapter is not None else None),
         },
         "outputs": {
             "directory": str(prepared.output_dir),
@@ -1354,6 +1395,8 @@ def format_screen_plan(plan: dict[str, object]) -> tuple[str, ...]:
         f"{execution['chunk_size']}, {execution['accelerator']} on "
         f"{execution['devices']}, batch {execution['affinity_batch_size']}, "
         f"seed {execution['seed']}",
+        ("Affinity weights: full checkpoint only (no adapter)" if execution.get("affinity_adapter") is None
+         else "Affinity weights: optional adapter " + str(execution["affinity_adapter"]["weights_sha256"])),
         f"Status: {outputs['status']}",
     )
 
