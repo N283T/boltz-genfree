@@ -14,12 +14,12 @@ benchmark, and not an all-target integration claim.
 
 | Route | Receptor | MSA | ref_pos | batch | max absolute difference across six outputs |
 |---|---|---|---|---|---|
-| minimal | all 580 input residues | query-only, MSA module retained | zero | 1 | 2.8312206268310547e-7 |
-| balanced | fixed 159 residues | existing MSA, subsample 1024 | RDKit 2D | 2 | 4.172325134277344e-7 |
+| context-free | all 580 input residues | query-only, MSA module retained | zero | 1 | 2.8312206268310547e-7 |
+| context-supplied | fixed 159 residues | existing MSA, subsample 1024 | RDKit 2D | 2 | 4.172325134277344e-7 |
 
 Both routes use FadD28 records `000001_2277079` and `000002_6520605` from the
 existing canonical library, affinity recycling 0, seed 20260718, kernels ON,
-MW correction OFF, and no structure prediction. The balanced route reuses the
+MW correction OFF, and no structure prediction. The context-supplied route reuses the
 existing ATP-bootstrap reference solely for this smoke; it does not fix the
 seed-selection policy for the future full benchmark. Library ligand budget 96.
 
