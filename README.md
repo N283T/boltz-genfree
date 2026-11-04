@@ -11,15 +11,11 @@ the ranking.
 
 ![GenFree as the first stage of a library screen](docs/images/screening_routes.png)
 
+![Full-library comparison of GenFree with the published Boltzina and Boltz-2 scores](docs/images/full_library.png)
+
 GenFree needs a receptor context. A short receptor is used in full; a longer one is
 cropped using a supplied reference complex, which only selects receptor sequence
 blocks and gives the model no ligand pose or structure-derived distogram.
-
-The associated manuscript, analyses and result data are in
-[`N283T/boltz-affinity-paper`](https://github.com/N283T/boltz-affinity-paper). The
-frozen research runtime used for the paper is
-[`N283T/boltz2-affinity-interventions-boltz`](https://github.com/N283T/boltz2-affinity-interventions-boltz);
-changes here do not alter it.
 
 ## Install
 
@@ -130,7 +126,7 @@ see [docs/finetuning.md](docs/finetuning.md) for the current boundary.
 On one RTX 5080, 49,980 compounds of one target (ALR) took 18,290 s (2.7 compounds/s).
 This shows feasibility on that hardware and target, not general performance or
 accuracy. Structure-derived distograms, Boltz-1, multi-chain inputs and research
-interventions are not exposed here; they remain in the research repository.
+interventions are not exposed here.
 
 The legacy commands `boltz-stfree` and `boltz-stfree-fix-macos-libomp`, the
 `.boltz-stfree/` state directory and the `boltz.stfree_runtime` module keep their
@@ -142,8 +138,8 @@ original revision.
 
 History is preserved, not squashed: [Boltz](https://github.com/jwohlwend/boltz), then
 [boltz-community](https://github.com/Novel-Therapeutics/boltz-community), then
-[boltz2-affinity-interventions-boltz](https://github.com/N283T/boltz2-affinity-interventions-boltz),
-then this repository. Inherited code is under the [MIT License](LICENSE) with the
+a research runtime that added the interventions and the
+structure-free runtime, then this repository. Inherited code is under the [MIT License](LICENSE) with the
 original copyright notices retained. See [CITATION.cff](CITATION.cff) to cite.
 
 ## Development
