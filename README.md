@@ -15,6 +15,10 @@ GenFree needs a receptor context. A short receptor is used in full; a longer one
 cropped using a supplied reference complex, which only selects receptor sequence
 blocks and gives the model no ligand pose or structure-derived distogram.
 
+## Performance
+
+![Simulated two-stage screen: shortlist-share sweep](docs/images/performance.png)
+
 ## Install
 
 Python 3.10 or newer. The package is not on PyPI; install from a tagged release or
