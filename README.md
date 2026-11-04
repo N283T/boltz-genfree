@@ -11,8 +11,6 @@ the ranking.
 
 ![GenFree as the first stage of a library screen](docs/images/screening_routes.png)
 
-*Boltz-2 generates a structure for every compound; in a two-stage screen GenFree ranks the whole library without building any structure, and Boltz-2 re-ranks only the top of the ranking. Figure 1 of the associated manuscript.*
-
 GenFree needs a receptor context. A short receptor is used in full; a longer one is
 cropped using a supplied reference complex, which only selects receptor sequence
 blocks and gives the model no ligand pose or structure-derived distogram.
