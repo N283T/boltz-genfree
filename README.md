@@ -9,9 +9,7 @@ for large, resumable virtual screens. It is intended as a cheap first stage: ran
 whole library with GenFree, then spend the full Boltz-2 pipeline only on the top of
 the ranking.
 
-![GenFree as the first stage of a library screen](docs/images/screening_routes.png)
-
-![Full-library comparison of GenFree with the published Boltzina and Boltz-2 scores](docs/images/full_library.png)
+![Boltz-GenFree overview](docs/images/genfree_overview.png)
 
 GenFree needs a receptor context. A short receptor is used in full; a longer one is
 cropped using a supplied reference complex, which only selects receptor sequence
