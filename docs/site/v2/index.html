@@ -1,0 +1,1886 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boltz-GenFree</title>
+<meta name="description" content="Boltz-GenFree: structure-generation-free ranking for first-stage affinity screening with the released Boltz-2 affinity checkpoint.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Red+Hat+Mono:wght@400..700&display=swap">
+<style>
+:root{
+  --bg:#fafaf7; --panel:#ffffff; --ink:#161616; --ink-2:#565656; --ink-3:#6f6f6a;
+  --line:#bdbdb8; --line-2:#e0e0db; --soft:#f1f1ee; --soft-2:#e7e7e3;
+  --accent:#b8124f; --hot:#f7a8c8; --accent-tint:#f6dfe8;
+  --tile:#161616; --tile-ink:#ffffff;
+  /* role hues, flat */
+  --s1:#0e6f66; --s1-tint:#e3f0ed;      /* structure checkpoint */
+  --s2:#9c3d2e; --s2-tint:#f7e5df;      /* affinity checkpoint */
+  --dist:#2b5c9e; --dist-tint:#e2eaf5;  /* distogram path */
+  --zp:#a8510f;  --zp-tint:#f8e8db;     /* pair path */
+  /* series */
+  --b2:#3c3c3c; --bzn:#858580; --gf:#b8124f; --cfree:#b9b9b3;
+  --up:#2166ac; --down:#b07d12;
+  --display:"Bricolage Grotesque","Atkinson Hyperlegible",sans-serif;
+  --sans:"Atkinson Hyperlegible","Helvetica Neue",Arial,sans-serif;
+  --mono:"Red Hat Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 18px/1.65 var(--sans);overflow-x:hidden}
+h1,h2,h3,h4,p,ul,ol,figure,table{margin:0}
+a{color:var(--accent)}
+.wrap{width:100%;max-width:940px;margin:0 auto;padding:0 20px}
+sup{font-size:.62em;line-height:0}
+
+/* ---------- hero ---------- */
+.hero{background:var(--tile);color:var(--tile-ink);padding:26px 0 34px;
+      --ink:#fafaf7; --ink-2:#c9c9c4}
+.hero .logo{width:min(420px,78vw);margin-bottom:22px;--hl:#b8124f;--accent:#f7a8c8}
+.hero .logo svg{width:100%;height:auto;display:block}
+.hero h1{font:800 clamp(28px,6.2vw,50px)/1.05 var(--sans);letter-spacing:-.015em;color:#fafaf7}
+.hero h1 em{font-style:normal;color:var(--hot)}
+.hero .sub{margin-top:14px;font:700 clamp(17px,2.4vw,23px)/1.25 var(--display);color:#fafaf7}
+.hero .claim{margin-top:18px;max-width:62ch;font-size:clamp(16px,1.9vw,19px);color:#e4e4df}
+.hero .who{margin-top:22px;font-size:17px;color:#e4e4df}
+.hero .who b{color:#fafaf7}
+.hero a{color:#f7a8c8}
+.hero .aff{margin-top:4px;font-size:15.5px;color:#b9b9b3}
+.kpis{margin-top:26px;display:grid;gap:12px;grid-template-columns:1fr}
+.kpi{border:2px solid #4a4a46;padding:14px 16px;background:#1f1f1e}
+.kpi .n{font:800 clamp(24px,4.4vw,34px)/1 var(--sans);color:var(--hot);letter-spacing:-.01em}
+.kpi .t{margin-top:8px;font-size:16.5px;line-height:1.4;color:#e4e4df}
+.links{margin-top:26px;display:flex;flex-wrap:wrap;gap:10px}
+.links a{display:inline-block;padding:11px 16px;border:2px solid #fafaf7;color:#fafaf7;
+         text-decoration:none;font-weight:700;font-size:15px}
+.links a.pri{background:var(--accent);border-color:var(--accent)}
+.status{margin-top:18px;font:500 14px/1.4 var(--mono);color:#b9b9b3;letter-spacing:.02em}
+
+/* ---------- sticky nav ---------- */
+.nav{position:sticky;top:0;z-index:40;background:var(--bg);border-bottom:2px solid var(--ink)}
+.nav .inner{display:flex;gap:4px;overflow-x:auto;padding:0 12px;scrollbar-width:thin}
+.nav a{flex:0 0 auto;padding:13px 11px;font:700 15px/1 var(--sans);color:var(--ink-2);
+       text-decoration:none;white-space:nowrap;border-bottom:4px solid transparent}
+.nav a:hover,.nav a:focus-visible{color:var(--ink);border-bottom-color:var(--hot)}
+
+/* ---------- sections ---------- */
+section{padding:42px 0 10px;border-top:1px solid var(--line-2)}
+section:first-of-type{border-top:0}
+.shead{display:flex;gap:14px;align-items:flex-start;margin-bottom:16px}
+.shead .num{flex:0 0 auto;font:700 15px/1 var(--mono);background:var(--tile);color:var(--tile-ink);
+            padding:8px 9px;letter-spacing:.02em}
+.shead h2{font:800 clamp(22px,3.6vw,33px)/1.1 var(--sans);letter-spacing:-.012em}
+.lede{font-size:clamp(19px,2.4vw,23px);line-height:1.45;font-weight:700}
+.body p{margin-top:16px;font-size:18px}
+.body h3{margin-top:40px;font:800 23px/1.25 var(--sans)}
+.body h4{margin-top:24px;font:700 19px/1.3 var(--sans)}
+.body ul,.body ol{margin-top:14px;padding-left:1.2em;font-size:18px}
+.body li{margin-top:8px}
+code{font:500 .92em var(--mono);background:var(--soft-2);padding:1px 4px}
+.note{margin-top:20px;border-left:4px solid var(--line);padding:2px 0 2px 16px;
+      font-size:16.5px;color:var(--ink-2)}
+
+/* ---------- figures: no frame, same column as the text ---------- */
+figure{margin:30px 0 0;background:none;border:0}
+.scroller{overflow-x:auto;-webkit-overflow-scrolling:touch}
+figure svg{display:block;width:100%;height:auto;min-width:660px}
+figure.narrow svg{min-width:460px}
+figcaption{padding:12px 0 0;border:0;font-size:16px;
+           line-height:1.5;color:var(--ink-2)}
+figcaption b{color:var(--ink)}
+.hint{padding:0 0 6px;font:500 13px/1 var(--mono);color:var(--ink-3)}
+@media (min-width:760px){.hint{display:none}}
+
+
+/* ---------- section 1: pipeline made of page elements ---------- */
+.lanes{margin-top:30px}
+.lane,.lane-top,.lane-under{display:grid;align-items:stretch;
+  grid-template-columns:104px minmax(0,1fr) 22px minmax(0,1.35fr) 22px minmax(0,1fr) 22px minmax(0,1fr)}
+.lane{margin-top:0}
+.lane.gf{margin-top:86px}
+.lname{display:flex;flex-direction:column;justify-content:center;gap:8px;align-items:flex-start;padding-right:10px}
+.lname b{font:800 20px/1 var(--sans)}
+.lane.gf .lname b{color:var(--accent)}
+.pill{font:700 13px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:6px 8px;border:2px solid var(--ink)}
+.pill.fast{background:var(--accent);border-color:var(--accent);color:#fff}
+.cell{display:flex;position:relative}
+.lanes .card{flex:1;min-height:92px;background:var(--panel);border:2px solid var(--line);padding:12px 12px;
+  display:flex;flex-direction:column;justify-content:center;position:relative;outline-offset:2px}
+.lanes .card b{display:block;font:800 17px/1.2 var(--sans)}
+.lanes .card small{display:block;margin-top:5px;font:400 15px/1.3 var(--sans);color:var(--ink-2)}
+.lanes .c-s1{background:var(--s1);border-color:var(--s1)} .lanes .c-s1 b,.lanes .c-s1 small{color:#fff}
+.lanes .c-s2{background:var(--s2-tint);border-color:var(--s2)} .lanes .c-s2 b{color:var(--s2)}
+.lanes .c-gf{background:var(--accent-tint);border-color:var(--accent)} .lanes .c-gf b{color:var(--accent)}
+.lanes .c-none{background:transparent;border:2px dashed var(--line)} .lanes .c-none b{color:var(--ink-3)}
+.bars{display:grid;gap:4px;margin-top:8px}
+.bars i{display:block;height:7px}
+.join{display:flex;align-items:center;justify-content:center;font:700 20px/1 var(--sans);color:var(--ink-2)}
+.join.dim{color:var(--line)}
+.join{pointer-events:none}
+/* the cost bracket over Boltz-2 and the inputs line under GenFree */
+.lane-top{margin-bottom:10px}
+.brace{grid-column:4 / 7;border:2px solid var(--ink-3);border-bottom:0;height:16px;position:relative;margin-top:2px}
+.brace span{position:absolute;left:50%;top:-12px;transform:translateX(-50%);background:var(--bg);padding:0 8px;
+  font:700 13px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);white-space:nowrap}
+.lane-under{margin-top:8px}
+.under{grid-column:2 / 7;border:2px solid var(--accent);border-top:0;height:16px;position:relative;margin-right:0}
+.under span{position:absolute;left:50%;bottom:-11px;transform:translateX(-50%);background:var(--bg);padding:0 8px;
+  font:700 13px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--accent);white-space:nowrap}
+.lane-under{margin-bottom:18px}
+/* the question the paper asks, pinned to the structure step */
+.ask{position:absolute;left:0;right:0;top:calc(100% + 16px);z-index:2;background:#fff;color:var(--ink);
+  border:2px solid var(--ink);padding:10px 12px;font:800 17px/1.25 var(--sans);text-align:center}
+.ask::before,.ask::after{content:"";position:absolute;left:50%;margin-left:-10px;border:10px solid transparent;border-top:0}
+.ask::before{top:-12px;border-bottom-color:var(--ink)}
+.ask::after{top:-8px;border-bottom-color:#fff}
+/* hover / focus notes */
+.tip::before{content:"";position:absolute;top:7px;right:7px;width:7px;height:7px;border-radius:50%;background:var(--ink-3);opacity:.55}
+.c-s1::before{background:#fff}
+.tip::after{content:attr(data-tip);position:absolute;left:0;bottom:calc(100% + 10px);z-index:5;width:max-content;max-width:250px;
+  background:var(--ink);color:#fff;font:400 15px/1.4 var(--sans);padding:9px 11px;opacity:0;transform:translateY(4px);
+  pointer-events:none;transition:opacity .15s,transform .15s}
+.tip.r::after{left:auto;right:0}
+.tip:hover::after,.tip:focus::after,.tip:focus-visible::after{opacity:1;transform:none}
+.lanes .card:focus-visible{outline:3px solid var(--accent)}
+@media (max-width:719px){
+  .lane,.lane-top,.lane-under{grid-template-columns:minmax(0,1fr)}
+  .lane-top,.lane-under{display:none}
+  .lname{flex-direction:row;align-items:center;padding:0 0 10px}
+  .join{height:24px;font-size:0}
+  .join::before{content:"\2193";font-size:20px}
+  .lanes .card{min-height:0}
+  .cell{flex-direction:column}
+  .lane.gf{margin-top:34px}
+  .ask{position:relative;top:auto;margin:16px 0 4px}
+  .tip::after{max-width:min(250px,80vw)}
+}
+
+
+/* ---------- section 2: where it happens in Boltz-2 ---------- */
+.hint2{margin:26px 0 12px;font:500 14px/1.3 var(--mono);color:var(--ink-3);letter-spacing:.02em}
+#how-a,#how-b{scroll-margin-top:64px}
+@media (min-width:940px){.swipe{display:none}}
+/* Overview figure: a fixed 900px stage. Panels, connectors and labels are one SVG in the
+   same px coordinates as the absolutely positioned boxes, so they always meet. */
+.arch-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-top:4px}
+.arch{width:900px;margin:0 auto}
+.arch .stage{position:relative;width:900px;height:576px}
+.arch .wires{position:absolute;inset:0;width:900px;height:576px;overflow:visible}
+.arch .panel{fill:var(--soft);stroke:none}
+.arch .stg{font:700 15px/1 var(--mono);letter-spacing:.06em;fill:var(--ink-3);text-transform:uppercase}
+.arch .w{fill:none;stroke:var(--ink-2);stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.arch .ah{fill:var(--ink-2)}
+.arch .wl{font:400 15px/1 var(--sans);fill:var(--ink-2)}
+.arch .pill{fill:var(--soft)}
+.arch .plus{fill:var(--panel);stroke:var(--ink-2);stroke-width:2.5}
+.arch .bx{position:absolute;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+  box-sizing:border-box;height:118px;padding:10px 12px;background:var(--panel);border:2px solid var(--line);border-radius:0;
+  color:var(--ink);text-align:center;text-decoration:none;font:700 16px/1.2 var(--sans);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.arch .bx small{display:block;margin-top:3px;font:400 15px/1.2 var(--sans);opacity:.85}
+.arch .bx.ck{background:var(--s1);border-color:var(--s1);color:#fff}
+.arch .bx.ck::before{background:#fff}
+.arch .bx.dep{background:var(--accent-tint);border-color:var(--accent);color:var(--accent)}
+.arch .bx.out{border-color:var(--ink)}
+.arch a.bx{cursor:pointer} .arch a.bx:hover{background:#f0c9da}
+.arch a.bx u{text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1.5px}
+.arch .bx:focus-visible,.arch .pair:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.arch .tip::after{text-align:left;max-width:290px}
+.tip.dn::after{bottom:auto;top:calc(100% + 10px)}
+.arch .ic{width:40px;height:40px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.arch .ic .wh{fill:var(--panel)} .arch .ic .f{fill:currentColor}
+.arch .ic .hi{fill:var(--accent);stroke:var(--accent)} .arch .ic .lo{fill:var(--panel);stroke:var(--line)}
+.arch .ic.wide{width:58px}
+.arch .pic{display:flex;align-items:flex-end;gap:2px}
+.arch .rib{width:46px;height:46px}
+.arch .crop{width:112px;height:41px;flex:0 0 auto;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.arch .crop .ch{stroke:var(--line);stroke-width:16}
+.arch .crop .ch.on{stroke:var(--accent)}
+.arch .crop .ring{stroke:var(--ink);stroke-width:6;stroke-dasharray:16 11}
+.arch .crop .lg{fill:var(--panel);stroke:var(--ink);stroke-width:7}
+.arch .pic.in{align-items:center;gap:8px}
+.arch .seq{width:60px;height:11px;flex:0 0 auto}
+.arch .pic .lig{width:44px;height:25px;flex:0 0 auto}
+.arch .cx{display:block;width:52px;height:52px;flex:0 0 auto;--lig-w:22px}
+.arch .stack{display:flex;gap:3px}
+.arch .stack .cx{width:40px;height:40px}
+.arch .stack .cx:nth-child(1),.arch .stack .cx:nth-child(3){opacity:.55}
+.arch .bx.ck{--lig-ink:#fff;--lig-fill:var(--s1)}
+.arch .lps{display:flex;gap:4px}
+.arch .lps svg{display:block;width:34px;height:31px;fill:none;stroke:#fff;stroke-linecap:round;stroke-linejoin:round}
+.arch .lps path{stroke-width:4.2} .arch .lps polygon{stroke-width:2.4}
+.arch .lps svg:nth-child(1),.arch .lps svg:nth-child(3){opacity:.55}
+.arch .pair .pr{display:block;width:62px;height:62px}
+.arch .pr .bg{fill:var(--panel)}
+.arch .pr .v0{fill:var(--ink-2)} .arch .pr .v1{fill:var(--bzn)} .arch .pr .v2{fill:var(--line)} .arch .pr .v3{fill:var(--soft-2)}
+.arch .pr .tp{fill:var(--line)} .arch .pr .tl{fill:var(--ink)}
+.arch .legend{display:flex;flex-wrap:wrap;gap:8px 22px;list-style:none;margin:16px 0 0;padding:0;font-size:15px;color:var(--ink-2)}
+.arch .legend li{display:flex;align-items:center;gap:8px;margin:0}
+.arch .k{display:inline-block;width:22px;height:16px;border:2px solid var(--line);border-radius:0;background:var(--panel)}
+.arch .k.dep{background:var(--accent-tint);border-color:var(--accent)}
+.arch .k.ck{background:var(--s1);border-color:var(--s1)}
+
+/* ---------- details ---------- */
+details{margin-top:18px;border:1px solid var(--line);background:var(--panel)}
+details+details{margin-top:10px}
+summary{cursor:pointer;padding:14px 16px;font:700 17px/1.3 var(--sans);
+        display:flex;gap:10px;align-items:baseline}
+summary::marker{color:var(--accent)}
+details[open] summary{border-bottom:1px solid var(--line-2)}
+.dbody{padding:4px 16px 18px}
+.dbody p,.dbody ul{margin-top:14px;font-size:16.5px}
+.dbody h4{margin-top:18px;font:700 17px/1.3 var(--sans)}
+
+/* ---------- tables ---------- */
+.tscroll{overflow-x:auto;margin-top:16px;border:1px solid var(--line);background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:16px}
+caption{text-align:left;padding:12px 14px;font-weight:700;font-size:16.5px;border-bottom:1px solid var(--line-2)}
+th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line-2);white-space:nowrap}
+th{font:700 14.5px/1.2 var(--sans);color:var(--ink-2);background:var(--soft);vertical-align:bottom}
+td.n,th.n{text-align:right;font-family:var(--mono);font-size:15px}
+tr.mean td{font-weight:700;background:var(--soft)}
+.tnote{padding:12px 14px;font-size:15px;line-height:1.5;color:var(--ink-2);border-top:1px solid var(--line-2)}
+
+/* ---------- misc blocks ---------- */
+.cards{margin-top:18px;display:grid;gap:12px;grid-template-columns:1fr}
+.card{border:1px solid var(--line);background:var(--panel);padding:15px 16px}
+.card h4{margin:0 0 6px;font:700 18px/1.25 var(--sans)}
+.card p{margin:0;font-size:16.5px;color:var(--ink-2)}
+.card .tag{font:600 12.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;
+           color:var(--accent);display:block;margin-bottom:8px}
+pre{margin-top:14px;overflow-x:auto;background:var(--tile);color:#f1f1ee;padding:14px 16px;
+    font:500 13.5px/1.6 var(--mono)}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+.band{background:var(--accent-tint);border-top:2px solid var(--accent)}
+footer{margin-top:40px;background:var(--tile);color:#c9c9c4;padding:30px 0;font-size:15px}
+footer a{color:var(--hot)}
+footer p{margin-top:12px;max-width:72ch}
+
+@media (min-width:620px){
+  .kpis{grid-template-columns:repeat(3,1fr)}
+  .cards{grid-template-columns:repeat(2,1fr)}
+  .cards.three{grid-template-columns:repeat(3,1fr)}
+}
+@media (min-width:980px){
+  section{padding:58px 0 14px}
+  .hero{padding:34px 0 46px}
+}
+
+/* ---------- shared SVG text styles ---------- */
+svg text{font-family:var(--sans);fill:var(--ink)}
+.f-ttl{font:800 17px var(--sans)}
+.f-lab{font:700 14px var(--sans)}
+.f-sub{font:400 13.5px var(--sans);fill:var(--ink-2)}
+.f-num{font:600 13px var(--mono)}
+.f-numl{font:600 13px var(--mono);fill:var(--ink-2)}
+.f-tick{font:500 12.5px var(--mono);fill:var(--ink-3)}
+.f-cap{font:700 12.5px var(--mono);letter-spacing:.06em;fill:var(--ink-2)}
+.box{fill:var(--panel);stroke:var(--ink-2);stroke-width:1.5}
+.box.dash{stroke-dasharray:7 5}
+.ar{fill:none;stroke:var(--ink-2);stroke-width:2.4;marker-end:url(#ah)}
+.ar.dash{stroke-dasharray:7 5}
+.ar.nohead{marker-end:none}
+.gl{stroke:var(--line-2);stroke-width:1}
+.axis{stroke:var(--ink-2);stroke-width:2}
+.b-b2{fill:var(--b2)} .b-bzn{fill:var(--bzn)} .b-gf{fill:var(--gf)} .b-cf{fill:var(--cfree)}
+.s1box{fill:var(--s1-tint);stroke:var(--s1);stroke-width:2}
+.s2box{fill:var(--s2-tint);stroke:var(--s2);stroke-width:2}
+.dbox{fill:var(--dist-tint);stroke:var(--dist);stroke-width:2}
+.zbox{fill:var(--zp-tint);stroke:var(--zp);stroke-width:2}
+.gbox{fill:var(--accent-tint);stroke:var(--accent);stroke-width:2}
+.t-s1{fill:var(--s1)} .t-s2{fill:var(--s2)} .t-d{fill:var(--dist)}
+.t-z{fill:var(--zp)} .t-gf{fill:var(--accent)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.4" markerHeight="4.4" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#565656"/>
+    </marker>
+    <marker id="ahc" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4.4" markerHeight="4.4" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b8124f"/>
+    </marker>
+  </defs>
+</svg>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="logo"><svg class="wm" xmlns="http://www.w3.org/2000/svg" viewBox="35 86 935 126" role="img" aria-label="Boltz-GenFree wordmark">
+  <rect x="623.4" y="144.2" width="291.9" height="57.6" style="fill: var(--hl, #f6c4d7)"/>
+  <path d="M43.76 197.5V102.46H82.06Q90.85 102.46 97.69 104.04Q104.53 105.63 109.35 108.72Q114.18 111.82 116.7 116.43Q119.22 121.04 119.22 127.23Q119.22 132.99 116.84 137.6Q114.46 142.2 109.21 145.01Q103.95 147.82 95.46 148.54V149.84Q110 150.56 116.55 156.6Q123.1 162.65 123.1 172.59Q123.1 180.94 118.78 186.41Q114.46 191.88 106.18 194.69Q97.9 197.5 85.66 197.5ZM67.09 178.78H84.66Q92 178.78 96.03 176.12Q100.06 173.45 100.06 168.56Q100.06 163.08 95.53 160.42Q90.99 157.76 81.92 157.76H67.09ZM67.09 141.92H79.62Q87.82 141.92 92.14 139.18Q96.46 136.44 96.46 131.12Q96.46 126.08 92.58 123.56Q88.69 121.04 80.91 121.04H67.09Z M163.28 199.52Q152.34 199.52 143.84 195.12Q135.34 190.73 130.59 181.88Q125.84 173.02 125.84 159.63Q125.84 145.66 130.81 136.8Q135.78 127.95 144.34 123.7Q152.91 119.45 163.71 119.45Q174.94 119.45 183.37 123.84Q191.79 128.24 196.47 137.09Q201.15 145.95 201.15 159.48Q201.15 173.45 196.18 182.31Q191.22 191.16 182.65 195.34Q174.08 199.52 163.28 199.52ZM163.86 182.38Q168.32 182.38 171.34 179.86Q174.37 177.34 175.95 172.44Q177.54 167.55 177.54 160.78Q177.54 153.29 175.81 148.18Q174.08 143.07 170.84 140.33Q167.6 137.6 162.99 137.6Q158.67 137.6 155.65 140.12Q152.62 142.64 151.04 147.53Q149.46 152.43 149.46 159.34Q149.46 170.28 153.27 176.33Q157.09 182.38 163.86 182.38Z M206.62 197.5V96.7H229.95V197.5Z M268.11 199.23Q254.72 199.23 248.17 192.39Q241.62 185.55 241.62 171.15V139.61H233.26V124.92H233.7Q242.62 123.77 246.37 118.95Q250.11 114.12 250.98 104.33V104.04H264.66V121.47H282.08V140.19H264.66V168.99Q264.66 174.46 267.32 176.76Q269.98 179.07 273.87 179.07Q275.89 179.07 278.05 178.49Q280.21 177.92 282.08 176.91V197.21Q277.62 198.51 274.16 198.87Q270.7 199.23 268.11 199.23Z M286.83 197.5V177.92L322.98 141.05V140.19H287.55V121.47H350.19V141.2L314.05 178.2V178.78H350.62V197.5Z M349.62 169.42V148.97H390.37V169.42Z M433.42 199.52Q421.04 199.52 412.18 193.32Q403.33 187.13 398.65 176.12Q393.97 165.1 393.97 150.7Q393.97 140.04 396.63 130.9Q399.3 121.76 404.91 114.92Q410.53 108.08 419.17 104.26Q427.81 100.44 439.76 100.44Q449.84 100.44 457.11 103.18Q464.38 105.92 468.99 110.81Q473.6 115.71 475.47 122.12Q477.34 128.52 476.62 135.87L454.88 138.46Q455.17 131.98 453.3 127.88Q451.42 123.77 447.75 121.76Q444.08 119.74 438.9 119.74Q432.7 119.74 428.1 123.05Q423.49 126.36 420.97 132.99Q418.45 139.61 418.45 149.55Q418.45 156.89 419.89 162.72Q421.33 168.56 424.21 172.52Q427.09 176.48 431.34 178.56Q435.58 180.65 441.06 180.65Q446.53 180.65 450.42 178.71Q454.3 176.76 456.39 173.38Q458.48 170 458.48 165.53H443.5V149.12H479.22V197.5H463.23V171.87H461.94Q461.22 180.8 457.69 186.99Q454.16 193.18 448.04 196.35Q441.92 199.52 433.42 199.52Z M521.98 199.52Q511.18 199.52 503.91 196.42Q496.64 193.32 492.18 187.92Q487.71 182.52 485.77 175.61Q483.82 168.7 483.82 161.07Q483.82 152.86 485.91 145.37Q488 137.88 492.39 132.05Q496.78 126.22 503.77 122.84Q510.75 119.45 520.54 119.45Q530.34 119.45 537.32 122.84Q544.3 126.22 548.48 132.27Q552.66 138.32 553.88 146.24Q555.1 154.16 553.52 163.37L506.43 164.09Q507.01 172.59 510.18 176.91Q514.06 182.24 522.13 182.24Q525.58 182.24 527.89 181.37Q530.19 180.51 531.63 178.85Q533.07 177.2 533.65 174.82Q534.22 172.44 534.08 169.42L555.39 170.57Q555.82 175.32 554.46 180.36Q553.09 185.4 549.34 189.72Q545.6 194.04 538.9 196.78Q532.21 199.52 521.98 199.52ZM506.86 151.42 532.93 150.84Q532.78 148.83 532.5 146.96Q531.34 142.49 528.46 140.12Q525.58 137.74 520.54 137.74Q515.22 137.74 512.05 140.48Q508.88 143.21 507.58 148.11Q507.15 149.69 506.86 151.42Z M560.58 197.5V121.47H580.3V152.43H581.46Q582.32 141.2 585.2 133.92Q588.08 126.65 593.41 123.05Q598.74 119.45 606.94 119.45Q619.33 119.45 625.59 127.66Q631.86 135.87 631.86 152.14V197.5H608.53V155.16Q608.53 147.39 606.15 143.5Q603.78 139.61 598.59 139.61Q594.27 139.61 590.96 142.64Q587.65 145.66 585.78 152.43Q583.9 159.2 583.9 170.57V197.5Z M639.2 197.5V102.46H704.14V121.9H662.53V144.65H699.25V163.66H662.53V197.5Z M707.74 197.5V121.47H727.9V151.71H729.06Q729.92 139.61 732.44 132.63Q734.96 125.64 738.78 122.69Q742.59 119.74 747.34 119.74Q749.94 119.74 752.74 120.46Q755.55 121.18 758.29 122.76L757.14 148.68Q753.97 146.81 750.94 145.88Q747.92 144.94 745.18 144.94Q740.58 144.94 737.41 147.53Q734.24 150.12 732.58 155.16Q730.93 160.2 730.93 167.4V197.5Z M796.88 199.52Q786.08 199.52 778.81 196.42Q771.54 193.32 767.07 187.92Q762.61 182.52 760.66 175.61Q758.72 168.7 758.72 161.07Q758.72 152.86 760.81 145.37Q762.9 137.88 767.29 132.05Q771.68 126.22 778.66 122.84Q785.65 119.45 795.44 119.45Q805.23 119.45 812.22 122.84Q819.2 126.22 823.38 132.27Q827.55 138.32 828.78 146.24Q830 154.16 828.42 163.37L781.33 164.09Q781.9 172.59 785.07 176.91Q788.96 182.24 797.02 182.24Q800.48 182.24 802.78 181.37Q805.09 180.51 806.53 178.85Q807.97 177.2 808.54 174.82Q809.12 172.44 808.98 169.42L830.29 170.57Q830.72 175.32 829.35 180.36Q827.98 185.4 824.24 189.72Q820.5 194.04 813.8 196.78Q807.1 199.52 796.88 199.52ZM781.76 151.42 807.82 150.84Q807.68 148.83 807.39 146.96Q806.24 142.49 803.36 140.12Q800.48 137.74 795.44 137.74Q790.11 137.74 786.94 140.48Q783.78 143.21 782.48 148.11Q782.05 149.69 781.76 151.42Z M871.33 199.52Q860.53 199.52 853.26 196.42Q845.98 193.32 841.52 187.92Q837.06 182.52 835.11 175.61Q833.17 168.7 833.17 161.07Q833.17 152.86 835.26 145.37Q837.34 137.88 841.74 132.05Q846.13 126.22 853.11 122.84Q860.1 119.45 869.89 119.45Q879.68 119.45 886.66 122.84Q893.65 126.22 897.82 132.27Q902 138.32 903.22 146.24Q904.45 154.16 902.86 163.37L855.78 164.09Q856.35 172.59 859.52 176.91Q863.41 182.24 871.47 182.24Q874.93 182.24 877.23 181.37Q879.54 180.51 880.98 178.85Q882.42 177.2 882.99 174.82Q883.57 172.44 883.42 169.42L904.74 170.57Q905.17 175.32 903.8 180.36Q902.43 185.4 898.69 189.72Q894.94 194.04 888.25 196.78Q881.55 199.52 871.33 199.52ZM856.21 151.42 882.27 150.84Q882.13 148.83 881.84 146.96Q880.69 142.49 877.81 140.12Q874.93 137.74 869.89 137.74Q864.56 137.74 861.39 140.48Q858.22 143.21 856.93 148.11Q856.5 149.69 856.21 151.42Z" style="fill: var(--ink, #161616)"/>
+  <circle cx="941.3" cy="122.5" r="20" fill="none" style="stroke: var(--ink, #161616)" stroke-width="5" stroke-dasharray="7.06 5"/>
+  <circle cx="941.3" cy="122.5" r="9" style="fill: var(--accent, #b8124f)"/>
+</svg></div>
+    <h1>Ranking a library without building a <em>structure</em> for every candidate</h1>
+    <p class="sub">Structure-generation-free ranking for first-stage affinity screening</p>
+    <p class="claim">Boltz-2 scores affinity by co-folding a structure for every candidate. GenFree builds
+      none, keeps the released affinity checkpoint unchanged, and returns only a ranking.</p>
+
+    <div class="kpis">
+      <div class="kpi">
+        <div class="n">90%</div>
+        <div class="t">of Boltz-2&rsquo;s mean average precision on eight libraries. Boltzina: 67%.</div>
+      </div>
+      <div class="kpi">
+        <div class="n">0.0839</div>
+        <div class="t">mean AP when Boltz-2 re-ranks the top 10%. Boltz-2 alone: 0.0840.</div>
+      </div>
+      <div class="kpi">
+        <div class="n">8.5&ndash;8.9&times;</div>
+        <div class="t">lower cost for that two-stage screen, estimated on two timed targets.</div>
+      </div>
+    </div>
+
+    <p class="who"><b>Tsubasa Nagae</b><sup>1,2</sup> and <b>Kentaro Tomii</b><sup>1,2,*</sup></p>
+    <p class="aff"><sup>1</sup>Graduate School of Medical Life Science, Yokohama City University, Yokohama, Japan &nbsp;&middot;&nbsp;
+      <sup>2</sup>AIRC, National Institute of Advanced Industrial Science and Technology (AIST), Tokyo, Japan &nbsp;&middot;&nbsp;
+      <sup>*</sup><a href="mailto:k-tomii@aist.go.jp">k-tomii@aist.go.jp</a></p>
+
+    <nav class="links">
+      <a class="pri" href="https://github.com/N283T/boltz-genfree">Code</a>
+      <a href="https://doi.org/10.5281/zenodo.23949585">Data and analysis</a>
+      <a href="#methods">Methods and settings</a>
+      <a href="#cite">Cite</a>
+    </nav>
+    <p class="status">Preprint in preparation.</p>
+  </div>
+</header>
+
+<nav class="nav" aria-label="Sections">
+  <div class="inner">
+    <a href="#problem">1 Problem</a>
+    <a href="#how">2 How Boltz-2 scores</a>
+    <a href="#prior">3 Prior work</a>
+    <a href="#interventions">4 Interventions</a>
+    <a href="#design">5 Design</a>
+    <a href="#results">6 Results</a>
+    <a href="#twostage">7 Two-stage screen</a>
+    <a href="#ft300">8 Label selection</a>
+    <a href="#limits">9 Limitations</a>
+    <a href="#methods">10 Methods</a>
+  </div>
+</nav>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="shead"><div class="num">01</div>
+      <h2>A screen needs a ranking, not a structure for every candidate</h2></div>
+    <div class="body">
+      <p class="lede">Boltz-2 is useful, but expensive for full-library screening.</p>
+
+      <div class="lanes" role="group" aria-label="Boltz-2 builds a structure for every candidate; GenFree does not">
+
+        <!-- Boltz-2 lane -->
+        <div class="lane-top"><div class="brace"><span>Paid for every candidate</span></div></div>
+        <div class="lane">
+          <div class="lname"><b>Boltz-2</b><span class="pill slow">Slow</span></div>
+          <div class="cell"><div class="card" tabindex="0"><b>Large library</b><small>10,000+</small></div></div>
+          <div class="join">&rarr;</div>
+          <div class="cell"><div class="card c-s1 tip" tabindex="0" data-tip="Co-folds the complex, then samples poses again inside the affinity step."><b>Generate structure</b><small>Rate-limiting</small></div><div class="ask">Needed for affinity?</div></div>
+          <div class="join">&rarr;</div>
+          <div class="cell"><div class="card c-s2 tip" tabindex="0" data-tip="Reads the generated structure through the crop and the distogram."><b>Affinity score</b><small>+ poses</small></div></div>
+          <div class="join">&rarr;</div>
+          <div class="cell"><div class="card tip r" tabindex="0" data-tip="The only output a first-stage screen uses."><b>Ranking</b>
+            <span class="bars"><i style="width:100%;background:#161616"></i><i style="width:78%;background:#565656"></i><i style="width:52%;background:#bdbdb8"></i></span></div></div>
+        </div>
+
+        <!-- GenFree lane -->
+        <div class="lane gf">
+          <div class="lname"><b>GenFree</b><span class="pill fast">Fast</span></div>
+          <div class="cell"><div class="card" tabindex="0"><b>Large library</b><small>10,000+</small></div></div>
+          <div class="join dim">&rarr;</div>
+          <div class="cell"><div class="card c-none tip" tabindex="0" data-tip="No co-folding and no docking for any candidate."><b>No structure generation</b></div></div>
+          <div class="join dim">&rarr;</div>
+          <div class="cell"><div class="card c-gf tip" tabindex="0" data-tip="The same released affinity checkpoint. No pose goes in."><b>Affinity score</b><small>no poses</small></div></div>
+          <div class="join">&rarr;</div>
+          <div class="cell"><div class="card c-gf tip r" tabindex="0" data-tip="The only output a first-stage screen uses."><b>Ranking</b>
+            <span class="bars"><i style="width:100%;background:#b8124f"></i><i style="width:78%;background:#d47a9c"></i><i style="width:52%;background:#f0bcd0"></i></span></div></div>
+        </div>
+        <div class="lane-under"><div class="under"><span>Processed inputs</span></div></div>
+
+      </div>
+
+      <p>At the same time, several studies suggest that the pose contributes little to the predicted affinity
+        (<a href="https://doi.org/10.26434/chemrxiv.15006767/v2">Ujihara 2026</a>;
+        <a href="https://doi.org/10.1021/acs.jcim.5c02630">Bret et al. 2026</a>;
+        <a href="https://arxiv.org/abs/2508.17555">Furui and Ohue 2025</a>).</p>
+
+      <p>We examined this in detail by intervening on the individual inputs of the affinity module.</p>
+
+      <p>Based on those results, we built GenFree. It uses the same Boltz-2 weights, generates no structure,
+        and screens fast.</p>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <div class="shead"><div class="num">02</div>
+      <h2>How the Boltz-2 affinity prediction uses a structure</h2></div>
+    <div class="body">
+      <p class="lede">A Boltz-2 affinity run hands the affinity module two things that depend on the generated
+        structures: the token set it scores, and a binned distogram.</p>
+
+      <p class="hint2">Where this happens in Boltz-2. Click a crimson part for its details. <span class="swipe">Scroll sideways on a phone.</span></p>
+      <div class="arch-scroll"><div class="arch" role="group" aria-label="Boltz-2 affinity prediction. Stage 1: the structure checkpoint generates poses and the best pose is cropped to the ligand and nearby residues (the cropped tokens). Stage 2: the affinity trunk builds a pair representation, local pose sampling generates poses on the crop, and their distogram is combined with the pair representation into the affinity prediction">
+        <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="prot-rib" viewBox="0 0 427 427"><path d="M90,270c-4-3 -21-15 -26-19c-22-22 22-46 48-20c22,18 23,19 25,20c17,18 -13,39 -47,19Z" fill="#8a8a85"/><path d="M88,382c-10-4 -50-28 -61-37c-15-19 10-42 45-18c3,3 18,14 28,24c7,8 0,38 -12,31Z" fill="#8a8a85"/><path d="M204,89c-3-2 -24-12 -24-18c0-7 11-16 41,0c30,17 18,33 -17,18Z" fill="#8a8a85"/><path d="M131,176c-1-1 -11-8 -22-17c-16-17 13-42 48-21c0,0 0,0 0,0c2,2 19,15 27,22c22,22 -27,37 -53,16Z" fill="#8a8a85"/><path d="M255,330c-2,4 -1,4 -3,8c-1,3 -1,3 -4,8c-2,4 -3,5 -6,7c-3,2 -6,3 -6,4c0,0 -15,7 -31-3c-6-4 -9-9 -9-10c-2-4 -3-13 0-22c1-1 1-3 3-7c2-3 2-3 3-7c0,0 0,0 1-3c0,0 7-13 9-15c0,0 0-1 4-6c1-2 8-13 12-19c1-1 1-2 4-6c0,0 3-5 4-6c0-1 0-1 5-9c5-8 5-8 10-17c0,0 1-1 2-3c1-2 1-1 12-19c5-9 6-9 11-17c0-1 0-1 4-7c1-2 1-2 3-4c4-6 6-10 6-10c0-1 0-1 -1-1c-2-1 -10-4 -12-6c0,0 -2-2 -3-6c0-2 1-7 5-8c5-2 6-2 11-4c1,0 1,0 7-3c1,0 1,0 7-3c3-1 3-1 6-2c1-1 12-4 15-6c1,0 1,0 7-3c3-1 5-2 7-3c5-2 12-1 13,6c0,2 1,7 4,21c1,6 1,6 2,12c0,1 1,2 2,10c0,1 1,6 2,11c1,8 3,9 0,14c-1,2 -5,5 -11,3c-4-1 -10-5 -11-5c-1,0 -1,0 -1,1c0,1 0,1 -5,8c0,0 -17,26 -19,28c-7,10 -7,10 -7,11c0,0 -15,23 -17,26c-1,1 -1,1 -9,14c-1,2 -1,2 -2,3c-4,6 -4,6 -8,12c-16,26 -16,26 -19,33Z" fill="#565656"/><path d="M323,382c-7,32 -48,61 -91,32c-15-10 -30-42 -16-44c11-2 10,16 15,23c13,16 40,31 66,6c25-24 0-81 42-127c29-32 82-19 86,21c3,32 -23,57 -26,60c-14,15 -22,1 -15-7c2-2 26-23 26-48c1-28 -41-47 -69-5c-17,25 -15,74 -19,90Z" fill="#b4b4ae"/><path d="M183,160c11,9 13,16 13,17c0,1 1,3 0,9c0,6 -4,12 -6,17c0,0 -2,3 -3,6c0,1 0,1 -5,10c-3,6 -4,7 -4,7c-2,2 -4,4 -8,7c-2,1 -6,3 -10,3c-12,2 -26-1 -29-2c-7-1 -7-2 -14-3c-3-1 -6-1 -8-2c-16-3 -23-2 -33,0c-1,0 -6,2 -10,5c-4,3 -4,8 -4,11c0,2 1,4 1,5c0,0 -7-6 -8-13c0-2 -3-9 2-23c1-1 1-3 3-7c1-2 1-3 3-8c0-1 5-12 7-15c1-2 5-7 12-10c10-4 21-4 43,0c0,0 2,0 3,1c2,0 24,4 38,3c7,0 19-2 19-9c0-3 -3-10 -3-10Z" fill="#b4b4ae"/><path d="M221,71c38,19 20,45 12,58c-2,4 -12,23 -38,18c-8-2 -59-19 -81-5c-11,7 -5,15 -5,17c-4-4 -21-20 13-67c6-8 21-15 48-10c19,4 23,6 34,6c11,1 37,4 30-6c-7-11 -12-11 -12-12Z" fill="#b4b4ae"/><path d="M136,250c19,15 15,30 -1,60c-1,3 -6,16 -24,19c-11,2 -71-9 -82-1c-9,7 -3,16 -3,16c-17-14 -8-35 -2-49c2-6 8-24 23-27c14-3 29,1 40,2c15,1 40,1 47-4c8-5 2-14 1-15Z" fill="#b4b4ae"/><path d="M100,351c13,12 8,32 -5,42c-12,8 -55,1 -84,10c-10,3 -17-10 -4-14c18-6 73-3 84-8c13-5 9-30 9-30Z" fill="#b4b4ae"/><path d="M223,59c0,0 -3-1 -4-2c-4-5 1-11 2-13c1-1 4-6 5-7c1-1 4-6 12-13c9-9 20-14 21-14c5-2 13-6 27-9c16-3 29,0 34,1c8,2 10,3 15,6c8,4 14,10 15,11c3,3 8,9 9,11c6,9 6,11 8,16c1,4 3,12 4,17c1,10 0,16 -2,26c-1,4 -3,11 -4,14c-3,6 -2,7 -3,7c-3,5 -11,5 -14,0c-1-2 -1-3 -1-6c0-1 6-12 7-21c0-1 1-7 1-11c0-9 -1-18 -7-29c-1-1 -4-8 -11-14c-5-4 -10-7 -13-8c-5-2 -5-2 -10-4c-15-4 -29-1 -36,1c-6,2 -14,5 -14,6c-7,4 -9,5 -15,10c-4,4 -8,8 -9,9c-3,4 -3,4 -6,8c-2,3 -2,4 -3,6c-1,1 -2,2 -2,2c-3,2 -4,2 -7,1Z" fill="#b4b4ae"/></symbol><symbol id="lig" viewBox="1943.7 725.6 241 133"><g style="fill:none;stroke:var(--lig-ink,var(--ink));stroke-width:var(--lig-w,12.44px);stroke-linecap:round;stroke-linejoin:round"><path style="fill:var(--lig-fill,var(--panel))" d="M2050.998,731.822L2094.942,757.1L2094.942,807.656L2050.998,832.934L2007.054,807.656L2007.054,757.1Z"/><path d="M2094.943,757.099L2136.554,735.71L2167.665,759.043"/><path d="M2007.054,807.655L1969.332,832.933"/></g><circle cx="2167.665" cy="759.044" r="16.333" style="fill:var(--lig-ink,var(--ink))"/></symbol><symbol id="seq" viewBox="1326 744.877 442 75"><g style="fill:var(--ink-2)"><circle cx="1363.498" cy="782.377" r="37.5"/><circle cx="1455.165" cy="782.377" r="37.5" opacity=".5"/><circle cx="1546.831" cy="782.377" r="37.5"/><circle cx="1638.498" cy="782.377" r="37.5" opacity=".5"/><circle cx="1730.165" cy="782.377" r="37.5"/></g></symbol><defs><path id="arch-chain" d="M39,296.2 L74,281.8 Q109,267.4 146.5,287.2 Q184,307 159,330.4 Q134,353.8 94,368.2 Q54,382.6 99,389.8 Q144,397 191.5,386.2 Q239,375.4 256.5,350.2 Q274,325 259,301.6 Q244,278.2 284,272.8 Q324,267.4 349,289 Q374,310.6 359,335.8 Q344,361 374,377.2 Q404,393.4 436.5,377.2 Q469,361 456.5,334 Q444,307 464,290.8 L484,274.6"/><clipPath id="arch-pk"><circle cx="299" cy="327" r="80"/></clipPath></defs></svg>
+        <div class="stage">
+          <svg class="wires" viewBox="0 0 900 576" aria-hidden="true">
+            <defs><marker id="arch-ah" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto"><path class="ah" d="M0,0 L12,6 L0,12 Z"/></marker></defs>
+            <rect class="panel" x="0" y="0" width="900" height="186"/>
+            <rect class="panel" x="0" y="236" width="900" height="340"/>
+            <text class="stg" x="24" y="30">Stage 1 · predict the structure</text>
+            <text class="stg" x="876" y="266" text-anchor="end">Stage 2 · predict the affinity</text>
+            <!-- stage 1 -->
+            <path class="w" d="M174,103 H254" marker-end="url(#arch-ah)"/>
+            <path class="w" d="M408,103 H488" marker-end="url(#arch-ah)"/>
+            <path class="w" d="M642,103 H722" marker-end="url(#arch-ah)"/>
+            <text class="wl" x="682" y="91" text-anchor="middle">top-ranked</text>
+            <!-- crop: best pose down, across the gap, into the tokens -->
+            <path class="w" d="M801,162 V211 H104 V280" marker-end="url(#arch-ah)"/>
+            <rect class="pill" x="370" y="199" width="200" height="24"/>
+            <text class="wl" x="470" y="216" text-anchor="middle">crop around the ligand</text>
+            <!-- stage 2 -->
+            <path class="w" d="M184,341 H218" marker-end="url(#arch-ah)"/>
+            <path class="w" d="M362,341 H396" marker-end="url(#arch-ah)"/>
+            <path class="w" d="M520,341 H684" marker-end="url(#arch-ah)"/>
+            <path class="w" d="M460,400 V432" marker-end="url(#arch-ah)"/>
+            <path class="w" d="M530,493 H626" marker-end="url(#arch-ah)"/>
+            <path class="w" d="M700,433 V356" marker-end="url(#arch-ah)"/>
+            <circle class="plus" cx="700" cy="341" r="13"/>
+            <path class="w" d="M693,341 H707 M700,334 V348"/>
+            <path class="w" d="M713,341 H732" marker-end="url(#arch-ah)"/>
+          </svg>
+
+          <!-- stage 1 -->
+          <div class="bx tip dn" style="left:24px;top:44px;width:150px" tabindex="0" data-tip="The ligand is given as a SMILES string or a CCD code. Boltz also needs an MSA for the protein (a file or the MSA server); pocket or contact constraints and templates are optional.">
+            <span class="pic in" aria-hidden="true"><svg class="seq"><use href="#seq"/></svg><svg class="lig"><use href="#lig"/></svg></span>
+            <span>Input<small>sequence + ligand</small></span></div>
+          <div class="bx ck tip dn" style="left:258px;top:44px;width:150px" tabindex="0" data-tip="The trunk (MSA module and Pairformer, 3 recycling steps by default) feeds a diffusion module that samples atom coordinates.">
+            <svg class="ic" viewBox="0 0 40 40" aria-hidden="true"><path d="M3 24 C7 8 13 8 15 18 C17 28 23 28 25 18 C27 8 33 8 37 22"/><path d="M6 33 L30 33"/><path d="M26 29 L31 33 L26 37"/></svg>
+            <span>Structure checkpoint</span></div>
+          <div class="bx dep tip dn" style="left:492px;top:44px;width:150px" tabindex="0" data-tip="One sample by default; --diffusion_samples asks for more. Each gets a confidence score.">
+            <span class="stack" aria-hidden="true"><svg class="cx" viewBox="0 0 427 427"><use href="#prot-rib"/><use href="#lig" x="190" y="40" width="260" height="144"/></svg><svg class="cx" viewBox="0 0 427 427"><use href="#prot-rib"/><use href="#lig" x="150" y="110" width="260" height="144"/></svg><svg class="cx" viewBox="0 0 427 427"><use href="#prot-rib"/><use href="#lig" x="110" y="180" width="260" height="144"/></svg></span>
+            <span>Poses</span></div>
+          <div class="bx dep tip dn r" style="left:726px;top:44px;width:150px" tabindex="0" data-tip="Poses are ranked by confidence score, (4 &times; complex pLDDT + ipTM) / 5, with pTM in place of ipTM when ipTM is zero. Only the top one is passed on.">
+            <svg class="cx" viewBox="0 0 427 427"><use href="#prot-rib"/><use href="#lig" x="150" y="110" width="260" height="144"/></svg>
+            <span>Best pose</span></div>
+
+          <!-- stage 2 -->
+          <a class="bx dep tip dn" style="left:24px;top:282px;width:160px" href="#how-a" data-tip="The ligand and its nearest receptor tokens, up to a size limit. Click for details.">
+            <svg class="crop" viewBox="28 242 468 170" aria-hidden="true"><use class="ch" href="#arch-chain"/><use class="ch on" href="#arch-chain" clip-path="url(#arch-pk)"/><circle class="ring" cx="299" cy="327" r="80"/><use href="#lig" x="242" y="297" width="128" height="71"/></svg>
+            <span><u>Cropped tokens</u><small>ligand + neighbours</small></span></a>
+          <div class="bx tip dn" style="left:222px;top:282px;width:140px" tabindex="0" data-tip="A separate checkpoint (boltz2_aff.ckpt) runs the embedder and trunk again on the crop, with 5 recycling steps.">
+            <svg class="ic" viewBox="0 0 40 40" aria-hidden="true"><polygon class="wh" points="4,26 28,26 36,33 12,33"/><polygon class="wh" points="4,17 28,17 36,24 12,24"/><polygon class="wh" points="4,8 28,8 36,15 12,15"/></svg>
+            <span>Affinity trunk</span></div>
+          <div class="bx pair tip dn" style="left:400px;top:282px;width:120px" tabindex="0" data-tip="Only ligand&ndash;protein and ligand&ndash;ligand pairs are kept; protein&ndash;protein pairs are masked out.">
+            <svg class="pr" viewBox="0 0 70 70" aria-hidden="true"><rect class="bg" x="7" y="7" width="63" height="63"/><rect class="tp" x="7" y="0" width="7" height="5"/><rect class="tp" x="0" y="7" width="5" height="7"/><rect class="tp" x="15" y="0" width="7" height="5"/><rect class="tp" x="0" y="15" width="5" height="7"/><rect class="tp" x="23" y="0" width="7" height="5"/><rect class="tp" x="0" y="23" width="5" height="7"/><rect class="tp" x="31" y="0" width="7" height="5"/><rect class="tp" x="0" y="31" width="5" height="7"/><rect class="tp" x="39" y="0" width="7" height="5"/><rect class="tp" x="0" y="39" width="5" height="7"/><rect class="tp" x="47" y="0" width="7" height="5"/><rect class="tp" x="0" y="47" width="5" height="7"/><rect class="tl" x="55" y="0" width="7" height="5"/><rect class="tl" x="0" y="55" width="5" height="7"/><rect class="tl" x="63" y="0" width="7" height="5"/><rect class="tl" x="0" y="63" width="5" height="7"/><rect class="v0" x="7" y="7" width="7" height="7"/><rect class="v1" x="15" y="7" width="7" height="7"/><rect class="v2" x="23" y="7" width="7" height="7"/><rect class="v3" x="31" y="7" width="7" height="7"/><rect class="v3" x="39" y="7" width="7" height="7"/><rect class="v2" x="47" y="7" width="7" height="7"/><rect class="v3" x="55" y="7" width="7" height="7"/><rect class="v3" x="63" y="7" width="7" height="7"/><rect class="v1" x="7" y="15" width="7" height="7"/><rect class="v0" x="15" y="15" width="7" height="7"/><rect class="v1" x="23" y="15" width="7" height="7"/><rect class="v2" x="31" y="15" width="7" height="7"/><rect class="v2" x="39" y="15" width="7" height="7"/><rect class="v3" x="47" y="15" width="7" height="7"/><rect class="v3" x="55" y="15" width="7" height="7"/><rect class="v3" x="63" y="15" width="7" height="7"/><rect class="v2" x="7" y="23" width="7" height="7"/><rect class="v1" x="15" y="23" width="7" height="7"/><rect class="v0" x="23" y="23" width="7" height="7"/><rect class="v1" x="31" y="23" width="7" height="7"/><rect class="v2" x="39" y="23" width="7" height="7"/><rect class="v3" x="47" y="23" width="7" height="7"/><rect class="v2" x="55" y="23" width="7" height="7"/><rect class="v2" x="63" y="23" width="7" height="7"/><rect class="v3" x="7" y="31" width="7" height="7"/><rect class="v2" x="15" y="31" width="7" height="7"/><rect class="v1" x="23" y="31" width="7" height="7"/><rect class="v0" x="31" y="31" width="7" height="7"/><rect class="v1" x="39" y="31" width="7" height="7"/><rect class="v2" x="47" y="31" width="7" height="7"/><rect class="v1" x="55" y="31" width="7" height="7"/><rect class="v1" x="63" y="31" width="7" height="7"/><rect class="v3" x="7" y="39" width="7" height="7"/><rect class="v2" x="15" y="39" width="7" height="7"/><rect class="v2" x="23" y="39" width="7" height="7"/><rect class="v1" x="31" y="39" width="7" height="7"/><rect class="v0" x="39" y="39" width="7" height="7"/><rect class="v1" x="47" y="39" width="7" height="7"/><rect class="v1" x="55" y="39" width="7" height="7"/><rect class="v1" x="63" y="39" width="7" height="7"/><rect class="v2" x="7" y="47" width="7" height="7"/><rect class="v3" x="15" y="47" width="7" height="7"/><rect class="v3" x="23" y="47" width="7" height="7"/><rect class="v2" x="31" y="47" width="7" height="7"/><rect class="v1" x="39" y="47" width="7" height="7"/><rect class="v0" x="47" y="47" width="7" height="7"/><rect class="v0" x="55" y="47" width="7" height="7"/><rect class="v0" x="63" y="47" width="7" height="7"/><rect class="v3" x="7" y="55" width="7" height="7"/><rect class="v3" x="15" y="55" width="7" height="7"/><rect class="v2" x="23" y="55" width="7" height="7"/><rect class="v1" x="31" y="55" width="7" height="7"/><rect class="v1" x="39" y="55" width="7" height="7"/><rect class="v0" x="47" y="55" width="7" height="7"/><rect class="v0" x="55" y="55" width="7" height="7"/><rect class="v0" x="63" y="55" width="7" height="7"/><rect class="v3" x="7" y="63" width="7" height="7"/><rect class="v3" x="15" y="63" width="7" height="7"/><rect class="v2" x="23" y="63" width="7" height="7"/><rect class="v1" x="31" y="63" width="7" height="7"/><rect class="v1" x="39" y="63" width="7" height="7"/><rect class="v0" x="47" y="63" width="7" height="7"/><rect class="v0" x="55" y="63" width="7" height="7"/><rect class="v0" x="63" y="63" width="7" height="7"/></svg>
+            <span>Pair repr.</span></div>
+          <div class="bx ck tip" style="left:390px;top:434px;width:140px" tabindex="0" data-tip="3 diffusion samples on the crop by default. The one with the highest ipTM is kept for the distogram.">
+            <span class="lps" aria-hidden="true"><svg viewBox="0 0 40 36"><path d="M6,34 C2,26 4,17 9,12 C14,6 27,5 32,11 C37,16 35,23 33,28 C32,31 34,33 37,34"/><g transform="translate(19,24) rotate(8)"><polygon points="0,-7 6.06,-3.5 6.06,3.5 0,7 -6.06,3.5 -6.06,-3.5"/></g></svg><svg viewBox="0 0 40 36"><path d="M4,32 C3,24 6,15 12,10 C18,5 29,6 33,13 C36,19 33,25 34,29 C35,32 36,33 38,34"/><g transform="translate(21,23)"><polygon points="0,-7 6.06,-3.5 6.06,3.5 0,7 -6.06,3.5 -6.06,-3.5"/></g></svg><svg viewBox="0 0 40 36"><path d="M5,34 C4,27 3,19 8,14 C13,8 24,4 31,9 C37,14 36,21 34,26 C33,30 35,33 37,33"/><g transform="translate(20,25) rotate(-12)"><polygon points="0,-7 6.06,-3.5 6.06,3.5 0,7 -6.06,3.5 -6.06,-3.5"/></g></svg></span>
+            <span>Local pose sampling</span></div>
+          <a class="bx dep tip r" style="left:630px;top:434px;width:140px" href="#how-b" data-tip="Distances in the kept pose, sorted into bins. Click for details.">
+            <svg class="ic wide" viewBox="0 0 58 40" aria-hidden="true"><g class="f" stroke="none"><rect x="4" y="27" width="5" height="7"/><rect x="10.5" y="20" width="5" height="14"/><rect x="17" y="11" width="5" height="23"/><rect x="23.5" y="6" width="5" height="28"/><rect x="30" y="14" width="5" height="20"/><rect x="36.5" y="22" width="5" height="12"/><rect x="43" y="29" width="5" height="5"/><rect x="49.5" y="32" width="5" height="2"/></g><path d="M2 35H56"/></svg>
+            <span><u>Distogram</u></span></a>
+          <div class="bx out tip r" style="left:736px;top:282px;width:140px" tabindex="0" data-tip="An affinity value, log10(IC50) with IC50 in &micro;M (lower binds tighter), and a binder probability. Each is the average of two affinity modules.">
+            <span>Affinity prediction</span></div>
+        </div>
+
+        <ul class="legend" aria-label="Legend">
+          <li><i class="k ck"></i>Generates a structure</li>
+          <li><i class="k dep"></i>Depends on a generated structure</li>
+          <li><i class="k"></i>Rest of the affinity pathway</li>
+        </ul>
+      </div></div>
+
+      <p>Two structures are generated: stage 1 co-folds the complex, and stage 2 samples local poses again on the crop.</p>
+
+      <h3 id="how-a">(a) The crop: which tokens the affinity checkpoint sees</h3>
+      <p>The cropper orders tokens by distance to the ligand and adds chain stretches until a limit:
+        256 tokens, 200 protein tokens, 2,048 atoms. The checkpoint sees the ligand and its neighbourhood, not
+        the receptor.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 524" role="img" aria-label="The affinity cropper selects ligand-proximal tokens; five of eight receptors exceed the 200-protein-token limit">
+          <text class="f-ttl" x="16" y="22">Tokens selected around the ligand</text>
+
+          <!-- ligand glyph -->
+          <g transform="translate(257,60)">
+            <polygon points="0,-14 12,-7 12,7 0,14 -12,7 -12,-7" fill="none" stroke="#161616" stroke-width="3.4"/>
+            <line x1="12" y1="-7" x2="28" y2="-16" stroke="#161616" stroke-width="3.4" stroke-linecap="round"/>
+            <line x1="-12" y1="7" x2="-27" y2="16" stroke="#161616" stroke-width="3.4" stroke-linecap="round"/>
+            <circle cx="28" cy="-16" r="4.6" fill="#161616"/>
+            <circle cx="-27" cy="16" r="4.6" fill="#161616"/>
+          </g>
+          <text class="f-lab" x="300" y="46">ligand</text>
+          <text class="f-sub" x="300" y="64">generated pose</text>
+          <path class="ar dash" d="M250 76 C 238 86, 236 86, 232 90" stroke="#9c3d2e"/>
+          <path class="ar dash" d="M266 76 C 276 86, 280 86, 286 90" stroke="#9c3d2e"/>
+
+          <!-- token strip: 60 tokens, pitch 10.4, x from 70 -->
+          <text class="f-cap" x="70" y="88">1 square = 1 token</text>
+          <g>
+            <rect x="70.0" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="80.4" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="90.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="101.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="111.6" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="122.0" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="132.4" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="142.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="153.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="163.6" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="174.0" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="184.4" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="194.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="205.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="215.6" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="226.0" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="236.4" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="246.8" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="257.2" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="267.6" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="278.0" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="288.4" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="298.8" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="309.2" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="319.6" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="330.0" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="340.4" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="350.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="361.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="371.6" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="382.0" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="392.4" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="402.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="413.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="423.6" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="434.0" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="444.4" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="454.8" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="465.2" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="475.6" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="486.0" y="98" width="9" height="26" fill="#f7e5df" stroke="#9c3d2e"/>
+            <rect x="496.4" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="506.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="517.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="527.6" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="538.0" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="548.4" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="558.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="569.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="579.6" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="590.0" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="600.4" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="610.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="621.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="631.6" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="642.0" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="652.4" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="662.8" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+            <rect x="673.2" y="98" width="9" height="26" fill="#f1f1ee" stroke="#bdbdb8"/>
+          </g>
+          <!-- braces under the two selected runs -->
+          <path class="ar nohead" d="M226 132 L226 140 L349 140 L349 132" stroke="#9c3d2e" stroke-width="1.8"/>
+          <path class="ar nohead" d="M434 132 L434 140 L495 140 L495 132" stroke="#9c3d2e" stroke-width="1.8"/>
+          <text class="f-sub" x="287" y="158" text-anchor="middle">selected neighbourhood</text>
+          <text class="f-sub" x="465" y="158" text-anchor="middle">second stretch</text>
+          <text class="f-sub" x="744" y="152" text-anchor="end">not selected</text>
+
+          <!-- limits -->
+          <rect class="s2box" x="16" y="174" width="222" height="62"/>
+          <text class="f-lab t-s2" x="30" y="196">Stop at the first limit</text>
+          <text class="f-sub" x="30" y="214">256 tokens, 200 protein tokens,</text>
+          <text class="f-sub" x="30" y="230">2,048 atoms</text>
+          <path class="ar" d="M244 205 L276 205"/>
+          <rect class="s2box" x="282" y="174" width="196" height="62"/>
+          <text class="f-lab t-s2" x="296" y="196">The crop</text>
+          <text class="f-sub" x="296" y="214">ligand plus</text>
+          <text class="f-sub" x="296" y="230">ligand-proximal tokens</text>
+          <path class="ar" d="M484 205 L516 205"/>
+          <rect class="box" x="522" y="174" width="222" height="62"/>
+          <text class="f-lab" x="536" y="196">Affinity checkpoint input</text>
+          <text class="f-sub" x="536" y="214">not the whole receptor</text>
+
+          <!-- panel 2 -->
+          <line class="gl" x1="16" y1="254" x2="744" y2="254"/>
+          <text class="f-ttl" x="16" y="282">Receptor size against the 200-token limit</text>
+          <line class="axis" x1="120" y1="294" x2="120" y2="500"/>
+          <line x1="265" y1="294" x2="265" y2="500" stroke="#b8124f" stroke-width="2" stroke-dasharray="7 5"/>
+          <text class="f-numl" x="269" y="308" fill="#b8124f" style="fill:#b8124f">200</text>
+
+          <rect class="b-cf" x="120" y="316" width="100.7" height="15"/>
+          <text class="f-lab" x="112" y="328" text-anchor="end">ALR</text>
+          <text class="f-num" x="556" y="328">139</text>
+          <rect class="s2box" x="120" y="342" width="246.3" height="15"/>
+          <text class="f-lab" x="112" y="354" text-anchor="end">GSK3A</text>
+          <text class="f-num" x="556" y="354">340</text>
+          <rect class="s2box" x="120" y="368" width="304.2" height="15"/>
+          <text class="f-lab" x="112" y="380" text-anchor="end">GSK3B</text>
+          <text class="f-num" x="556" y="380">420</text>
+          <rect class="b-cf" x="120" y="394" width="102.1" height="15"/>
+          <text class="f-lab" x="112" y="406" text-anchor="end">NSD2</text>
+          <text class="f-num" x="556" y="406">141</text>
+          <rect class="b-cf" x="120" y="420" width="130.4" height="15"/>
+          <text class="f-lab" x="112" y="432" text-anchor="end">CTDSP1</text>
+          <text class="f-num" x="556" y="432">180</text>
+          <rect class="s2box" x="120" y="446" width="186.1" height="15"/>
+          <text class="f-lab" x="112" y="458" text-anchor="end">NS5</text>
+          <text class="f-num" x="556" y="458">257</text>
+          <rect class="s2box" x="120" y="472" width="158.6" height="15"/>
+          <text class="f-lab" x="112" y="484" text-anchor="end">NS1</text>
+          <text class="f-num" x="556" y="484">219</text>
+          <rect class="s2box" x="120" y="498" width="420" height="15"/>
+          <text class="f-lab" x="112" y="510" text-anchor="end">FadD28</text>
+          <text class="f-num" x="556" y="510">580</text>
+        </svg>
+        </div>
+        <figcaption><b>Most receptors do not fit the crop.</b> 5 of the 8 targets exceed the
+          200-protein-token limit (brick); the whole-receptor setting here raises it to 580
+          tokens.</figcaption>
+      </figure>
+
+      <p>The crop decides what the network conditions on, and Section 4 shows it moves the result.</p>
+
+      <h3 id="how-b">(b) The distogram: how the sampled coordinates enter the score</h3>
+      <p>The affinity checkpoint does not reuse the first pose. It samples its own local poses on the crop and
+        keeps the highest-ipTM one. Those coordinates enter only as pairwise distances in 64 bins, boundaries
+        2 to 22 &#8491;, through a learned embedding.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 312" role="img" aria-label="Local poses become pairwise distances, 64 bins and a learned embedding">
+          <text class="f-ttl" x="16" y="22">Inside the affinity checkpoint: coordinates to pair features</text>
+          <text class="f-sub" x="16" y="42">boltz2_aff.ckpt, cropped tokens</text>
+
+          <!-- 1 local poses -->
+          <rect class="s2box" x="16" y="56" width="150" height="104"/>
+          <text class="f-lab t-s2" x="91" y="78" text-anchor="middle">Local poses</text>
+          <g fill="none" stroke="#9c3d2e" stroke-width="2.4">
+            <polygon points="74,104 86,97 86,83 74,76 62,83 62,97" opacity="0.45"/>
+            <polygon points="82,110 94,103 94,89 82,82 70,89 70,103" opacity="0.7"/>
+            <polygon points="90,116 102,109 102,95 90,88 78,95 78,109"/>
+          </g>
+          <text class="f-sub" x="91" y="142" text-anchor="middle">sampled here</text>
+          <path class="ar" d="M170 108 L192 108"/>
+
+          <!-- 2 distances -->
+          <rect class="dbox" x="196" y="56" width="150" height="104"/>
+          <text class="f-lab t-d" x="271" y="78" text-anchor="middle">Pairwise distances</text>
+          <g>
+            <rect x="238" y="88" width="13" height="13" fill="#2b5c9e"/>
+            <rect x="252" y="88" width="13" height="13" fill="#7a9ccb"/>
+            <rect x="266" y="88" width="13" height="13" fill="#c3d3e9"/>
+            <rect x="280" y="88" width="13" height="13" fill="#7a9ccb"/>
+            <rect x="238" y="102" width="13" height="13" fill="#7a9ccb"/>
+            <rect x="252" y="102" width="13" height="13" fill="#2b5c9e"/>
+            <rect x="266" y="102" width="13" height="13" fill="#7a9ccb"/>
+            <rect x="280" y="102" width="13" height="13" fill="#c3d3e9"/>
+            <rect x="238" y="116" width="13" height="13" fill="#c3d3e9"/>
+            <rect x="252" y="116" width="13" height="13" fill="#7a9ccb"/>
+            <rect x="266" y="116" width="13" height="13" fill="#2b5c9e"/>
+            <rect x="280" y="116" width="13" height="13" fill="#7a9ccb"/>
+          </g>
+          <text class="f-sub" x="271" y="150" text-anchor="middle">representative atoms</text>
+          <path class="ar" d="M350 108 L372 108"/>
+
+          <!-- 3 bins -->
+          <rect class="dbox" x="376" y="56" width="160" height="104"/>
+          <text class="f-lab t-d" x="456" y="78" text-anchor="middle">64 distance bins</text>
+          <g fill="#2b5c9e">
+            <rect x="398" y="118" width="7" height="12"/>
+            <rect x="407" y="110" width="7" height="20"/>
+            <rect x="416" y="98" width="7" height="32"/>
+            <rect x="425" y="90" width="7" height="40"/>
+            <rect x="434" y="96" width="7" height="34"/>
+            <rect x="443" y="104" width="7" height="26"/>
+            <rect x="452" y="94" width="7" height="36"/>
+            <rect x="461" y="106" width="7" height="24"/>
+            <rect x="470" y="114" width="7" height="16"/>
+            <rect x="479" y="120" width="7" height="10"/>
+            <rect x="488" y="124" width="7" height="6"/>
+            <rect x="497" y="126" width="7" height="4"/>
+          </g>
+          <line class="axis" x1="396" y1="130" x2="512" y2="130"/>
+          <text class="f-sub" x="456" y="150" text-anchor="middle">boundaries 2 to 22 &#8491;</text>
+          <path class="ar" d="M540 108 L562 108"/>
+
+          <!-- 4 embedding -->
+          <rect class="dbox" x="566" y="56" width="178" height="104"/>
+          <text class="f-lab t-d" x="655" y="78" text-anchor="middle">Learned embedding</text>
+          <g>
+            <rect x="592" y="94" width="14" height="22" fill="#2b5c9e"/>
+            <rect x="608" y="94" width="14" height="22" fill="#c3d3e9"/>
+            <rect x="624" y="94" width="14" height="22" fill="#7a9ccb"/>
+            <rect x="640" y="94" width="14" height="22" fill="#2b5c9e"/>
+            <rect x="656" y="94" width="14" height="22" fill="#c3d3e9"/>
+            <rect x="672" y="94" width="14" height="22" fill="#7a9ccb"/>
+            <rect x="688" y="94" width="14" height="22" fill="#2b5c9e"/>
+            <rect x="704" y="94" width="14" height="22" fill="#c3d3e9"/>
+          </g>
+          <text class="f-sub" x="655" y="142" text-anchor="middle">to pair feature width</text>
+
+          <path class="ar" d="M655 164 L655 196"/>
+          <rect class="zbox" x="430" y="200" width="314" height="72"/>
+          <text class="f-lab t-z" x="446" y="226">Pairwise conditioning</text>
+          <text class="f-sub" x="446" y="250">plus the trunk pair representation</text>
+
+          <rect class="gbox" x="16" y="200" width="390" height="72"/>
+          <text class="f-lab t-gf" x="32" y="226">The only way coordinates enter</text>
+          <text class="f-sub" x="32" y="250">GenFree zeroes it</text>
+
+        </svg>
+        </div>
+        <figcaption><b>Coordinates reach the heads only through a binned distogram.</b> The embedding meets the
+          trunk pair representation in the conditioner, whose output is added back before the
+          heads.</figcaption>
+      </figure>
+
+    </div>
+  </div>
+</section>
+
+<section id="prior">
+  <div class="wrap">
+    <div class="shead"><div class="num">03</div>
+      <h2>What earlier work already suggested</h2></div>
+    <div class="body">
+      <p class="lede">Three independent readings point the same way: the pose the affinity module is handed
+        matters much less than the context around it.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 314" role="img" aria-label="Response magnitudes reported by earlier work on pose-to-affinity information flow">
+          <text class="f-ttl" x="16" y="22">Ujihara 2026: affinity response</text>
+
+          <rect class="s1box" x="100" y="58" width="143" height="30"/>
+          <text class="f-lab t-s1" x="171" y="78" text-anchor="middle">under 3&times;</text>
+          <text class="f-sub" x="100" y="110">coordinates substituted, crop fixed</text>
+          <rect class="gbox" x="400" y="58" width="320" height="30"/>
+          <text class="f-lab t-gf" x="560" y="78" text-anchor="middle">10&times; and beyond</text>
+          <text class="f-sub" x="400" y="110">crop-level and end-to-end</text>
+
+          <line class="axis" x1="100" y1="128" x2="726" y2="128"/>
+          <g class="f-tick" text-anchor="middle">
+            <line class="axis" x1="100" y1="128" x2="100" y2="134"/><text x="100" y="150">1&times;</text>
+            <line class="axis" x1="243" y1="128" x2="243" y2="134"/><text x="243" y="150">3&times;</text>
+            <line class="axis" x1="400" y1="128" x2="400" y2="134"/><text x="400" y="150">10&times;</text>
+            <line class="axis" x1="543" y1="128" x2="543" y2="134"/><text x="543" y="150">30&times;</text>
+            <line class="axis" x1="700" y1="128" x2="700" y2="134"/><text x="700" y="150">100&times;</text>
+          </g>
+          <text class="f-cap" x="16" y="133">RESPONSE</text>
+
+          <line class="gl" x1="16" y1="172" x2="744" y2="172"/>
+
+          <text class="f-ttl" x="16" y="198">Furui and Ohue 2025: pose masked</text>
+          <rect class="b-bzn" x="200" y="210" width="224" height="18"/>
+          <text class="f-lab" x="192" y="224" text-anchor="end">docked pose</text>
+          <text class="f-num" x="432" y="224">0.056</text>
+          <rect x="200" y="236" width="172" height="18" fill="#c4c4bf"/>
+          <text class="f-lab" x="192" y="250" text-anchor="end">pose masked</text>
+          <text class="f-num" x="380" y="250">0.043</text>
+          <text class="f-sub" x="500" y="242">mean AP, ligand at the origin</text>
+
+          <text class="f-sub" x="16" y="297">Bret and colleagues 2026: little pose dependence</text>
+        </svg>
+        </div>
+        <figcaption><b>Magnitudes as published.</b> Substituting coordinates at a fixed crop changed the
+          predicted affinity under threefold; crop-level and end-to-end interventions reached tenfold and
+          beyond. The axis is logarithmic.</figcaption>
+      </figure>
+
+      <p>Boltzina docks each ligand with Vina into a grid from one reference complex per target, then uses the
+        released affinity pathway. Two-stage designs exist too, rescoring a top 20% or a top 10% with
+        Boltz-2.</p>
+
+      <div class="cards three">
+        <div class="card"><span class="tag">New here 1</span>
+          <h4>No structure at all</h4>
+          <p>Earlier two-stage designs need docked poses or a full Boltz-2 pass first. GenFree needs no structure
+            for any candidate.</p>
+        </div>
+        <div class="card"><span class="tag">New here 2</span>
+          <h4>Interventions on the retained inputs</h4>
+          <p>Earlier tracing asked how far a pose moves the value. Here the question is which remaining inputs
+            the <i>ranking</i> can lose.</p>
+        </div>
+        <div class="card"><span class="tag">New here 3</span>
+          <h4>Full libraries, not panels</h4>
+          <p>Eight full libraries of about 50,000 compounds, against the released Boltz-2 and Boltzina
+            scores.</p>
+        </div>
+      </div>
+
+      <details>
+        <summary>References for this section</summary>
+        <div class="dbody">
+          <ul>
+            <li>Passaro, S. et al. <b>Boltz-2: towards accurate and efficient binding affinity prediction.</b>
+              bioRxiv 2025. <a href="https://doi.org/10.1101/2025.06.14.659707">10.1101/2025.06.14.659707</a></li>
+            <li>Furui, K.; Ohue, M. <b>Boltzina: efficient and accurate virtual screening via docking-guided
+              binding prediction with Boltz-2.</b> arXiv:2508.17555, 2025.
+              <a href="https://arxiv.org/abs/2508.17555">arxiv.org/abs/2508.17555</a></li>
+            <li>Ujihara, K. <b>Pose-to-affinity information flow in Boltz-2: pathways and response
+              magnitude.</b> ChemRxiv, version 2, 2026.
+              <a href="https://doi.org/10.26434/chemrxiv.15006767/v2">10.26434/chemrxiv.15006767/v2</a></li>
+            <li>Bret, G.; Sindt, F.; Rognan, D. <b>Assessing Boltz-2 performance for the binding classification
+              of docking hits.</b> <i>J. Chem. Inf. Model.</i> 2026, 66, 1511&ndash;1521.
+              <a href="https://doi.org/10.1021/acs.jcim.5c02630">10.1021/acs.jcim.5c02630</a></li>
+            <li>Furui, K.; Ohue, M. <b>Head fine-tuning of Boltz-2 affinity prediction with few labels.</b>
+              2026.</li>
+            <li>Migliorini, G. et al. <b>PairSAE: mechanistic interpretability from pair representations in
+              protein co-folding.</b> arXiv:2606.27440, 2026.</li>
+            <li>Buterez, D. et al. <b>MF-PCBA: multifidelity high-throughput screening benchmarks.</b>
+              <i>J. Chem. Inf. Model.</i> 2023, 63, 2667&ndash;2678.</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section id="interventions">
+  <div class="wrap">
+    <div class="shead"><div class="num">04</div>
+      <h2>Interventions: which inputs the ranking actually needs</h2></div>
+    <div class="body">
+      <p class="lede">Zeroing the distogram costs almost nothing, while the crop and the learned pair pathway
+        around it are load-bearing.</p>
+
+      <p>Enriched 512-compound panels (128 positive, 384 negative) and captured contexts, with one input
+        changed at a time.</p>
+
+      <h3>The condition study, A to E</h3>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 386" role="img" aria-label="The five conditions of the condition study and what each supplies">
+            <text class="f-ttl" x="16" y="22">Where the crop and distogram come from</text>
+            <text class="f-cap" x="308" y="52" text-anchor="middle">CROP</text>
+            <text class="f-cap" x="456" y="52" text-anchor="middle">DISTOGRAM</text>
+            <text class="f-cap" x="592" y="52" text-anchor="middle">SAMPLING</text>
+            <text class="f-cap" x="700" y="52" text-anchor="middle">ROLE</text>
+            <line class="gl" x1="16" y1="60" x2="744" y2="60"/>
+            <rect x="16" y="70" width="36" height="42" fill="#161616"/>
+            <text class="f-lab" x="34" y="97" text-anchor="middle" fill="#ffffff" style="fill:#ffffff">A</text>
+            <text class="f-lab" x="56" y="88">Generated control</text>
+            <text class="f-sub" x="56" y="106">the normal route</text>
+            <rect class="s2box" x="240" y="74" width="136" height="34"/>
+            <text class="f-sub t-s2" x="308" y="96" text-anchor="middle">generated complex</text>
+            <rect class="s2box" x="388" y="74" width="136" height="34"/>
+            <text class="f-sub t-s2" x="456" y="96" text-anchor="middle">its own local poses</text>
+            <text class="f-sub" x="592" y="96" text-anchor="middle">both stages</text>
+            <text class="f-sub" x="700" y="96" text-anchor="middle">control</text>
+            <line class="gl" x1="16" y1="120" x2="744" y2="120"/>
+            <rect x="16" y="130" width="36" height="42" fill="#161616"/>
+            <text class="f-lab" x="34" y="157" text-anchor="middle" fill="#ffffff" style="fill:#ffffff">B</text>
+            <text class="f-lab" x="56" y="148">Zero distogram</text>
+            <text class="f-sub" x="56" y="166">nothing else changed</text>
+            <rect class="s2box" x="240" y="134" width="136" height="34"/>
+            <text class="f-sub t-s2" x="308" y="156" text-anchor="middle">generated complex</text>
+            <rect class="gbox" x="388" y="134" width="136" height="34"/>
+            <text class="f-sub t-gf" x="456" y="156" text-anchor="middle">zero features</text>
+            <text class="f-sub" x="592" y="156" text-anchor="middle">both stages</text>
+            <text class="f-sub" x="700" y="156" text-anchor="middle">diagnostic</text>
+            <line class="gl" x1="16" y1="180" x2="744" y2="180"/>
+            <rect x="16" y="190" width="36" height="42" fill="#161616"/>
+            <text class="f-lab" x="34" y="217" text-anchor="middle" fill="#ffffff" style="fill:#ffffff">C</text>
+            <text class="f-lab" x="56" y="208">Reference crop</text>
+            <text class="f-sub" x="56" y="226">distogram kept</text>
+            <rect class="gbox" x="240" y="194" width="136" height="34"/>
+            <text class="f-sub t-gf" x="308" y="216" text-anchor="middle">fixed per target</text>
+            <rect class="s2box" x="388" y="194" width="136" height="34"/>
+            <text class="f-sub t-s2" x="456" y="216" text-anchor="middle">reuses A's complex</text>
+            <text class="f-sub" x="592" y="216" text-anchor="middle">stage 1 only</text>
+            <text class="f-sub" x="700" y="216" text-anchor="middle">diagnostic</text>
+            <line class="gl" x1="16" y1="240" x2="744" y2="240"/>
+            <rect x="16" y="250" width="36" height="42" fill="#b8124f"/>
+            <text class="f-lab" x="34" y="277" text-anchor="middle" fill="#ffffff" style="fill:#ffffff">D</text>
+            <text class="f-lab t-gf" x="56" y="268">Reference-crop candidate</text>
+            <text class="f-sub" x="56" y="286">separately processed input</text>
+            <rect class="gbox" x="240" y="254" width="136" height="34"/>
+            <text class="f-sub t-gf" x="308" y="276" text-anchor="middle">fixed per target</text>
+            <rect class="gbox" x="388" y="254" width="136" height="34"/>
+            <text class="f-sub t-gf" x="456" y="276" text-anchor="middle">zero features</text>
+            <text class="f-sub t-gf" x="592" y="276" text-anchor="middle">none</text>
+            <text class="f-sub t-gf" x="700" y="276" text-anchor="middle">candidate</text>
+            <line class="gl" x1="16" y1="300" x2="744" y2="300"/>
+            <rect x="16" y="310" width="36" height="42" fill="#b8124f"/>
+            <text class="f-lab" x="34" y="337" text-anchor="middle" fill="#ffffff" style="fill:#ffffff">E</text>
+            <text class="f-lab t-gf" x="56" y="328">Full-receptor candidate</text>
+            <text class="f-sub" x="56" y="346">separately processed input</text>
+            <rect class="gbox" x="240" y="314" width="136" height="34"/>
+            <text class="f-sub t-gf" x="308" y="336" text-anchor="middle">complete receptor</text>
+            <rect class="gbox" x="388" y="314" width="136" height="34"/>
+            <text class="f-sub t-gf" x="456" y="336" text-anchor="middle">zero features</text>
+            <text class="f-sub t-gf" x="592" y="336" text-anchor="middle">none</text>
+            <text class="f-sub t-gf" x="700" y="336" text-anchor="middle">candidate</text>
+            <text class="f-sub" x="16" y="378">All five: supplied MSA, 3D ligand positions, recycling 5</text>
+          </svg>
+        </div>
+        <figcaption><b>Two diagnostics and two candidates.</b> A is the control, B zeroes its distogram, C swaps
+          the crop for a fixed one. D and E use separately processed input. ALR and NSD2 ran A and B
+          only.</figcaption>
+      </figure>
+
+      <p>B against A barely moves the metrics: only the GSK3A AUROC difference of &minus;0.0058 excludes zero.
+        The crop matters more. The full-receptor candidate loses AP on GSK3A, NS5 and FadD28 and gains it on
+        NS1, so there is no single direction.</p>
+
+      <details>
+        <summary>Per-target condition results, with intervals</summary>
+        <div class="dbody">
+          <p>AUROC and AP on the enriched panels, against the recorded anchor. D198/D296 and D300/D364
+            are raised protein-token caps.</p>
+          <div class="tscroll">
+            <table>
+              <caption>Condition study: all executed routes and crop-size interventions.</caption>
+              <thead><tr><th>Target</th><th>Condition</th><th class="n">AUROC</th><th class="n">AP</th>
+                <th>&Delta;AUROC [95%]</th><th>&Delta;AP [95%]</th></tr></thead>
+              <tbody>
+                <tr><td>ALR</td><td>A</td><td class="n">0.658</td><td class="n">0.385</td><td>&mdash;</td><td>&mdash;</td></tr>
+                <tr><td>ALR</td><td>B</td><td class="n">0.656</td><td class="n">0.385</td><td>&minus;0.0019 [&minus;0.0105, +0.0065]</td><td>&minus;0.0003 [&minus;0.0082, +0.0084]</td></tr>
+                <tr><td>GSK3A</td><td>A</td><td class="n">0.795</td><td class="n">0.608</td><td>&mdash;</td><td>&mdash;</td></tr>
+                <tr><td>GSK3A</td><td>B</td><td class="n">0.789</td><td class="n">0.603</td><td>&minus;0.0058 [&minus;0.0119, &minus;0.0001]</td><td>&minus;0.0042 [&minus;0.0176, +0.0071]</td></tr>
+                <tr><td>GSK3A</td><td>C</td><td class="n">0.805</td><td class="n">0.629</td><td>+0.0103 [+0.0007, +0.0202]</td><td>+0.0218 [&minus;0.0008, +0.0433]</td></tr>
+                <tr><td>GSK3A</td><td>D</td><td class="n">0.798</td><td class="n">0.617</td><td>+0.0029 [&minus;0.0062, +0.0131]</td><td>+0.0097 [&minus;0.0137, +0.0343]</td></tr>
+                <tr><td>GSK3A</td><td>D198</td><td class="n">0.797</td><td class="n">0.615</td><td>&minus;0.0006 [&minus;0.0067, +0.0057]</td><td>&minus;0.0020 [&minus;0.0135, +0.0097]</td></tr>
+                <tr><td>GSK3A</td><td>D296</td><td class="n">0.782</td><td class="n">0.566</td><td>&minus;0.0158 [&minus;0.0437, +0.0096]</td><td>&minus;0.0515 [&minus;0.0946, &minus;0.0125]</td></tr>
+                <tr><td>GSK3A</td><td>E</td><td class="n">0.765</td><td class="n">0.535</td><td>&minus;0.0303 [&minus;0.0583, &minus;0.0008]</td><td>&minus;0.0723 [&minus;0.1247, &minus;0.0191]</td></tr>
+                <tr><td>GSK3B</td><td>A</td><td class="n">0.898</td><td class="n">0.792</td><td>&mdash;</td><td>&mdash;</td></tr>
+                <tr><td>GSK3B</td><td>B</td><td class="n">0.899</td><td class="n">0.792</td><td>+0.0009 [&minus;0.0024, +0.0043]</td><td>+0.0006 [&minus;0.0068, +0.0076]</td></tr>
+                <tr><td>GSK3B</td><td>C</td><td class="n">0.894</td><td class="n">0.761</td><td>&minus;0.0037 [&minus;0.0160, +0.0088]</td><td>&minus;0.0309 [&minus;0.0658, +0.0061]</td></tr>
+                <tr><td>GSK3B</td><td>D</td><td class="n">0.894</td><td class="n">0.761</td><td>&minus;0.0040 [&minus;0.0179, +0.0099]</td><td>&minus;0.0309 [&minus;0.0678, +0.0038]</td></tr>
+                <tr><td>GSK3B</td><td>D300</td><td class="n">0.876</td><td class="n">0.677</td><td>&minus;0.0180 [&minus;0.0340, &minus;0.0017]</td><td>&minus;0.0841 [&minus;0.1330, &minus;0.0302]</td></tr>
+                <tr><td>GSK3B</td><td>D364</td><td class="n">0.872</td><td class="n">0.726</td><td>&minus;0.0224 [&minus;0.0422, &minus;0.0037]</td><td>&minus;0.0347 [&minus;0.0760, +0.0087]</td></tr>
+                <tr><td>GSK3B</td><td>E</td><td class="n">0.899</td><td class="n">0.793</td><td>+0.0013 [&minus;0.0171, +0.0209]</td><td>+0.0014 [&minus;0.0444, +0.0478]</td></tr>
+                <tr><td>NSD2</td><td>A</td><td class="n">0.779</td><td class="n">0.565</td><td>&mdash;</td><td>&mdash;</td></tr>
+                <tr><td>NSD2</td><td>B</td><td class="n">0.780</td><td class="n">0.569</td><td>+0.0011 [&minus;0.0054, +0.0076]</td><td>+0.0046 [&minus;0.0089, +0.0166]</td></tr>
+                <tr><td>NS5</td><td>A</td><td class="n">0.860</td><td class="n">0.723</td><td>&mdash;</td><td>&mdash;</td></tr>
+                <tr><td>NS5</td><td>B</td><td class="n">0.864</td><td class="n">0.726</td><td>+0.0039 [&minus;0.0012, +0.0092]</td><td>+0.0030 [&minus;0.0092, +0.0163]</td></tr>
+                <tr><td>NS5</td><td>C</td><td class="n">0.836</td><td class="n">0.642</td><td>&minus;0.0244 [&minus;0.0493, &minus;0.0001]</td><td>&minus;0.0805 [&minus;0.1361, &minus;0.0221]</td></tr>
+                <tr><td>NS5</td><td>D</td><td class="n">0.836</td><td class="n">0.633</td><td>&minus;0.0249 [&minus;0.0502, &minus;0.0011]</td><td>&minus;0.0902 [&minus;0.1426, &minus;0.0342]</td></tr>
+                <tr><td>NS5</td><td>E</td><td class="n">0.834</td><td class="n">0.600</td><td>&minus;0.0263 [&minus;0.0520, &minus;0.0025]</td><td>&minus;0.1231 [&minus;0.1817, &minus;0.0617]</td></tr>
+                <tr><td>NS1</td><td>A</td><td class="n">0.772</td><td class="n">0.493</td><td>&mdash;</td><td>&mdash;</td></tr>
+                <tr><td>NS1</td><td>E</td><td class="n">0.803</td><td class="n">0.575</td><td>+0.0308 [+0.0043, +0.0569]</td><td>+0.0825 [+0.0271, +0.1296]</td></tr>
+                <tr><td>FadD28</td><td>A</td><td class="n">0.724</td><td class="n">0.550</td><td>&mdash;</td><td>&mdash;</td></tr>
+                <tr><td>FadD28</td><td>E</td><td class="n">0.686</td><td class="n">0.438</td><td>&minus;0.0374 [&minus;0.0898, +0.0144]</td><td>&minus;0.1119 [&minus;0.1938, &minus;0.0319]</td></tr>
+              </tbody>
+            </table>
+            <p class="tnote">Seed 20260714, affinity recycling five, enabled kernels, no molecular-weight
+              correction.</p>
+          </div>
+        </div>
+      </details>
+
+      <h3>Captured-context pathway interventions</h3>
+      <p>Each compound's saved context is held fixed and compared with an unmodified run on it. This separates
+        the distogram from the pair pathway it feeds.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 326" role="img" aria-label="AUROC change of four captured-context pathway interventions across seven panels">
+          <text class="f-ttl" x="16" y="22">AUROC change across seven panels</text>
+
+          <line x1="689.7" y1="56" x2="689.7" y2="268" stroke="#161616" stroke-width="1.6" stroke-dasharray="6 4"/>
+          <text class="f-cap" x="689.7" y="320" text-anchor="middle">NO CHANGE</text>
+
+          <!-- row 1: zero distogram -->
+          <text class="f-lab t-gf" x="16" y="80">Zero the distogram</text>
+          <rect x="684.9" y="76" width="9.8" height="16" fill="#b8124f"/>
+          <text class="f-num t-gf" x="678" y="89" text-anchor="end">&minus;0.0042 to +0.0044</text>
+
+          <!-- row 2: residual pair pathway -->
+          <text class="f-lab t-z" x="16" y="132">Remove the residual pair pathway</text>
+          <rect x="555.2" y="128" width="80.6" height="16" fill="#a8510f"/>
+          <text class="f-num" x="548" y="141" text-anchor="end">&minus;0.2455 to &minus;0.0807</text>
+
+          <!-- row 3: bypass conditioner -->
+          <text class="f-lab t-z" x="16" y="184">Bypass the conditioner</text>
+          <rect x="547.7" y="180" width="61.3" height="16" fill="#a8510f"/>
+          <text class="f-num" x="540" y="193" text-anchor="end">&minus;0.2568 to &minus;0.1207</text>
+
+          <!-- row 4: remove pair input to conditioner -->
+          <text class="f-lab t-z" x="16" y="236">Remove the pair input to the conditioner</text>
+          <rect x="291.7" y="232" width="305.9" height="16" fill="#a8510f"/>
+          <text class="f-num" x="300" y="245" fill="#ffffff" style="fill:#ffffff">&minus;0.6379 to &minus;0.1376</text>
+
+          <!-- axis -->
+          <line class="axis" x1="220" y1="268" x2="736" y2="268"/>
+          <g class="f-tick" text-anchor="middle">
+            <line class="axis" x1="287.1" y1="268" x2="287.1" y2="274"/><text x="287.1" y="290">&minus;0.6</text>
+            <line class="axis" x1="421.3" y1="268" x2="421.3" y2="274"/><text x="421.3" y="290">&minus;0.4</text>
+            <line class="axis" x1="555.5" y1="268" x2="555.5" y2="274"/><text x="555.5" y="290">&minus;0.2</text>
+            <line class="axis" x1="689.7" y1="268" x2="689.7" y2="274"/><text x="689.7" y="290">0</text>
+          </g>
+          <text class="f-sub" x="16" y="290">AUROC change</text>
+        </svg>
+        </div>
+        <figcaption><b>The distogram and the pair pathway are orders of magnitude apart.</b> Zeroing the
+          distogram moves AUROC by &minus;0.0042 to +0.0044 and AP by &minus;0.0033 to +0.0062. Removing the
+          pair input leaves AUROC near chance.</figcaption>
+      </figure>
+
+
+      <h3>Single-input followups</h3>
+      <p>A second set changes one input at a time against a baseline run in the same experiment.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 334" role="img" aria-label="AP change of the single-input interventions across seven panels">
+            <text class="f-ttl" x="16" y="22">AP change against each baseline</text>
+            <text class="f-sub" x="16" y="42">seven 512-compound panels</text>
+            <line x1="691.0" y1="56" x2="691.0" y2="268" stroke="#161616" stroke-width="1.6" stroke-dasharray="6 4"/>
+            <text class="f-lab" x="16" y="84">Remove the protein</text>
+            <text class="f-num" x="16" y="102">&minus;0.4998 to &minus;0.0814</text>
+            <rect x="315.2" y="72" width="314.6" height="16" fill="#3c3c3c"/>
+            <text class="f-lab" x="16" y="136">Bypass the MSA module</text>
+            <text class="f-num" x="16" y="154">&minus;0.2474 to &minus;0.1038</text>
+            <rect x="505.0" y="124" width="107.9" height="16" fill="#3c3c3c"/>
+            <text class="f-lab" x="16" y="188">Query-only MSA</text>
+            <text class="f-num" x="16" y="206">&minus;0.0734 to +0.0457</text>
+            <rect x="635.8" y="176" width="89.6" height="16" fill="#858580"/>
+            <text class="f-lab" x="16" y="240">Zero the ligand reference positions</text>
+            <text class="f-num" x="16" y="258">&minus;0.0869 to about 0</text>
+            <rect x="625.7" y="228" width="65.3" height="16" fill="#858580"/>
+            <line class="axis" x1="300" y1="268" x2="736" y2="268"/>
+            <line class="axis" x1="315.0" y1="268" x2="315.0" y2="274"/>
+            <text class="f-tick" x="315.0" y="286" text-anchor="middle">&minus;0.5</text>
+            <line class="axis" x1="465.4" y1="268" x2="465.4" y2="274"/>
+            <text class="f-tick" x="465.4" y="286" text-anchor="middle">&minus;0.3</text>
+            <line class="axis" x1="615.8" y1="268" x2="615.8" y2="274"/>
+            <text class="f-tick" x="615.8" y="286" text-anchor="middle">&minus;0.1</text>
+            <line class="axis" x1="691.0" y1="268" x2="691.0" y2="274"/>
+            <text class="f-tick" x="691.0" y="286" text-anchor="middle">0</text>
+            <text class="f-sub" x="16" y="286">AP change</text>
+            <text class="f-sub" x="16" y="312">2D ligand positions, not ETKDG: &minus;0.0171 to +0.0052</text>
+            <text class="f-sub" x="16" y="330">Folded conditioning: at most 2.5 &times; 10&#8315;&#8310;</text>
+          </svg>
+        </div>
+        <figcaption><b>The protein and the MSA module are load-bearing; the ligand conformer is not.</b>
+          Bypassing the MSA module or removing the protein reduces AP on all seven panels.</figcaption>
+      </figure>
+
+      <h3>Crop-construction sensitivity</h3>
+      <p>How the crop is built moves the result, and nothing tested here dominates. Raising the token cap did
+        not help: GSK3A at 296 tokens lost AP by &minus;0.0515, GSK3B at 300 tokens by &minus;0.0841.</p>
+
+      
+
+    </div>
+  </div>
+</section>
+
+<section id="design">
+  <div class="wrap">
+    <div class="shead"><div class="num">05</div>
+      <h2>What GenFree replaces, and the two routes it offers</h2></div>
+    <div class="body">
+      <p class="lede">GenFree keeps the released affinity trunk and heads and swaps exactly the two inputs
+        that depend on structure generation: the token set and the distogram.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 336" role="img" aria-label="What supplies the crop and the distogram in Boltz-2, context-supplied GenFree and context-free GenFree">
+          <text class="f-ttl" x="16" y="22">The same trained pathway, three different inputs</text>
+          <text class="f-cap" x="235" y="50" text-anchor="middle">RECEPTOR TOKENS</text>
+          <text class="f-cap" x="419" y="50" text-anchor="middle">DISTOGRAM</text>
+
+          <rect class="box" x="520" y="60" width="224" height="220" fill="#f1f1ee"/>
+          <text class="f-lab" x="632" y="150" text-anchor="middle">Released affinity</text>
+          <text class="f-lab" x="632" y="170" text-anchor="middle">trunk and heads</text>
+          <text class="f-sub" x="632" y="200" text-anchor="middle">pretrained weights</text>
+
+          <!-- row 1 Boltz-2 -->
+          <text class="f-lab" x="16" y="84">Boltz-2</text>
+          <text class="f-sub" x="16" y="102">one per candidate</text>
+          <rect class="s2box" x="150" y="68" width="170" height="44"/>
+          <text class="f-sub t-s2" x="235" y="95" text-anchor="middle">generated crop</text>
+          <rect class="s2box" x="334" y="68" width="170" height="44"/>
+          <text class="f-sub t-s2" x="419" y="95" text-anchor="middle">from its own sampling</text>
+          <path class="ar" d="M506 90 L516 90"/>
+
+          <!-- row 2 context-supplied -->
+          <text class="f-lab t-gf" x="16" y="160">GenFree,</text>
+          <text class="f-lab t-gf" x="16" y="178">context-supplied</text>
+          <text class="f-sub" x="16" y="196">one crop per target</text>
+          <rect class="gbox" x="150" y="144" width="170" height="44"/>
+          <text class="f-sub t-gf" x="235" y="171" text-anchor="middle">reference crop</text>
+          <rect class="gbox" x="334" y="144" width="170" height="44"/>
+          <text class="f-sub t-gf" x="419" y="171" text-anchor="middle">zero</text>
+          <path class="ar" d="M506 166 L516 166" stroke="#b8124f" marker-end="url(#ahc)"/>
+
+          <!-- row 3 context-free -->
+          <text class="f-lab t-gf" x="16" y="236">GenFree,</text>
+          <text class="f-lab t-gf" x="16" y="254">context-free</text>
+          <text class="f-sub" x="16" y="272">no preparation</text>
+          <rect class="gbox" x="150" y="220" width="170" height="44"/>
+          <text class="f-sub t-gf" x="235" y="247" text-anchor="middle">complete receptor</text>
+          <rect class="gbox" x="334" y="220" width="170" height="44"/>
+          <text class="f-sub t-gf" x="419" y="247" text-anchor="middle">zero</text>
+          <path class="ar" d="M506 242 L516 242" stroke="#b8124f" marker-end="url(#ahc)"/>
+
+          <text class="f-sub" x="16" y="316">A reference crop still carries structure: one complex per target</text>
+        </svg>
+        </div>
+        <figcaption><b>Two inputs out, everything else kept.</b> The cropper is replaced by a token set from
+          external context or the complete receptor, and the embedded distogram by zeros.</figcaption>
+      </figure>
+
+      <p>The <b>context-supplied</b> route keeps the external context a target had: a reference crop, an MSA,
+        two-dimensional ligand positions. Cutting the crop is the costly step; the two targets without an
+        experimental complex use one structure predicted per target.</p>
+
+      <p>The <b>context-free</b> route passes the complete receptor, a query-only MSA and zero ligand
+        positions. No per-target preparation, and lower AP on all eight targets.</p>
+
+      <p>Affinity recycling is zero in both, against five in the standard pipeline: on 128-compound subsets of
+        five targets more passes did not improve AP.</p>
+
+      <div class="tscroll">
+        <table>
+          <caption>What each route supplies.</caption>
+          <thead><tr><th></th><th>Boltz-2</th><th>Boltzina</th><th>GenFree, context-supplied</th>
+            <th>GenFree, context-free</th></tr></thead>
+          <tbody>
+            <tr><td>Scored structure</td><td>Generated per compound</td><td>Docked pose (Vina)</td><td>None</td><td>None</td></tr>
+            <tr><td>Receptor tokens</td><td>Generated crop</td><td>&mdash;</td><td>Reference crop<sup>a</sup></td><td>Complete receptor</td></tr>
+            <tr><td>Distogram</td><td>From its own sampling</td><td>From the docked pose</td><td>Zero</td><td>Zero</td></tr>
+            <tr><td>MSA</td><td>Supplied</td><td>&mdash;</td><td>Supplied</td><td>Empty, query only</td></tr>
+            <tr><td>Ligand reference positions</td><td>Three-dimensional</td><td>&mdash;</td><td>Two-dimensional</td><td>Zero</td></tr>
+            <tr><td>Affinity recycling</td><td>5</td><td>5</td><td>0</td><td>0</td></tr>
+            <tr><td>Per-target preparation</td><td>None</td><td>A Boltz-2 reference complex</td><td>A reference crop</td><td>None</td></tr>
+          </tbody>
+        </table>
+        <p class="tnote">A dash marks a setting this study does not set. Per-target preparation happens
+          once per target: for the context-supplied route a reference crop for 5 targets, from an experimental
+          complex for 3 and a predicted structure for 2. <sup>a</sup>Elsewhere the complete receptor fits the
+          ordinary limit.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="results">
+  <div class="wrap">
+    <div class="shead"><div class="num">06</div>
+      <h2>Results on eight full libraries</h2></div>
+    <div class="body">
+      <p class="lede">On its own GenFree keeps 90% of the Boltz-2 mean AP, against 67% for Boltzina. How much
+        survives depends on the target and the endpoint.</p>
+
+      <p>The evidence is the eight MF-PCBA libraries of the Boltzina benchmark, eight of the ten assays
+        Boltz-2 held out. The context-supplied route is carried forward: higher AP on all eight targets than
+        the context-free one.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 516" role="img" aria-label="Full-library average precision of each cheap route as a share of the Boltz-2 AP on the same target">
+          <text class="f-ttl" x="16" y="22">Average precision as a share of the Boltz-2 AP on the same target</text>
+          <text class="f-sub" x="16" y="40">eight libraries, about 50,000 compounds each</text>
+          <rect x="16" y="54" width="11" height="11" fill="#b8124f"/><text class="f-sub" x="33" y="64">GenFree, context-supplied</text>
+          <rect x="216" y="54" width="11" height="11" fill="#858580"/><text class="f-sub" x="233" y="64">Boltzina</text>
+          <rect x="306" y="54" width="11" height="11" fill="#b9b9b3"/><text class="f-sub" x="323" y="64">GenFree, context-free</text>
+          <line x1="480" y1="60" x2="506" y2="60" stroke="#b8124f" stroke-width="2" stroke-dasharray="6 4"/><text class="f-sub" x="512" y="64">Boltz-2 = 100%</text>
+          <line class="gl" x1="110.0" y1="78" x2="110.0" y2="489"/>
+          <line class="gl" x1="313.8" y1="78" x2="313.8" y2="489"/>
+          <line class="gl" x1="640.0" y1="78" x2="640.0" y2="489"/>
+          <line x1="517.7" y1="78" x2="517.7" y2="489" stroke="#b8124f" stroke-width="2" stroke-dasharray="6 4"/>
+          <text class="f-lab" x="102" y="106" text-anchor="end">ALR</text>
+          <rect x="110.0" y="84" width="468.8" height="11" fill="#b8124f"/>
+          <text class="f-num" x="584.8" y="94">115%</text>
+          <rect x="110.0" y="97" width="326.2" height="11" fill="#858580"/>
+          <text class="f-num" x="442.2" y="107">80%</text>
+          <rect x="110.0" y="110" width="366.9" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="482.9" y="120">90%</text>
+          <text class="f-lab" x="102" y="152" text-anchor="end">GSK3A</text>
+          <rect x="110.0" y="130" width="456.6" height="11" fill="#b8124f"/>
+          <text class="f-num" x="572.6" y="140">112%</text>
+          <rect x="110.0" y="143" width="330.2" height="11" fill="#858580"/>
+          <text class="f-num" x="446.2" y="153">81%</text>
+          <rect x="110.0" y="156" width="150.8" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="266.8" y="166">37%</text>
+          <text class="f-lab" x="102" y="198" text-anchor="end">GSK3B</text>
+          <rect x="110.0" y="176" width="521.8" height="11" fill="#b8124f"/>
+          <text class="f-num" x="637.8" y="186">128%</text>
+          <rect x="110.0" y="189" width="322.1" height="11" fill="#858580"/>
+          <text class="f-num" x="438.1" y="199">79%</text>
+          <rect x="110.0" y="202" width="183.5" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="299.5" y="212">45%</text>
+          <text class="f-lab" x="102" y="244" text-anchor="end">NSD2</text>
+          <rect x="110.0" y="222" width="224.2" height="11" fill="#b8124f"/>
+          <text class="f-num" x="340.2" y="232">55%</text>
+          <rect x="110.0" y="235" width="203.8" height="11" fill="#858580"/>
+          <text class="f-num" x="319.8" y="245">50%</text>
+          <rect x="110.0" y="248" width="134.5" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="250.5" y="258">33%</text>
+          <text class="f-lab" x="102" y="290" text-anchor="end">CTDSP1</text>
+          <rect x="110.0" y="268" width="256.8" height="11" fill="#b8124f"/>
+          <text class="f-num" x="372.8" y="278">63%</text>
+          <rect x="110.0" y="281" width="289.5" height="11" fill="#858580"/>
+          <text class="f-num" x="405.5" y="291">71%</text>
+          <rect x="110.0" y="294" width="203.8" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="319.8" y="304">50%</text>
+          <text class="f-lab" x="102" y="336" text-anchor="end">NS5</text>
+          <rect x="110.0" y="314" width="187.5" height="11" fill="#b8124f"/>
+          <text class="f-num" x="303.5" y="324">46%</text>
+          <rect x="110.0" y="327" width="179.4" height="11" fill="#858580"/>
+          <text class="f-num" x="295.4" y="337">44%</text>
+          <rect x="110.0" y="340" width="163.1" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="279.1" y="350">40%</text>
+          <text class="f-lab" x="102" y="382" text-anchor="end">NS1</text>
+          <rect x="110.0" y="360" width="273.2" height="11" fill="#b8124f"/>
+          <text class="f-num" x="389.2" y="370">67%</text>
+          <rect x="110.0" y="373" width="236.5" height="11" fill="#858580"/>
+          <text class="f-num" x="352.5" y="383">58%</text>
+          <rect x="110.0" y="386" width="220.2" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="336.2" y="396">54%</text>
+          <text class="f-lab" x="102" y="428" text-anchor="end">FadD28</text>
+          <rect x="110.0" y="406" width="403.6" height="11" fill="#b8124f"/>
+          <text class="f-num" x="519.6" y="416">99%</text>
+          <rect x="110.0" y="419" width="281.3" height="11" fill="#858580"/>
+          <text class="f-num" x="397.3" y="429">69%</text>
+          <rect x="110.0" y="432" width="269.1" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="385.1" y="442">66%</text>
+          <text class="f-lab" x="102" y="474" text-anchor="end">Mean</text>
+          <rect x="110.0" y="452" width="366.9" height="11" fill="#b8124f"/>
+          <text class="f-num" x="482.9" y="462">90%</text>
+          <rect x="110.0" y="465" width="273.2" height="11" fill="#858580"/>
+          <text class="f-num" x="389.2" y="475">67%</text>
+          <rect x="110.0" y="478" width="191.6" height="11" fill="#b9b9b3"/>
+          <text class="f-num" x="307.6" y="488">47%</text>
+          <line class="axis" x1="110.0" y1="489" x2="640.0" y2="489"/>
+          <line class="axis" x1="110.0" y1="489" x2="110.0" y2="495"/>
+          <text class="f-tick" x="110.0" y="511" text-anchor="middle">0</text>
+          <line class="axis" x1="313.8" y1="489" x2="313.8" y2="495"/>
+          <text class="f-tick" x="313.8" y="511" text-anchor="middle">50%</text>
+          <line class="axis" x1="517.7" y1="489" x2="517.7" y2="495"/>
+          <text class="f-tick" x="517.7" y="511" text-anchor="middle">100%</text>
+          <line class="axis" x1="640.0" y1="489" x2="640.0" y2="495"/>
+          <text class="f-tick" x="640.0" y="511" text-anchor="middle">130%</text>
+        </svg>
+        </div>
+        <figcaption><b>Retention depends on the target.</b> Context-supplied keeps 46% (NS5) to 128% (GSK3B),
+          mean 90%; Boltzina 44% to 81%, mean 67%; context-free a mean 47%. The dashed line is the Boltz-2
+          reference.</figcaption>
+      </figure>
+
+      <p>Against Boltzina, AP and AUROC agree target for target: above it on ALR, GSK3A and GSK3B, by +0.0962
+        in AP on GSK3B, below it on CTDSP1 by &minus;0.0055.</p>
+
+      <p>Against Boltz-2 the picture is mixed. NSD2, CTDSP1, NS5 and NS1 lose both endpoints, NS5 by the most;
+        GSK3B gains. AUROC retains least and AP retains most.</p>
+
+      <details>
+        <summary>Full-library table: AP, shares of the reference and intervals</summary>
+        <div class="dbody">
+          <div class="tscroll">
+            <table>
+              <caption>Full-library average precision of the cheaper routes as a share of the published Boltz-2 reference.</caption>
+              <thead><tr><th>Target</th><th class="n">N</th><th class="n">Positive</th><th class="n">Boltz-2</th>
+                <th class="n">Boltzina</th><th class="n">Context-free</th><th class="n">Context-supplied</th>
+                <th>&Delta;AP vs Boltz-2 [95%]</th></tr></thead>
+              <tbody>
+                <tr><td>ALR</td><td class="n">49,980</td><td class="n">976</td><td class="n">0.0372</td><td class="n">0.0296 (80%)</td><td class="n">0.0335 (90%)</td><td class="n">0.0429 (115%)</td><td>+0.0057 [&minus;0.0008, +0.0142]</td></tr>
+                <tr><td>GSK3A</td><td class="n">49,882</td><td class="n">612</td><td class="n">0.1129</td><td class="n">0.0915 (81%)</td><td class="n">0.0423 (37%)</td><td class="n">0.1259 (112%)</td><td>+0.0130 [&minus;0.0041, +0.0317]</td></tr>
+                <tr><td>GSK3B</td><td class="n">49,915</td><td class="n">522</td><td class="n">0.1979</td><td class="n">0.1566 (79%)</td><td class="n">0.0897 (45%)</td><td class="n">0.2528 (128%)</td><td>+0.0550 [+0.0189, +0.0904]</td></tr>
+                <tr><td>NSD2</td><td class="n">49,995</td><td class="n">144</td><td class="n">0.0219</td><td class="n">0.0109 (50%)</td><td class="n">0.0072 (33%)</td><td class="n">0.0121 (55%)</td><td>&minus;0.0098 [&minus;0.0165, &minus;0.0054]</td></tr>
+                <tr><td>CTDSP1</td><td class="n">49,981</td><td class="n">782</td><td class="n">0.0673</td><td class="n">0.0476 (71%)</td><td class="n">0.0338 (50%)</td><td class="n">0.0421 (63%)</td><td>&minus;0.0252 [&minus;0.0339, &minus;0.0180]</td></tr>
+                <tr><td>NS5</td><td class="n">49,985</td><td class="n">486</td><td class="n">0.1661</td><td class="n">0.0738 (44%)</td><td class="n">0.0671 (40%)</td><td class="n">0.0759 (46%)</td><td>&minus;0.0903 [&minus;0.1177, &minus;0.0660]</td></tr>
+                <tr><td>NS1</td><td class="n">49,982</td><td class="n">466</td><td class="n">0.0535</td><td class="n">0.0312 (58%)</td><td class="n">0.0289 (54%)</td><td class="n">0.0360 (67%)</td><td>&minus;0.0175 [&minus;0.0267, &minus;0.0085]</td></tr>
+                <tr><td>FadD28</td><td class="n">49,987</td><td class="n">159</td><td class="n">0.0157</td><td class="n">0.0108 (69%)</td><td class="n">0.0104 (66%)</td><td class="n">0.0155 (99%)</td><td>&minus;0.0002 [&minus;0.0236, +0.0232]</td></tr>
+                <tr class="mean"><td>Mean</td><td class="n"></td><td class="n"></td><td class="n">0.0840</td><td class="n">0.0565 (67%)</td><td class="n">0.0391 (47%)</td><td class="n">0.0754 (90%)</td><td></td></tr>
+              </tbody>
+            </table>
+            <p class="tnote">&Delta;AP is context-supplied minus Boltz-2. The mean row weights the targets
+              equally. CTDSP1 holds 49,981 compounds: four oversized ligands (88 to 93 heavy atoms, all
+              negatives) exceed the 256-token budget and are input exclusions.</p>
+          </div>
+          <h4>AUROC, enrichment and fixed-budget recovery</h4>
+          <p>Top-1% enrichment is above the reference on 3 targets and below it on 2. At a 100-compound
+            budget: ALR, 23 positives against 9, and NS5, 12 against 32.</p>
+          <p>Eight further seeds on GSK3B, NS5 and ALR move AP by at most +0.00471.</p>
+        </div>
+      </details>
+
+      <h3>Speed: each workflow at its own defaults</h3>
+      <p>GSK3B and NS5, the same 2,048 score-blind compounds, one GPU and 16 logical CPUs, one
+        fresh-process run per method. Recycling zero is GenFree's own default.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 338" role="img" aria-label="Wall time of three workflows on 2,048 score-blind compounds, as multiples of the GenFree time">
+          <defs>
+            <pattern id="hatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+              <rect width="7" height="7" fill="#ffffff"/>
+              <line x1="0" y1="0" x2="0" y2="7" stroke="#858580" stroke-width="4"/>
+            </pattern>
+          </defs>
+          <text class="f-ttl" x="16" y="22">Fresh-process pipeline wall time, 2,048 compounds</text>
+          <text class="f-sub" x="16" y="40">multiples of the GenFree time on that target</text>
+
+          <text class="f-lab" x="16" y="72">GSK3B</text>
+          <rect x="200" y="80" width="5.6" height="20" fill="#b8124f"/>
+          <text class="f-lab" x="192" y="94" text-anchor="end">GenFree</text>
+          <text class="f-num" x="212" y="94">636.5 s &nbsp;1&times;</text>
+          <rect x="200" y="108" width="67.3" height="20" fill="#858580"/>
+          <text class="f-lab" x="192" y="122" text-anchor="end">Boltzina</text>
+          <text class="f-num" x="274" y="122">7,427.8 s &nbsp;12&times;</text>
+          <rect x="200" y="136" width="325.4" height="20" fill="#3c3c3c"/>
+          <text class="f-lab" x="192" y="150" text-anchor="end">Boltz-2</text>
+          <text class="f-num" x="532" y="150">36,982.2 s &nbsp;58&times;</text>
+
+          <text class="f-lab" x="16" y="188">NS5</text>
+          <rect x="200" y="196" width="5.6" height="20" fill="#b8124f"/>
+          <text class="f-lab" x="192" y="210" text-anchor="end">GenFree</text>
+          <text class="f-num" x="212" y="210">368.8 s &nbsp;1&times;</text>
+          <rect x="200" y="224" width="201.9" height="20" fill="url(#hatch)" stroke="#858580" stroke-width="1.5"/>
+          <text class="f-lab" x="192" y="238" text-anchor="end">Boltzina</text>
+          <text class="f-num" x="409" y="238">13,233.6 s &nbsp;36&times; *</text>
+          <rect x="200" y="252" width="460" height="20" fill="#3c3c3c"/>
+          <text class="f-lab" x="192" y="266" text-anchor="end">Boltz-2</text>
+          <text class="f-num" x="660" y="266" text-anchor="end" fill="#ffffff" style="fill:#ffffff">30,111.5 s &nbsp;82&times;</text>
+
+          <line class="axis" x1="200" y1="284" x2="690" y2="284"/>
+          <g class="f-tick" text-anchor="middle">
+            <line class="axis" x1="200" y1="284" x2="200" y2="290"/><text x="200" y="306">0</text>
+            <line class="axis" x1="312.2" y1="284" x2="312.2" y2="290"/><text x="312.2" y="306">20&times;</text>
+            <line class="axis" x1="424.4" y1="284" x2="424.4" y2="290"/><text x="424.4" y="306">40&times;</text>
+            <line class="axis" x1="536.6" y1="284" x2="536.6" y2="290"/><text x="536.6" y="306">60&times;</text>
+            <line class="axis" x1="648.8" y1="284" x2="648.8" y2="290"/><text x="648.8" y="306">80&times;</text>
+          </g>
+          <text class="f-sub" x="16" y="332">* 2,030 of 2,048 scores returned</text>
+        </svg>
+        </div>
+        <figcaption><b>Each workflow at its own defaults.</b> GenFree is 12 and 36 times faster than Boltzina,
+          58 and 82 times faster than the timed Boltz-2 run. Preparation sits outside the bars (77.7 s on
+          GSK3B, 72.0 s on NS5).</figcaption>
+      </figure>
+
+      <p>GenFree is ahead of Boltzina here too. With 21 and 16 positives the subsets are small, so the
+        full libraries stay the primary evidence.</p>
+
+      <details>
+        <summary>Local comparison table and the size sweep</summary>
+        <div class="dbody">
+          <div class="tscroll">
+            <table>
+              <caption>Fresh-process local comparison on 2,048 score-blind compounds per target.</caption>
+              <thead><tr><th>Target</th><th>Method</th><th class="n">Success</th><th class="n">Seconds</th>
+                <th class="n">AUROC</th><th class="n">AP</th><th class="n">EF 1%</th></tr></thead>
+              <tbody>
+                <tr><td>GSK3B</td><td>Boltz-2</td><td class="n">2048</td><td class="n">36,982.2</td><td class="n">0.8818</td><td class="n">0.2913</td><td class="n">23.22</td></tr>
+                <tr><td>GSK3B</td><td>GenFree (context-supplied)</td><td class="n">2048</td><td class="n">636.5</td><td class="n">0.9246</td><td class="n">0.3458</td><td class="n">41.80</td></tr>
+                <tr><td>GSK3B</td><td>Boltzina</td><td class="n">2048</td><td class="n">7,427.8</td><td class="n">0.8008</td><td class="n">0.0903</td><td class="n">4.64</td></tr>
+                <tr><td>NS5</td><td>Boltz-2</td><td class="n">2048</td><td class="n">30,111.5</td><td class="n">0.9093</td><td class="n">0.1305</td><td class="n">36.57</td></tr>
+                <tr><td>NS5</td><td>GenFree (context-supplied)</td><td class="n">2048</td><td class="n">368.8</td><td class="n">0.8671</td><td class="n">0.1566</td><td class="n">18.29</td></tr>
+                <tr><td>NS5</td><td>Boltzina</td><td class="n">2030</td><td class="n">13,233.6</td><td class="n">0.8008</td><td class="n">0.0576</td><td class="n">12.08</td></tr>
+              </tbody>
+            </table>
+            <p class="tnote">GSK3B and NS5 contain 21 and 16 positives. Wall time covers per-run
+              preprocessing, inference and writes. Subsets of 128, 512 and 2,048 compounds come from a
+              deterministic hash. On the same 2,030 NS5 IDs: Boltz-2 AP 0.1310, GenFree 0.1571, Boltzina
+              0.0576.</p>
+          </div>
+        </div>
+      </details>
+
+      <h3>A continuous-affinity check</h3>
+      <p>Ranking a library and predicting pX in a congeneric series are different tasks. On the four FEP+
+        series Boltz-2 reports, the mean corrected Pearson correlation is 0.729 for the generated control,
+        0.726 for the reference-crop candidate and 0.707 for the full-receptor one.</p>
+
+      <p>Per series the full-receptor candidate falls below the control on CDK2, JNK1 and p38 by
+        &minus;0.047, &minus;0.085 and &minus;0.140, and rises on TYK2 by +0.185. The ligand-only control
+        reaches 0.312.</p>
+    </div>
+  </div>
+</section>
+
+<section id="twostage">
+  <div class="wrap">
+    <div class="shead"><div class="num">07</div>
+      <h2>The two-stage screen: GenFree first, Boltz-2 on the top 10%</h2></div>
+    <div class="body">
+      <p class="lede">Re-ranking only the top 10% of the GenFree ranking with the published Boltz-2 score
+        reaches the eight-library mean AP of Boltz-2 alone, 0.0839 against 0.0840, at an estimated 8.5 to 8.9
+        times lower cost.</p>
+
+      <p>A first stage ranks the library; its top 5, 10 or 20%, fixed in advance, is re-ordered by a published
+        Boltz-2 score, and the rest keeps its first-stage order. GenFree and Boltzina are compared on the same
+        libraries.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 486" role="img" aria-label="The simulated two-stage screen and the mean AP difference from Boltz-2 across shortlist shares">
+          <text class="f-ttl" x="16" y="22">How the simulated screen is built</text>
+          <rect class="box" x="16" y="38" width="112" height="62"/>
+          <text class="f-lab" x="72" y="64" text-anchor="middle">Library</text>
+          <text class="f-sub" x="72" y="84" text-anchor="middle">about 50,000</text>
+          <path class="ar" d="M132 69 L156 69"/>
+          <rect class="gbox" x="160" y="38" width="152" height="62"/>
+          <text class="f-lab t-gf" x="236" y="62" text-anchor="middle">GenFree ranks all</text>
+          <text class="f-sub" x="236" y="82" text-anchor="middle">no structure generated</text>
+          <path class="ar" d="M316 69 L340 69"/>
+          <rect class="box" x="344" y="38" width="140" height="62"/>
+          <text class="f-lab" x="414" y="62" text-anchor="middle">Top 10% shortlist</text>
+          <text class="f-sub" x="414" y="82" text-anchor="middle">about 5,000</text>
+          <path class="ar" d="M488 69 L512 69"/>
+          <rect class="s2box" x="516" y="38" width="152" height="62"/>
+          <text class="f-lab t-s2" x="592" y="62" text-anchor="middle">Boltz-2 re-ranks</text>
+          <text class="f-sub" x="592" y="82" text-anchor="middle">the shortlist only</text>
+          <text class="f-sub" x="16" y="124">The rest keeps its GenFree order below</text>
+
+          <line class="gl" x1="16" y1="144" x2="744" y2="144"/>
+          <text class="f-ttl" x="16" y="170">Eight-library mean AP minus the Boltz-2 mean AP</text>
+          <text class="f-sub" x="16" y="188">by shortlist share</text>
+
+          <!-- grid -->
+          <line class="gl" x1="90" y1="200" x2="716" y2="200"/>
+          <g>
+            <line x1="191.7" y1="200" x2="191.7" y2="440" stroke="#e0e0db" stroke-width="2"/>
+            <line x1="293.3" y1="200" x2="293.3" y2="440" stroke="#e0e0db" stroke-width="2"/>
+            <line x1="496.7" y1="200" x2="496.7" y2="440" stroke="#e0e0db" stroke-width="2"/>
+          </g>
+          <line x1="90" y1="234.3" x2="716" y2="234.3" stroke="#161616" stroke-width="1.6" stroke-dasharray="6 4"/>
+          <text class="f-sub" x="96" y="228">Boltz-2 alone</text>
+
+          <!-- curves -->
+          <polyline fill="none" stroke="#858580" stroke-width="3" points="90,423.4 191.7,296.0 293.3,273.4 496.7,254.9 700,234.3"/>
+          <polyline fill="none" stroke="#b8124f" stroke-width="3" points="90,293.3 110.3,282.9 191.7,252.8 293.3,235.0 496.7,228.8 700,227.4"/>
+          <g fill="#b8124f">
+            <circle cx="191.7" cy="252.8" r="5"/><circle cx="293.3" cy="235.0" r="5"/><circle cx="496.7" cy="228.8" r="5"/>
+          </g>
+          <g fill="#858580">
+            <circle cx="191.7" cy="296.0" r="5"/><circle cx="293.3" cy="273.4" r="5"/><circle cx="496.7" cy="254.9" r="5"/>
+          </g>
+          <circle cx="90" cy="293.3" r="5" fill="#b8124f"/>
+          <circle cx="90" cy="423.4" r="5" fill="#858580"/>
+          <text class="f-lab t-gf" x="340" y="222">GenFree first stage</text>
+          <text class="f-lab" x="360" y="300" fill="#6f6f6a" style="fill:#6f6f6a">Boltzina first stage</text>
+          <text class="f-sub" x="98" y="288">GenFree alone</text>
+          <text class="f-sub" x="98" y="418">Boltzina alone</text>
+          <text class="f-num t-gf" x="293.3" y="222" text-anchor="middle">&minus;0.0001</text>
+
+          <!-- axes -->
+          <line class="axis" x1="90" y1="200" x2="90" y2="440"/>
+          <g class="f-tick" text-anchor="end">
+            <line class="axis" x1="84" y1="234.3" x2="90" y2="234.3"/><text x="78" y="239">0</text>
+            <line class="axis" x1="84" y1="302.9" x2="90" y2="302.9"/><text x="78" y="307">&minus;0.01</text>
+            <line class="axis" x1="84" y1="371.5" x2="90" y2="371.5"/><text x="78" y="376">&minus;0.02</text>
+            <line class="axis" x1="84" y1="440" x2="90" y2="440"/><text x="78" y="445">&minus;0.03</text>
+          </g>
+          <line class="axis" x1="90" y1="440" x2="716" y2="440"/>
+          <g class="f-tick" text-anchor="middle">
+            <text x="90" y="458">alone</text>
+            <text x="191.7" y="458">5%</text>
+            <text x="293.3" y="458">10%</text>
+            <text x="496.7" y="458">20%</text>
+            <text x="700" y="458">30%</text>
+          </g>
+          <text class="f-sub" x="16" y="480">Shortlist share re-ranked by Boltz-2</text>
+        </svg>
+        </div>
+        <figcaption><b>GenFree reaches Boltz-2 at about a 10% shortlist; Boltzina only where little of the cost
+          reduction is left.</b> Points are the three analysed shares; the lines add the 1 and 30% sweep
+          values.</figcaption>
+      </figure>
+
+      <p>Averaged over the eight targets the top-10% GenFree screen matches Boltz-2 alone, and GenFree alone
+        does not. With Boltzina first the construction stays below Boltz-2 at every share.</p>
+
+      <p>The recovery sits where GenFree alone falls short: on NSD2, CTDSP1, NS5 and NS1 the top 20% lifts AP
+        by +0.0081 to +0.0855. Where GenFree leads, the second stage costs AP. The best share depends on the
+        library.</p>
+
+      <h3>Cost</h3>
+      <p>Cost is one first-stage pass over the library plus one Boltz-2 pass over the shortlist, from the
+        per-compound times of the two timed targets. At 10% that is 8.5 and 8.9 times lower than Boltz-2
+        alone, against 3.3 and 1.9 with Boltzina first.</p>
+
+      <details>
+        <summary>Mean AP and estimated cost reduction at each share</summary>
+        <div class="dbody">
+          <div class="tscroll">
+            <table>
+              <caption>Simulated two-stage screen: mean AP over the eight full libraries.</caption>
+              <thead><tr><th>Route</th><th class="n">Mean AP</th><th>&Delta; vs Boltz-2 [95%]</th>
+                <th>&Delta; GenFree minus Boltzina [95%]</th><th class="n">Speed-up GSK3B / NS5</th></tr></thead>
+              <tbody>
+                <tr><td>Published Boltz-2</td><td class="n">0.0840</td><td>&mdash;</td><td>&mdash;</td><td class="n">1</td></tr>
+                <tr><td>GenFree alone</td><td class="n">0.0754</td><td>&minus;0.0086 [&minus;0.0155, &minus;0.0014]</td><td>+0.0189 [+0.0142, +0.0253]</td><td class="n">58 / 82</td></tr>
+                <tr><td>Boltzina alone</td><td class="n">0.0565</td><td>&minus;0.0276 [&minus;0.0336, &minus;0.0230]</td><td>&mdash;</td><td class="n">5.0 / 2.3</td></tr>
+                <tr><td>GenFree first, top 5%</td><td class="n">0.0813</td><td>&minus;0.0027 [&minus;0.0066, +0.0014]</td><td>+0.0063 [+0.0024, +0.0101]</td><td class="n">14.9 / 16.1</td></tr>
+                <tr><td>Boltzina first, top 5%</td><td class="n">0.0750</td><td>&minus;0.0090 [&minus;0.0123, &minus;0.0059]</td><td>&mdash;</td><td class="n">4.0 / 2.0</td></tr>
+                <tr><td>GenFree first, top 10%</td><td class="n">0.0839</td><td>&minus;0.0001 [&minus;0.0032, +0.0031]</td><td>+0.0055 [+0.0021, +0.0086]</td><td class="n">8.5 / 8.9</td></tr>
+                <tr><td>Boltzina first, top 10%</td><td class="n">0.0784</td><td>&minus;0.0057 [&minus;0.0082, &minus;0.0031]</td><td>&mdash;</td><td class="n">3.3 / 1.9</td></tr>
+                <tr><td>GenFree first, top 20%</td><td class="n">0.0848</td><td>+0.0008 [&minus;0.0016, +0.0032]</td><td>+0.0037 [+0.0013, +0.0062]</td><td class="n">4.6 / 4.7</td></tr>
+                <tr><td>Boltzina first, top 20%</td><td class="n">0.0811</td><td>&minus;0.0030 [&minus;0.0046, &minus;0.0012]</td><td>&mdash;</td><td class="n">2.5 / 1.6</td></tr>
+              </tbody>
+            </table>
+            <p class="tnote">Re-ranked compounds follow the Boltz-2 score released with Boltzina; the rest
+              keep their first-stage order. Speed-ups come from the measured 2,048-compound times; the NS5
+              Boltzina time covers the 2,030 compounds it completed.</p>
+          </div>
+          <h4>The second released Boltz-2 score</h4>
+          <p>The second released score reads the same, with two differences: at a 5% shortlist the mean
+            difference from Boltz-2 alone is &minus;0.0044, and NS1 stays below it at 20%.</p>
+          <h4>Why a short list is enough</h4>
+          <p>The two rankings share a mean 0.42 of their top 10% against 0.10 by chance, yet a mean 0.83
+            of the actives Boltz-2 puts in its own top 1% lie inside the GenFree top 10%, and 0.93 inside the
+            top 20%.</p>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section id="ft300">
+  <div class="wrap">
+    <div class="shead"><div class="num">08</div>
+      <h2>The cheap ranking can also choose which compounds to label</h2></div>
+    <div class="body">
+      <p class="lede">Fine-tuning the affinity modules on 300 GenFree-selected labels per target raises AP on
+        7 of the 8 targets, while AUROC rises on only 3.</p>
+
+      <p>The top 300 compounds of the completed context-supplied screen form the training pool, with labels
+        read only after selection. Both affinity modules train with a binary focal loss and AdamW, the trunk
+        frozen, for five epochs.</p>
+
+      <figure>
+        <p class="hint">scroll &rarr;</p>
+        <div class="scroller">
+        <svg viewBox="0 0 760 428" role="img" aria-label="Average precision before and after fine-tuning on 300 GenFree-selected labels per target">
+          <text class="f-ttl" x="16" y="22">AP before and after fine-tuning on 300 GenFree-selected labels</text>
+          <text class="f-sub" x="16" y="40">own-strict population: library minus 300 training and 20 monitor compounds</text>
+          <circle cx="22" cy="60" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/><text class="f-sub" x="34" y="65">no fine-tuning</text>
+          <circle cx="186" cy="60" r="5.5" fill="#b8124f"/><text class="f-sub" x="198" y="65">after FT300</text>
+          <line x1="336" y1="52" x2="336" y2="68" stroke="#3c3c3c" stroke-width="3"/><text class="f-sub" x="346" y="65">published Boltz-2</text>
+          <line class="gl" x1="120" y1="104" x2="640" y2="104"/>
+          <text class="f-lab" x="112" y="109" text-anchor="end">ALR</text>
+          <line x1="176.8" y1="104" x2="253.8" y2="104" stroke="#b8124f" stroke-width="3"/>
+          <line x1="187.4" y1="95" x2="187.4" y2="113" stroke="#3c3c3c" stroke-width="3"/>
+          <circle cx="176.8" cy="104" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/>
+          <circle cx="253.8" cy="104" r="5.5" fill="#b8124f"/>
+          <text class="f-num" x="620" y="109">0.0272 to 0.0641</text>
+          <line class="gl" x1="120" y1="138" x2="640" y2="138"/>
+          <text class="f-lab" x="112" y="143" text-anchor="end">GSK3A</text>
+          <line x1="300.5" y1="138" x2="330.8" y2="138" stroke="#b8124f" stroke-width="3"/>
+          <line x1="280.9" y1="129" x2="280.9" y2="147" stroke="#3c3c3c" stroke-width="3"/>
+          <circle cx="300.5" cy="138" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/>
+          <circle cx="330.8" cy="138" r="5.5" fill="#b8124f"/>
+          <text class="f-num" x="620" y="143">0.0865 to 0.1010</text>
+          <line class="gl" x1="120" y1="172" x2="640" y2="172"/>
+          <text class="f-lab" x="112" y="177" text-anchor="end">GSK3B</text>
+          <line x1="309.1" y1="172" x2="570.6" y2="172" stroke="#b8124f" stroke-width="3"/>
+          <line x1="355.2" y1="163" x2="355.2" y2="181" stroke="#3c3c3c" stroke-width="3"/>
+          <circle cx="309.1" cy="172" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/>
+          <circle cx="570.6" cy="172" r="5.5" fill="#b8124f"/>
+          <text class="f-num" x="620" y="177">0.0906 to 0.2159</text>
+          <line class="gl" x1="120" y1="206" x2="640" y2="206"/>
+          <text class="f-lab" x="112" y="211" text-anchor="end">NSD2</text>
+          <line x1="150.9" y1="206" x2="160.5" y2="206" stroke="#b8124f" stroke-width="3"/>
+          <line x1="169.9" y1="197" x2="169.9" y2="215" stroke="#3c3c3c" stroke-width="3"/>
+          <circle cx="150.9" cy="206" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/>
+          <circle cx="160.5" cy="206" r="5.5" fill="#b8124f"/>
+          <text class="f-num" x="620" y="211">0.0148 to 0.0194</text>
+          <line class="gl" x1="120" y1="240" x2="640" y2="240"/>
+          <text class="f-lab" x="112" y="245" text-anchor="end">CTDSP1</text>
+          <line x1="204.3" y1="240" x2="274.2" y2="240" stroke="#b8124f" stroke-width="3"/>
+          <line x1="255.7" y1="231" x2="255.7" y2="249" stroke="#3c3c3c" stroke-width="3"/>
+          <circle cx="204.3" cy="240" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/>
+          <circle cx="274.2" cy="240" r="5.5" fill="#b8124f"/>
+          <text class="f-num" x="620" y="245">0.0404 to 0.0739</text>
+          <line class="gl" x1="120" y1="274" x2="640" y2="274"/>
+          <text class="f-lab" x="112" y="279" text-anchor="end">NS5</text>
+          <line x1="246.5" y1="274" x2="515.5" y2="274" stroke="#b8124f" stroke-width="3"/>
+          <line x1="424.5" y1="265" x2="424.5" y2="283" stroke="#3c3c3c" stroke-width="3"/>
+          <circle cx="246.5" cy="274" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/>
+          <circle cx="515.5" cy="274" r="5.5" fill="#b8124f"/>
+          <text class="f-num" x="620" y="279">0.0606 to 0.1895</text>
+          <line class="gl" x1="120" y1="308" x2="640" y2="308"/>
+          <text class="f-lab" x="112" y="313" text-anchor="end">NS1</text>
+          <line x1="177.6" y1="308" x2="414.7" y2="308" stroke="#b8124f" stroke-width="3"/>
+          <line x1="219.1" y1="299" x2="219.1" y2="317" stroke="#3c3c3c" stroke-width="3"/>
+          <circle cx="177.6" cy="308" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/>
+          <circle cx="414.7" cy="308" r="5.5" fill="#b8124f"/>
+          <text class="f-num" x="620" y="313">0.0276 to 0.1412</text>
+          <line class="gl" x1="120" y1="342" x2="640" y2="342"/>
+          <text class="f-lab" x="112" y="347" text-anchor="end">FadD28</text>
+          <line x1="136.5" y1="342" x2="133.4" y2="342" stroke="#b8124f" stroke-width="3"/>
+          <line x1="152.6" y1="333" x2="152.6" y2="351" stroke="#3c3c3c" stroke-width="3"/>
+          <circle cx="136.5" cy="342" r="5.5" fill="#ffffff" stroke="#b8124f" stroke-width="2.5"/>
+          <circle cx="133.4" cy="342" r="5.5" fill="#b8124f"/>
+          <text class="f-num" x="620" y="347">0.0079 to 0.0064</text>
+          <line class="axis" x1="120" y1="370" x2="640" y2="370"/>
+          <line class="axis" x1="120.0" y1="370" x2="120.0" y2="376"/>
+          <text class="f-tick" x="120.0" y="392" text-anchor="middle">0.00</text>
+          <line class="axis" x1="224.3" y1="370" x2="224.3" y2="376"/>
+          <text class="f-tick" x="224.3" y="392" text-anchor="middle">0.05</text>
+          <line class="axis" x1="328.7" y1="370" x2="328.7" y2="376"/>
+          <text class="f-tick" x="328.7" y="392" text-anchor="middle">0.10</text>
+          <line class="axis" x1="433.0" y1="370" x2="433.0" y2="376"/>
+          <text class="f-tick" x="433.0" y="392" text-anchor="middle">0.15</text>
+          <line class="axis" x1="537.4" y1="370" x2="537.4" y2="376"/>
+          <text class="f-tick" x="537.4" y="392" text-anchor="middle">0.20</text>
+          <text class="f-sub" x="16" y="392">AP</text>
+          <text class="f-sub" x="16" y="418">One learning seed</text>
+        </svg>
+        </div>
+        <figcaption><b>Large AP gains where the shortfall was largest, and one small loss.</b> NS5 rises from
+          0.0606 to 0.1895 and NS1 from 0.0276 to 0.1412. Five of the eight paired intervals lie above
+          zero.</figcaption>
+      </figure>
+
+      <p>AUROC rises on only 3 targets and falls on 4; NSD2 drops from 0.7645 to 0.6148. Top-100 recovery goes
+        from 16 to 50 on NS5 and from 25 to 58 on GSK3B, and is unchanged on NSD2 and FadD28.</p>
+
+      <p>Is a GenFree-chosen label set as good as a Boltz-2-chosen one? On the top 300 of a Boltz-2 ranking
+        fine-tuned GenFree reaches a mean AP of 0.1306, up from 0.0558, against the 0.1340 reported for
+        fine-tuning ordinary Boltz-2.</p>
+
+      <details>
+        <summary>Label yields, populations and the comparison with fine-tuned Boltz-2</summary>
+        <div class="dbody">
+          <p>Own-strict evaluation excludes a policy's own 300 training and 20 monitor compounds; the
+            selector comparison also excludes the other policy's pools.</p>
+          <div class="tscroll">
+            <table>
+              <caption>FT300 label yields and evaluation populations.</caption>
+              <thead><tr><th>Target</th><th class="n">Positives / 300, Boltz-selected</th>
+                <th class="n">Positives / 300, GenFree-selected</th><th class="n">Own-strict N</th>
+                <th class="n">Common N</th><th class="n">Common positives</th></tr></thead>
+              <tbody>
+                <tr><td>ALR</td><td class="n">23</td><td class="n">42</td><td class="n">49,660</td><td class="n">49,388</td><td class="n">920</td></tr>
+                <tr><td>GSK3A</td><td class="n">70</td><td class="n">77</td><td class="n">49,562</td><td class="n">49,365</td><td class="n">503</td></tr>
+                <tr><td>GSK3B</td><td class="n">107</td><td class="n">131</td><td class="n">49,595</td><td class="n">49,398</td><td class="n">345</td></tr>
+                <tr><td>NSD2</td><td class="n">10</td><td class="n">4</td><td class="n">49,675</td><td class="n">49,455</td><td class="n">131</td></tr>
+                <tr><td>CTDSP1</td><td class="n">43</td><td class="n">24</td><td class="n">49,661</td><td class="n">49,395</td><td class="n">722</td></tr>
+                <tr><td>NS5</td><td class="n">90</td><td class="n">47</td><td class="n">49,665</td><td class="n">49,414</td><td class="n">374</td></tr>
+                <tr><td>NS1</td><td class="n">28</td><td class="n">24</td><td class="n">49,662</td><td class="n">49,406</td><td class="n">423</td></tr>
+                <tr><td>FadD28</td><td class="n">9</td><td class="n">5</td><td class="n">49,667</td><td class="n">49,356</td><td class="n">145</td></tr>
+              </tbody>
+            </table>
+            <p class="tnote">Both policies train GenFree; the names are label selectors. Each acquires
+              300 training and 20 monitor labels per target.</p>
+          </div>
+          <h4>Shares of the reference after fine-tuning</h4>
+          <p>FT300 AP exceeds the published Boltz-2 reference on 6 of the 8 targets: NS5 from 42% to 130%
+            (0.1895 against 0.1459), NS1 from 58% to 297% (0.1412 against 0.0475), CTDSP1 from 62% to 114%
+            (0.0739 against 0.0650). NSD2 and FadD28 stay below it.</p>
+          <h4>Fine-tuned GenFree against fine-tuned Boltz-2</h4>
+          <p>On the same 300 Boltz-selected labels the two reach 0.1306 (GenFree) and 0.1340 (Boltz-2) and
+            rank different compounds: mean rank correlation 0.46, top-10% overlap 0.39. Averaging the two
+            ranks gives 0.1520, but that needs both models on every compound.</p>
+        </div>
+      </details>
+
+      <div class="note">Selecting with GenFree and then fine-tuning ordinary Boltz-2 needs new Boltz-2
+        inference, and is left for future work.</div>
+    </div>
+  </div>
+</section>
+
+<section id="limits" class="band">
+  <div class="wrap">
+    <div class="shead"><div class="num">09</div><h2>Limitations</h2></div>
+    <div class="body">
+      <p class="lede">What this evidence does not establish.</p>
+      <ul>
+        <li><b>Accuracy varies widely by target</b> for every route here, Boltz-2 and Boltzina
+          included.</li>
+        <li><b>Transfer is untested.</b> The eight targets were chosen before the analysis, and the panels
+          that shaped the inputs come from the same libraries.</li>
+        <li><b>Inherited assumptions.</b> Boltz-2's leakage control for these assays is protein-level,
+          and its affinity training set is not public.</li>
+        <li><b>Labels cost something:</b> training and label acquisition sit outside the runtime
+          ratios.</li>
+        <li><b>No pose.</b> A compound carried forward still needs a structure built for it, at shortlist
+          scale.</li>
+      </ul>
+
+      <h3>Notes</h3>
+      <ul>
+        <li>Published Boltz-2 and Boltzina scores are compound-ID-aligned references, not matched
+          reruns.</li>
+        <li>The two-stage screen is simulated from released scores, not run end to end.</li>
+        <li>The NS5 Boltzina run returned 2,030 of 2,048 scores.</li>
+        <li>Mechanisms are hypotheses; the interventions are diagnostics inside a generated context.</li>
+        <li>One checkpoint flag is unconfirmed: whether the stage-2 trunk runs without templates.</li>
+        <li>Conditions B and C read the generated complex and stay diagnostics.</li>
+        <li>Intervals are exploratory and unadjusted; counts and correlations are point estimates.</li>
+        <li>The token strip in Section 2 is schematic.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="methods">
+  <div class="wrap">
+    <div class="shead"><div class="num">10</div><h2>Methods, settings, install and citation</h2></div>
+    <div class="body">
+      <p class="lede">Every number on this page comes from the curated tables of the archived analysis.</p>
+
+      <details>
+        <summary>Evaluation populations and targets</summary>
+        <div class="dbody">
+          <p>The eight MF-PCBA libraries are eight of the ten assays Boltz-2 held out, with proteins at
+            least 90% identical excluded from its affinity training. Boltzina left out two of the ten.
+            Recorded <code>target_active_v2</code> labels are used unchanged.</p>
+          <p>Conditions use enriched panels of 512 compounds, 128 positive and 384 negative, drawn
+            deterministically. The conditioning study uses 128-compound subsets (32 positives).</p>
+          <div class="tscroll">
+            <table>
+              <caption>Targets, populations and the conditions executed on the enriched panels.</caption>
+              <thead><tr><th>Target</th><th>Assay</th><th class="n">Protein tokens</th>
+                <th>Fits ordinary crop</th><th>Enriched panel</th><th>Full library</th>
+                <th>Executed 512 conditions</th></tr></thead>
+              <tbody>
+                <tr><td>ALR</td><td>485317</td><td class="n">139</td><td>Yes</td><td>Yes</td><td>Yes</td><td>A, B</td></tr>
+                <tr><td>GSK3A</td><td>2650</td><td class="n">340</td><td>No</td><td>Yes</td><td>Yes</td><td>A, B, C, D, E</td></tr>
+                <tr><td>GSK3B</td><td>2097</td><td class="n">420</td><td>No</td><td>Yes</td><td>Yes</td><td>A, B, C, D, E</td></tr>
+                <tr><td>NSD2</td><td>743445</td><td class="n">141</td><td>Yes</td><td>Yes</td><td>Yes</td><td>A, B</td></tr>
+                <tr><td>CTDSP1</td><td>493091</td><td class="n">180</td><td>Yes</td><td>No</td><td>Yes</td><td>&mdash;</td></tr>
+                <tr><td>NS5</td><td>588689</td><td class="n">257</td><td>No</td><td>Yes</td><td>Yes</td><td>A, B, C, D, E</td></tr>
+                <tr><td>NS1</td><td>504329</td><td class="n">219</td><td>No</td><td>Yes</td><td>Yes</td><td>A, E</td></tr>
+                <tr><td>FadD28</td><td>588549</td><td class="n">580</td><td>No</td><td>Yes</td><td>Yes</td><td>A, E</td></tr>
+              </tbody>
+            </table>
+            <p class="tnote">Protein tokens are executed construct lengths; the ordinary route crops above
+              200 protein tokens. NS1 and FadD28 have no recorded experimental complex and use a one-shot
+              predicted structure: NS1 with the external compound CID252055, FadD28 anchored on ATP.</p>
+          </div>
+          <p>The continuous check uses the 87-compound, four-target FEP+ subset Boltz-2 reports.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Recorded model settings</summary>
+        <div class="dbody">
+          <p><b>Condition study.</b> Seed 20260714, affinity recycling five, 200 steps and five samples
+            declared, enabled kernels, no molecular-weight correction, runtime 2.10.10.</p>
+          <p><b>Full-library GenFree.</b> Seed 20260718, released affinity checkpoint, affinity recycling
+            zero, batch eight, enabled kernels, folded conditioning, no molecular-weight correction.
+            Context-supplied: at most 1,024 MSA sequences, RDKit two-dimensional ligand positions, supplied
+            reference crops except on ALR, NSD2 and CTDSP1. Context-free: full receptor, zero ligand
+            positions, query-only MSA input.</p>
+          <p><b>Implementation.</b> A library is scored in resumable pieces. Folded conditioning is an
+            algebraic rearrangement and moves scores by at most 2.5 &times; 10&#8315;&#8310;.</p>
+          <p><b>Timing.</b> One GPU and 16 logical CPUs per method and target on ABCI <code>rt_HG</code>.
+            Boltz-2: official 2.2.1, supplied MSA, seed 20260908, structure recycling three, 200 steps, one
+            sample; affinity recycling five, 200 steps, five samples. GenFree: seed 20260718, recycling zero,
+            batch eight, folded conditioning, external reference crop, MSA subsampling, RDKit
+            two-dimensional positions. Boltzina: v1.0.1, Vina 1.2.7, 20 &#8491; box, exhaustiveness eight,
+            16 docking workers, affinity batch eight, recycling five, seed 20260908.</p>
+          <p><b>Fine-tuning.</b> Both affinity modules train on detached contexts, trunk frozen. Focal
+            losses are summed with &alpha;&#8321; = 0.8, &alpha;&#8322; = 0.6 and &gamma; = 2. AdamW:
+            learning rate 2 &times; 10&#8315;&#8309;, (&beta;&#8321;, &beta;&#8322;) = (0.9, 0.95), epsilon
+            10&#8315;&#8312;, no weight decay, clipping ten. Five epochs, batch one, accumulation four give
+            375 optimizer steps; learning seed zero gives 1,500 draws per 300-record pool. FP32 on detached
+            BF16 contexts.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Metrics and intervals</summary>
+        <div class="dbody">
+          <p>The aggregate binary probability, the mean of the two affinity modules, is ranked high to low
+            and read with AUROC, average precision and enrichment at the top 1% and 5%. AP is
+            non-interpolated; ties are grouped, and boundary ties are shared in proportion.</p>
+          <p>Panel and seed contrasts use 1,000-replicate label-stratified paired compound bootstrap
+            intervals; full-library and FT300 contrasts use 2,000. The molecular-weight correction is
+            Boltz-2's own, 1.035 <i>v</i> &minus; 0.600 MW<sup>0.3</sup> + 2.833.</p>
+        </div>
+      </details>
+
+      <details>
+        <summary>Does the score depend on the target at all?</summary>
+        <div class="dbody">
+          <p>4,377 compounds appear in two libraries with opposite recorded labels. The context-supplied
+            route puts the higher score on the target where the compound is active for 64.7% of them
+            [63.2, 66.1], against 62.1% for published Boltz-2 and 62.5% for published Boltzina.</p>
+          <p>Scores on shared compounds correlate across target pairs at a median Spearman of 0.617 for
+            the context-supplied route and 0.588 for the reference.</p>
+        </div>
+      </details>
+
+      <h3>Install and usage</h3>
+      <p>Python 3.10 or newer, installed from a tagged release. The affinity checkpoint downloads on first
+        use.</p>
+<pre><code>git clone https://github.com/N283T/boltz-genfree.git
+cd boltz-genfree
+uv sync --frozen --extra cuda      # --extra cuda12 for CUDA 12 PyTorch builds
+source .venv/bin/activate</code></pre>
+      <p>A screen config takes one protein source and one ligand source.</p>
+<pre><code>version: 1
+
+target:
+  sequence: YOUR_PROTEIN_SEQUENCE
+  msa: ./target.a3m          # or auto / empty
+  crop:                      # optional when the complete receptor fits
+    reference: ./reference-complex.cif
+    reference_protein: A
+    reference_ligand: L
+
+ligands:
+  csv: ./library.csv
+  id_column: id
+  smiles_column: smiles
+
+output_dir: ./screen-output</code></pre>
+<pre><code>boltz-genfree screen screen.yaml --prepare-only   # dry run: validate the inputs
+boltz-genfree screen screen.yaml                  # run; scores are written to scores.csv</code></pre>
+      <p>A re-run with the same inputs resumes. Options are documented in <code>docs/usage.md</code> and
+        <code>docs/finetuning.md</code>.</p>
+
+      <h3>Data and software availability</h3>
+      <p>Curated tables, run records and analysis code are archived on Zenodo
+        (<a href="https://doi.org/10.5281/zenodo.23949585">10.5281/zenodo.23949585</a>), data CC BY 4.0 and
+        code MIT; checkpoints are not included. <code>boltz-genfree</code> (v0.1.0):
+        <a href="https://github.com/N283T/boltz-genfree">github.com/N283T/boltz-genfree</a>.</p>
+
+      <h3 id="cite">Citation</h3>
+      <p>The manuscript is in preparation. Until it appears, cite the software and the archive.</p>
+      <ul>
+        <li><b>Software.</b> Nagae, T.; Tomii, K. Boltz-GenFree v0.1.0, MIT license (see
+          <code>CITATION.cff</code>).</li>
+        <li><b>Data and analysis code.</b> Nagae, T.; Tomii, K. Boltz-GenFree: curated tables, run
+          records and analysis code. Zenodo.
+          <a href="https://doi.org/10.5281/zenodo.23949585">10.5281/zenodo.23949585</a></li>
+        <li><b>Manuscript.</b> Nagae, T.; Tomii, K. Boltz-GenFree: structure-generation-free ranking for
+          first-stage affinity screening. In preparation.</li>
+      </ul>
+
+      <h3>Acknowledgements</h3>
+      <p>This work was supported by JST, NBDC Grant Number JPMJND2401, Japan (T.N. and K.T.), and by ABCI
+        3.0, provided by AIST and AIST Solutions. AI coding assistants were used during code development, data
+        analysis, figure preparation and manuscript drafting. The authors retain responsibility for the
+        scientific content.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><b>Boltz-GenFree</b> &middot; Tsubasa Nagae and Kentaro Tomii &middot; Yokohama City University and
+      AIRC, AIST &middot; <a href="mailto:k-tomii@aist.go.jp">k-tomii@aist.go.jp</a></p>
+    <p>Derived from <a href="https://github.com/jwohlwend/boltz">Boltz</a> and
+      <a href="https://github.com/Novel-Therapeutics/boltz-community">boltz-community</a>, under the MIT
+      license, and runs the released Boltz-2 affinity checkpoint unchanged.</p>
+  </div>
+</footer>
+
+</body>
+</html>
