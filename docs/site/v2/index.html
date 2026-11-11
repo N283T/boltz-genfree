@@ -71,31 +71,19 @@ sup{font-size:.62em;line-height:0}
 .kpi .t b{color:var(--tile-ink);font-weight:700}
 
 /* ---------- section menu ----------
-   wide: a slim fixed index left of the 900px column; middle: a centred bar that wraps;
+   wide and middle: a centred bar that wraps;
    phones: one row with the current section and a toggle that opens the list. */
 .nav{position:sticky;top:0;z-index:40;background:var(--bg);border-bottom:1px solid var(--line)}
 .nav-tg{display:none}
-.nav-list{list-style:none;margin:0 auto;padding:5px 14px;max-width:1240px;display:flex;flex-wrap:wrap;justify-content:center;gap:0 2px}
+.nav-list{list-style:none;margin:0 auto;padding:5px 12px;max-width:1400px;display:flex;flex-wrap:wrap;justify-content:center;gap:0 2px}
 .nav-list li{margin:0}
-.nav-list a{display:flex;align-items:baseline;gap:6px;padding:9px 9px 7px;font:700 14.5px/1.15 var(--sans);color:var(--ink-2);
+.nav-list a{display:flex;align-items:baseline;gap:5px;padding:9px 6px 7px;font:700 14px/1.15 var(--sans);color:var(--ink-2);
        text-decoration:none;border-bottom:3px solid transparent}
-.nav-list .nn{font:600 11.5px/1 var(--mono);letter-spacing:.02em;color:var(--ink-3)}
+.nav-list .nn{font:600 11px/1 var(--mono);letter-spacing:.02em;color:var(--ink-3)}
 .nav-list a:hover,.nav-list a:focus-visible{color:var(--ink);border-bottom-color:var(--hot);outline:none}
 .nav-list a[aria-current]{color:var(--ink);border-bottom-color:var(--accent)}
 .nav-list a[aria-current] .nn{color:var(--accent)}
 section{scroll-margin-top:84px}
-@media (min-width:1280px){
-  .nav{height:0;background:none;border:0;
-       --rw:min(214px,calc(50% - 486px))}
-  .nav-list{position:absolute;top:30px;left:calc(50% - 474px - var(--rw));width:var(--rw);max-width:none;margin:0;padding:0;
-            flex-direction:column;flex-wrap:nowrap;justify-content:flex-start;gap:0;border-left:1px solid var(--line)}
-  .nav-list a{display:grid;grid-template-columns:24px minmax(0,1fr);gap:0 4px;align-items:baseline;margin-left:-1px;padding:6px 8px 6px 12px;
-              font-size:14px;line-height:1.25;border-bottom:0;border-left:3px solid transparent;background:var(--bg)}
-  .nav-list a:hover,.nav-list a:focus-visible{border-left-color:var(--hot)}
-  .nav-list a[aria-current]{border-left-color:var(--accent);background:var(--panel)}
-  .nav-list a:focus-visible{box-shadow:inset 0 0 0 2px var(--accent)}
-  section{scroll-margin-top:12px}
-}
 @media (max-width:719px){
   section{scroll-margin-top:56px}
   .nav.js .nav-tg{display:flex;align-items:center;gap:10px;width:100%;margin:0;padding:13px 16px;border:0;background:none;cursor:pointer;
