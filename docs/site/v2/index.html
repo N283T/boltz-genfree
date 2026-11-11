@@ -5378,9 +5378,28 @@ var LIG=[["O1","O",5.42,7.91,-5.61],["C1","C",4.72,7.22,-6.3],["C20","C",5.34,6.
 </footer>
 
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.4.2/3Dmol-min.js"></script>
 <script>
 (function(){
+  /* The two 3D views are WebGL. Phones get still images instead (a heavy page with two live WebGL views can stop
+     a phone browser from opening it); other screens load the 3Dmol library only when the figure is near the screen. */
+  var phone = window.matchMedia && window.matchMedia('(max-width:719px), (pointer:coarse) and (max-width:1024px)').matches;
+  function still(id, src){ var el=document.getElementById(id); if(!el) return; var im=new Image(); im.alt=''; im.decoding='async'; im.src=src;
+    im.style.cssText='display:block;width:100%;height:100%;object-fit:contain'; el.appendChild(im); }
+  if (phone) { still('v-full','assets/3d-full.jpg'); still('v-crop','assets/3d-crop.jpg'); return; }
+  var anchor = document.getElementById('v-full'); if (!anchor) return;
+  var started = false;
+  function start(){
+    if (started) return; started = true;
+    var sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.4.2/3Dmol-min.js';
+    sc.onload = init; sc.onerror = function(){ init(); };
+    document.head.appendChild(sc);
+  }
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function(es){ if (es.some(function(e){return e.isIntersecting;})) { io.disconnect(); start(); } }, {rootMargin:'600px 0px'});
+    io.observe(anchor);
+  } else { start(); }
+  function init(){
   var VIEW = [0.38239,-0.42523,-0.90373,-83.85198,-0.912,-0.12998,0.25714,-0.29195];   // initial pose, chosen in pose-picker.html (3Dmol getView())
   var ROT = 90;   // extra turn about the vertical axis after the ligand is brought to the front
   var KEPT = [[1, 13], [40, 50], [53, 150], [160, 209], [211, 228]];   // receptor residues retained by AffinityCropper (GSK3B, one generated pose)
@@ -5415,6 +5434,7 @@ var LIG=[["O1","O",5.42,7.91,-5.61],["C1","C",4.72,7.22,-6.3],["C20","C",5.34,6.
   function link(a,b){ a.setViewChangeCallback(function(){ if(busy) return; busy=true; b.setView(a.getView()); b.render(); busy=false; }); }
   link(vf,vc); link(vc,vf);
   window.addEventListener('resize', function(){ vf.resize(); vc.resize(); });
+  }
 })();
 </script>
 </body>
