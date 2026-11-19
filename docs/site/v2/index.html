@@ -1938,7 +1938,8 @@ var LIG=[["O1","O",5.42,7.91,-5.61],["C1","C",4.72,7.22,-6.3],["C20","C",5.34,6.
         var i0=RES.findIndex(function(r){return r[0]===85}),j0=NR,bd=1e9;
         for(var q=NR;q<N;q++){var dq=Math.abs(dist(i0,q)-8);if(dq<bd){bd=dq;j0=q}}
         set(i0,j0);
-        window.addEventListener('load',function(){
+        // 3Dmol is loaded on demand (shared loader at the end of the page); start when this figure is near the screen
+        function initV(){
           var box=document.getElementById('dg-v');
           if(!window.$3Dmol){box.innerHTML='<div class="c3-fail">The 3D view needs the 3Dmol library (online).</div>';return}
           V=$3Dmol.createViewer(box,{backgroundAlpha:0});
@@ -1961,6 +1962,17 @@ var LIG=[["O1","O",5.42,7.91,-5.61],["C1","C",4.72,7.22,-6.3],["C20","C",5.34,6.
           cur=[bi,bj];
           set(cur[0],cur[1]);
           window.addEventListener('resize',function(){V.resize();V.render()});
+        }
+        window.addEventListener('load',function(){
+          var fig=document.getElementById('dg');
+          var once=false;
+          function go(){if(once)return;once=true;window.get3Dmol(initV)}
+          if('IntersectionObserver' in window){
+            var io=new IntersectionObserver(function(es){if(es.some(function(e){return e.isIntersecting})){io.disconnect();go()}},{rootMargin:'600px 0px'});
+            io.observe(fig);
+            // on larger screens, do not depend on the observer alone
+            if(!window.matchMedia('(max-width:719px), (pointer:coarse) and (max-width:1024px)').matches)setTimeout(go,4000);
+          }else go();
         });
       })();
       </script>
@@ -5370,6 +5382,15 @@ var LIG=[["O1","O",5.42,7.91,-5.61],["C1","C",4.72,7.22,-6.3],["C20","C",5.34,6.
 (function(){
   /* The two 3D views are WebGL. Phones get still images instead (a heavy page with two live WebGL views can stop
      a phone browser from opening it); other screens load the 3Dmol library only when the figure is near the screen. */
+  var queue = [], loading = false;
+  window.get3Dmol = function(cb){
+    if (window.$3Dmol) { cb(); return; }
+    queue.push(cb); if (loading) return; loading = true;
+    var sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.4.2/3Dmol-min.js';
+    sc.onload = sc.onerror = function(){ queue.splice(0).forEach(function(f){ f(); }); };
+    document.head.appendChild(sc);
+  };
   var phone = window.matchMedia && window.matchMedia('(max-width:719px), (pointer:coarse) and (max-width:1024px)').matches;
   function still(id, src){ var el=document.getElementById(id); if(!el) return; var im=new Image(); im.alt=''; im.decoding='async'; im.src=src;
     im.style.cssText='display:block;width:100%;height:100%;object-fit:contain'; el.appendChild(im); }
@@ -5378,14 +5399,12 @@ var LIG=[["O1","O",5.42,7.91,-5.61],["C1","C",4.72,7.22,-6.3],["C20","C",5.34,6.
   var started = false;
   function start(){
     if (started) return; started = true;
-    var sc = document.createElement('script');
-    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.4.2/3Dmol-min.js';
-    sc.onload = init; sc.onerror = function(){ init(); };
-    document.head.appendChild(sc);
+    window.get3Dmol(init);
   }
   if ('IntersectionObserver' in window) {
     var io = new IntersectionObserver(function(es){ if (es.some(function(e){return e.isIntersecting;})) { io.disconnect(); start(); } }, {rootMargin:'600px 0px'});
     io.observe(anchor);
+    window.addEventListener('load', function(){ setTimeout(start, 4000); });   // larger screens: do not depend on the observer alone
   } else { start(); }
   function init(){
   var VIEW = [0.38239,-0.42523,-0.90373,-83.85198,-0.912,-0.12998,0.25714,-0.29195];   // initial pose, chosen in pose-picker.html (3Dmol getView())
