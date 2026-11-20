@@ -64,7 +64,16 @@ limits, the optional reference bootstrap and fine-tuned heads are described in
 
 [MIT License](LICENSE). Derived from [Boltz](https://github.com/jwohlwend/boltz) and
 [boltz-community](https://github.com/Novel-Therapeutics/boltz-community); history is
-preserved. See [CITATION.cff](CITATION.cff) to cite.
+preserved.
+
+## Citation
+
+Release v0.1.0 is archived on Zenodo:
+[10.5281/zenodo.24400635](https://doi.org/10.5281/zenodo.24400635)
+(all versions: [10.5281/zenodo.24400634](https://doi.org/10.5281/zenodo.24400634)).
+The curated evidence and analysis code for the associated manuscript are archived at
+[10.5281/zenodo.23949585](https://doi.org/10.5281/zenodo.23949585). See
+[CITATION.cff](CITATION.cff) for citation metadata.
 
 ## Development
 
