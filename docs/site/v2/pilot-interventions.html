@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Interventions pilot</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Red+Hat+Mono:wght@400..700&display=swap">
+<style>
+:root{
+  --bg:#fafaf7; --panel:#ffffff; --ink:#161616; --ink-2:#565656; --ink-3:#6f6f6a;
+  --line:#bdbdb8; --line-2:#e0e0db; --soft:#f1f1ee;
+  --accent:#b8124f; --accent-tint:#f6dfe8;
+  --dist:#2b5c9e; --dist-tint:#e2eaf5;
+  --zp:#a8510f;  --zp-tint:#f8e8db;
+  --sans:"Atkinson Hyperlegible","Helvetica Neue",Arial,sans-serif;
+  --mono:"Red Hat Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 18px/1.6 var(--sans)}
+.wrap{max-width:940px;margin:0 auto;padding:40px 20px 80px}
+h2{margin:0;font:800 clamp(24px,3.6vw,33px)/1.1 var(--sans);letter-spacing:-.012em}
+.lede{margin:14px 0 0;font:700 clamp(19px,2.4vw,23px)/1.4 var(--sans)}
+.hint{margin:26px 0 10px;font:500 14px/1.3 var(--mono);color:var(--ink-3);letter-spacing:.02em}
+
+/* ---------- the pathway, built from page elements ---------- */
+.flow{display:grid;gap:10px 0;
+  grid-template-columns:minmax(0,1.15fr) 28px minmax(0,1.15fr) 28px 54px 28px minmax(0,1fr) 28px minmax(0,.8fr);
+  grid-template-areas:
+    "rail rail rail rail rail . . . ."
+    "z a1 cond a2 add a3 pf a4 head"
+    "dist a5 cond a2 add a3 pf a4 head";
+  align-items:stretch}
+.node,.wire,.rail{font:inherit;color:inherit;text-align:left;background:var(--panel);
+  border:2px solid var(--line);padding:11px 12px;cursor:default;position:relative}
+button.node,button.rail,button.wire{cursor:pointer}
+.node b{display:block;font:800 16px/1.2 var(--sans)}
+.node small{display:block;margin-top:3px;font:400 14px/1.3 var(--sans);color:var(--ink-2)}
+.z{grid-area:z;border-color:var(--zp);background:var(--zp-tint)}
+.dist{grid-area:dist;border-color:var(--dist);background:var(--dist-tint)}
+.cond{grid-area:cond;border-color:var(--zp);background:var(--panel);display:flex;flex-direction:column;justify-content:center}
+.add{grid-area:add;display:flex;align-items:center;justify-content:center;font:800 26px/1 var(--sans);padding:0}
+.pf{grid-area:pf;display:flex;flex-direction:column;justify-content:center}
+.head{grid-area:head;display:flex;flex-direction:column;justify-content:center}
+.arrow{display:flex;align-items:center;justify-content:center;color:var(--ink-3);font:700 20px/1 var(--sans)}
+.a1{grid-area:a1}.a2{grid-area:a2}.a3{grid-area:a3}.a4{grid-area:a4}.a5{grid-area:a5}
+.rail{grid-area:rail;border-style:dashed;border-color:var(--zp);background:transparent;
+  padding:6px 12px;font:600 14px/1.2 var(--mono);color:var(--zp);text-align:center}
+.head b{color:var(--ink)}
+
+@media (max-width:719px){
+  .flow{grid-template-columns:minmax(0,1fr);grid-template-areas:"z" "dist" "cond" "rail" "add" "pf" "head"}
+  .arrow{display:none}
+  .add{padding:6px 0}
+}
+/* clickable affordance */
+button.node:hover,button.rail:hover,button.wire:hover{border-color:var(--ink)}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.tag{position:absolute;top:-11px;right:8px;background:var(--accent);color:#fff;
+  font:700 12px/1 var(--mono);padding:4px 6px;display:none;letter-spacing:.04em}
+
+/* states: the chosen intervention marks its element */
+.flow[data-i="zero"] .dist,
+.flow[data-i="pairin"] .z,
+.flow[data-i="resid"] .rail,
+.flow[data-i="bypass"] .cond{background:var(--accent-tint);
+  border-color:var(--accent);border-style:dashed}
+.flow[data-i="zero"] .dist b,
+.flow[data-i="pairin"] .z b,
+.flow[data-i="bypass"] .cond b{text-decoration:line-through;text-decoration-thickness:2px}
+.flow[data-i="resid"] .rail{color:var(--accent);text-decoration:line-through}
+.flow[data-i="zero"] .dist .tag,
+.flow[data-i="pairin"] .z .tag,
+.flow[data-i="resid"] .rail .tag,
+.flow[data-i="bypass"] .cond .tag{display:block}
+.flow[data-i="resid"] .rail .tag{top:-12px}
+/* the score box reacts */
+.head{transition:background .25s,border-color .25s}
+.flow[data-i="zero"] .head{border-color:var(--ink);background:#e8f1e6}
+.flow:not([data-i="none"]):not([data-i="zero"]) .head{border-color:var(--accent);background:var(--accent-tint)}
+
+/* ---------- control chips ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.chip{font:700 16px/1 var(--sans);padding:12px 14px;border:2px solid var(--ink);background:var(--panel);
+  color:var(--ink);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:#fff}
+.chip:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+/* ---------- the readout ---------- */
+.read{margin-top:22px;display:grid;gap:18px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:760px){.read{grid-template-columns:minmax(0,.9fr) minmax(0,1.4fr);align-items:end}}
+.big{font:800 clamp(32px,5vw,46px)/1.05 var(--sans);letter-spacing:-.02em;min-height:2.1em}
+.big span{display:block;white-space:nowrap}
+.big.bad{color:var(--accent)}
+.verdict{margin-top:8px;font:700 19px/1.3 var(--sans)}
+.what{margin-top:4px;font-size:16px;color:var(--ink-2)}
+.scale{position:relative}
+.rows{display:grid;gap:8px}
+.row{display:grid;grid-template-columns:minmax(0,1fr);gap:3px}
+.row .nm{font:600 14px/1.2 var(--sans);color:var(--ink-3)}
+.track{position:relative;height:16px;background:var(--soft)}
+.bar{position:absolute;top:0;bottom:0;background:var(--line);transition:background .25s}
+.row.on .nm{color:var(--ink);font-weight:800}
+.row.on .bar{background:var(--accent)}
+.zero{position:absolute;top:-4px;bottom:20px;border-left:2px dashed var(--ink);pointer-events:none}
+.ticks{display:flex;justify-content:space-between;margin-top:6px;font:500 13px/1 var(--mono);color:var(--ink-3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Interventions: which inputs the ranking needs</h2>
+  <p class="lede">Zeroing the distogram costs almost nothing. Cutting the pair pathway collapses the ranking.</p>
+
+  <p class="hint">Tap a part of the affinity module, or pick below.</p>
+
+  <div class="flow" id="flow" data-i="none">
+    <button class="node z" data-i="pairin" aria-label="Remove the pair input to the conditioner"><span class="tag">REMOVED</span><b>Pair representation</b><small>from the trunk</small></button>
+    <div class="arrow a1">→</div>
+    <button class="node cond" data-i="bypass" aria-label="Bypass the conditioner"><span class="tag">BYPASSED</span><b>Pair conditioner</b><small>merges the two paths</small></button>
+    <div class="arrow a2">→</div>
+    <div class="node add">+</div>
+    <div class="arrow a3">→</div>
+    <div class="node pf"><b>Pairformer</b><small>cross pairs only</small></div>
+    <div class="arrow a4">→</div>
+    <div class="node head"><b>Affinity</b><small>value and binder probability</small></div>
+    <button class="node dist" data-i="zero" aria-label="Zero the distogram"><span class="tag">ZEROED</span><b>Distogram</b><small>binned distances, embedded</small></button>
+    <div class="arrow a5">→</div>
+    <button class="rail" data-i="resid" aria-label="Remove the residual pair pathway"><span class="tag">CUT</span>residual path: pair pathway added back</button>
+  </div>
+
+  <div class="chips" id="chips" role="group" aria-label="Intervention">
+    <button class="chip" data-i="none" aria-pressed="true">None</button>
+    <button class="chip" data-i="zero" aria-pressed="false">Zero the distogram</button>
+    <button class="chip" data-i="resid" aria-pressed="false">Remove the residual</button>
+    <button class="chip" data-i="bypass" aria-pressed="false">Bypass the conditioner</button>
+    <button class="chip" data-i="pairin" aria-pressed="false">Remove the pair input</button>
+  </div>
+
+  <div class="read">
+    <div>
+      <div class="big" id="big">&nbsp;</div>
+      <div class="verdict" id="verdict">Unmodified run</div>
+      <div class="what">AUROC change, seven 512-compound panels</div>
+    </div>
+    <div class="scale" aria-hidden="true">
+      <div class="rows" id="rows"></div>
+      <div class="ticks"><span>&minus;0.7</span><span>&minus;0.5</span><span>&minus;0.3</span><span>&minus;0.1</span><span>0</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  // AUROC change ranges across the seven panels (min, max), from the paper's table
+  var D = {
+    zero:   {n:'Zero the distogram',   lo:-0.0042, hi: 0.0044, v:'No real change',  bad:false},
+    resid:  {n:'Remove the residual',  lo:-0.2455, hi:-0.0807, v:'Clear drop',      bad:true},
+    bypass: {n:'Bypass the conditioner',lo:-0.2568,hi:-0.1207, v:'Clear drop',      bad:true},
+    pairin: {n:'Remove the pair input', lo:-0.6379,hi:-0.1376, v:'Largest drop',    bad:true}
+  };
+  var AX0 = -0.7, AX1 = 0.0;           // axis span
+  function pct(x){ return Math.max(0,Math.min(100,(x-AX0)/(AX1-AX0)*100)); }
+  var rows = document.getElementById('rows'), html='';
+  ['zero','resid','bypass','pairin'].forEach(function(k){
+    var d=D[k], l=pct(d.lo), r=pct(Math.min(d.hi,AX1));
+    html += '<div class="row" data-k="'+k+'"><div class="nm">'+d.n+'</div>'+
+            '<div class="track"><div class="bar" style="left:'+l+'%;width:'+Math.max(r-l,1.2)+'%"></div></div></div>';
+  });
+  rows.innerHTML = html;
+  function fmt(x){ var s=Math.abs(x).toFixed(4); return (x<0?'−':'+')+s; }
+  function set(k){
+    document.getElementById('flow').setAttribute('data-i',k);
+    [].forEach.call(document.querySelectorAll('.chip'),function(c){c.setAttribute('aria-pressed',c.dataset.i===k)});
+    [].forEach.call(rows.children,function(r){r.classList.toggle('on',r.dataset.k===k)});
+    var big=document.getElementById('big'), v=document.getElementById('verdict');
+    if(k==='none'){ big.innerHTML='&nbsp;'; big.className='big'; v.textContent='Unmodified run'; return; }
+    var d=D[k]; big.innerHTML='<span>'+fmt(d.lo)+'</span><span>to '+fmt(d.hi)+'</span>'; big.className='big'+(d.bad?' bad':''); v.textContent=d.v;
+  }
+  document.addEventListener('click',function(e){
+    var t=e.target.closest('[data-i]'); if(!t) return;
+    var k=t.dataset.i, cur=document.getElementById('flow').getAttribute('data-i');
+    set(t.classList.contains('chip')||k!==cur?k:'none');
+  });
+  set('none');
+})();
+</script>
+</body>
+</html>
