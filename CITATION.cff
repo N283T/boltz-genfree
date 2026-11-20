@@ -1,12 +1,34 @@
 cff-version: 1.2.0
 message: >-
-  If you use this software, please cite the software release and the associated
-  manuscript once its bibliographic details are finalized.
+  If you use this software, please cite the archived release below.
 title: "Boltz-GenFree: structure-generation-free Boltz-2 affinity screening"
 type: software
 authors:
-  - family-names: "PLACEHOLDER"
-    given-names: "AUTHOR LIST NOT FINALIZED"
+  - family-names: "Nagae"
+    given-names: "Tsubasa"
+    orcid: "https://orcid.org/0009-0003-2202-8741"
+    affiliation: >-
+      Yokohama City University; and National Institute of Advanced Industrial
+      Science and Technology (AIST)
+  - family-names: "Tomii"
+    given-names: "Kentaro"
+    orcid: "https://orcid.org/0000-0002-4567-4768"
+    affiliation: >-
+      National Institute of Advanced Industrial Science and Technology (AIST);
+      and Yokohama City University
+version: "0.1.0"
+date-released: "2026-11-04"
+doi: "10.5281/zenodo.24400635"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.24400635"
+    description: "Archived release v0.1.0"
+  - type: doi
+    value: "10.5281/zenodo.24400634"
+    description: "All versions (concept DOI)"
+  - type: doi
+    value: "10.5281/zenodo.23949585"
+    description: "Curated evidence and analysis code for the associated manuscript"
 repository-code: "https://github.com/N283T/boltz-genfree"
 license: MIT
 abstract: >-
@@ -17,10 +39,15 @@ keywords:
   - virtual screening
   - structure-generation-free screening
   - Boltz-2
-preferred-citation:
-  type: article
-  authors:
-    - family-names: "PLACEHOLDER"
-      given-names: "AUTHOR LIST NOT FINALIZED"
-  title: "PLACEHOLDER: final manuscript title"
-  journal: "Journal of Chemical Information and Modeling"
+references:
+  - type: software
+    title: "Boltz"
+    authors:
+      - family-names: "Wohlwend"
+        given-names: "Jeremy"
+      - family-names: "Corso"
+        given-names: "Gabriele"
+      - family-names: "Passaro"
+        given-names: "Saro"
+    repository-code: "https://github.com/jwohlwend/boltz"
+    license: MIT
