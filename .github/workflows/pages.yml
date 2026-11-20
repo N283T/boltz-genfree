@@ -1,0 +1,47 @@
+name: Deploy project page
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/site/v2/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Publish docs/site/v2
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Only the main page and its assets are public; the other pages under
+      # docs/site/v2 are working tools and stay unpublished.
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp docs/site/v2/index.html _site/
+          cp -r docs/site/v2/assets _site/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
