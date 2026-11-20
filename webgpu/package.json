@@ -1,0 +1,17 @@
+{
+  "name": "boltz-genfree-webgpu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WebGPU implementation of Boltz-GenFree (structure-generation-free Boltz-2 affinity scoring)",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:gpu": "BOLTZ_GENFREE_GPU_TESTS=1 node --test test/*.test.js",
+    "score": "node src/cli.js"
+  },
+  "devDependencies": {
+    "webgpu": "0.6.0"
+  }
+}
