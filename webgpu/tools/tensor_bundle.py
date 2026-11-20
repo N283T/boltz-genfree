@@ -30,7 +30,7 @@ def write_bundle(
     tensors: dict[str, Any],
     meta: dict[str, Any] | None = None,
 ) -> Path:
-    """Write ``tensors`` to ``directory/name.{json,bin}`` and return the manifest path."""
+    """Write ``tensors`` to ``directory/name.{json,bin}``; return the manifest."""
     directory.mkdir(parents=True, exist_ok=True)
     records: dict[str, dict[str, Any]] = {}
     offset = 0

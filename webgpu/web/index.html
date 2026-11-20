@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boltz-GenFree WebGPU</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; }
+  label { display: block; margin: .6rem 0 .2rem; }
+  input, select, button { font: inherit; width: 100%; box-sizing: border-box; padding: .3rem; }
+  pre { background: #f3f3f3; padding: .8rem; overflow: auto; }
+  @media (prefers-color-scheme: dark) { body { background: #111; color: #eee; } pre { background: #222; } }
+</style>
+</head>
+<body>
+<h1>Boltz-GenFree on WebGPU</h1>
+<p>Scores one trunk output with the structure-free Boltz-2 affinity module. Serve this
+directory (for example <code>python3 -m http.server</code> from <code>webgpu/</code>) and
+give the URLs of a weight pack and a trunk dump (see <code>DESIGN.md</code>).</p>
+<label for="pack">Weight pack manifest URL</label>
+<input id="pack" value="../packs/genfree-affinity.json">
+<label for="trunk">Trunk dump manifest URL</label>
+<input id="trunk" value="../oracle-dumps/ckpt-dump.json">
+<label for="mode">Distogram mode</label>
+<select id="mode"></select>
+<p><button id="run">Score</button></p>
+<pre id="out">idle</pre>
+<script type="module">
+import { TensorBundle } from "../src/bundle.js";
+import { STRUCTURE_FREE_MODES } from "../src/distogram.js";
+import { inputFromBundle } from "../src/trunk-input.js";
+import { deviceFromAdapter } from "../src/device.js";
+import { AffinityGpu } from "../src/gpu/affinity-gpu.js";
+
+const out = document.getElementById("out");
+const mode = document.getElementById("mode");
+for (const name of STRUCTURE_FREE_MODES) mode.add(new Option(name, name, false, name === "zero_distogram_features"));
+
+document.getElementById("run").addEventListener("click", async () => {
+  try {
+    if (!navigator.gpu) throw new Error("this browser has no WebGPU");
+    out.textContent = "loading...";
+    const [pack, trunk] = await Promise.all([
+      TensorBundle.fromUrl(document.getElementById("pack").value),
+      TensorBundle.fromUrl(document.getElementById("trunk").value),
+    ]);
+    const device = await deviceFromAdapter(await navigator.gpu.requestAdapter());
+    const engine = new AffinityGpu(device, pack);
+    const started = performance.now();
+    const result = await engine.score(inputFromBundle(trunk), { mode: mode.value, seed: 0 });
+    await engine.destroy();
+    out.textContent = JSON.stringify({
+      mode: mode.value,
+      affinity_pred_value: result.value,
+      affinity_probability_binary: result.probability,
+      elapsed_ms: Math.round(performance.now() - started),
+    }, null, 2);
+  } catch (error) {
+    out.textContent = String(error?.stack ?? error);
+  }
+});
+</script>
+</body>
+</html>

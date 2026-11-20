@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 from tensor_bundle import write_bundle
@@ -52,7 +52,12 @@ def small_module(seed: int) -> AffinityModule:
     )
     with torch.no_grad():
         for name, param in module.named_parameters():
-            if name.endswith("norm.weight") or ".norm_in.weight" in name or ".norm_out.weight" in name or "layer_norm.weight" in name:
+            if (
+                name.endswith("norm.weight")
+                or ".norm_in.weight" in name
+                or ".norm_out.weight" in name
+                or "layer_norm.weight" in name
+            ):
                 param.copy_(1 + 0.1 * torch.randn_like(param))
             else:
                 param.copy_(0.2 * torch.randn_like(param))
@@ -83,7 +88,9 @@ def checkpoint_modules(path: Path) -> tuple[list[AffinityModule], dict[str, Any]
         sub = {k[len(prefix) :]: v for k, v in state.items() if k.startswith(prefix)}
         module.load_state_dict(sub, strict=True)
         modules.append(module.eval())
-    return modules, {"affinity_mw_correction": bool(hp.get("affinity_mw_correction", False))}
+    return modules, {
+        "affinity_mw_correction": bool(hp.get("affinity_mw_correction", False))
+    }
 
 
 def make_inputs(token_s: int, token_z: int, n_rec: int, n_lig: int, seed: int):
@@ -169,6 +176,13 @@ def main() -> None:
     parser.add_argument("--name", default=None)
     parser.add_argument("--n-rec", type=int, default=7)
     parser.add_argument("--n-lig", type=int, default=3)
+    parser.add_argument(
+        "--modes",
+        nargs="+",
+        choices=MODES,
+        default=MODES,
+        help="structure-free modes to dump",
+    )
     parser.add_argument("--seed", type=int, default=0, help="distogram + input seed")
     args = parser.parse_args()
 
@@ -194,20 +208,26 @@ def main() -> None:
         "input/affinity_token_mask": feats["affinity_token_mask"],
     }
     summary: dict[str, Any] = {}
-    for mode in MODES:
+    for mode in args.modes:
         results = [
-            run_member(m, f"affinity{i + 1}", s_inputs, z_aff, feats, mode, args.seed, out)
+            run_member(
+                m, f"affinity{i + 1}", s_inputs, z_aff, feats, mode, args.seed, out
+            )
             for i, m in enumerate(modules)
         ]
         values = torch.stack([r["affinity_pred_value"] for r in results]).mean(0)
-        probs = torch.stack([torch.sigmoid(r["affinity_logits_binary"]) for r in results]).mean(0)
+        probs = torch.stack(
+            [torch.sigmoid(r["affinity_logits_binary"]) for r in results]
+        ).mean(0)
         out[f"final/{mode}/affinity_pred_value"] = values
         out[f"final/{mode}/affinity_probability_binary"] = probs
         summary[mode] = (float(values), float(probs))
 
     meta = {
-        "source": "checkpoint" if args.checkpoint else f"random-small:{args.random_small}",
-        "modes": MODES,
+        "source": "checkpoint"
+        if args.checkpoint
+        else f"random-small:{args.random_small}",
+        "modes": list(args.modes),
         "seed": args.seed,
         "nRec": args.n_rec,
         "nLig": args.n_lig,
@@ -225,7 +245,8 @@ def main() -> None:
             root = f"affinity{i + 1}"
             for k, v in m.state_dict().items():
                 weights[root + "/" + k.replace(".", "/")] = v
-            pf = m.pairformer_stack.layers[0]
+            pf = cast(Any, m.pairformer_stack.layers[0])
+            boundaries = cast(Any, m.boundaries)
             config[root] = {
                 "numDistBins": 64,
                 "tokenZ": token_z,
@@ -235,7 +256,7 @@ def main() -> None:
                 "triHeads": pf.tri_att_start.no_heads,
                 "triHeadWidth": pf.tri_att_start.c_hidden,
                 "conditionerTransitions": 2,
-                "boundaries": [float(x) for x in m.boundaries],
+                "boundaries": [float(x) for x in boundaries],
             }
         write_bundle(
             args.out_dir,

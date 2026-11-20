@@ -1,8 +1,6 @@
 // Reader for the float32 tensor bundles written by webgpu/tools/tensor_bundle.py.
 // The layout is LocalFold's manifest layout (shared/bundles/tensor-store.js):
 // { formatVersion, meta, tensors: { name: { file, byteOffset, dtype, shape } } }.
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
 
 export class TensorBundle {
   constructor(manifest, tensors) {
@@ -11,17 +9,36 @@ export class TensorBundle {
     this.tensors = tensors;
   }
 
+  /** Open a bundle from disk (Node). */
   static async open(manifestPath) {
+    // Node-only imports are lazy so this module also loads in a browser.
+    const { readFile } = await import("node:fs/promises");
+    const { dirname, resolve } = await import("node:path");
     const path = resolve(manifestPath);
     const manifest = JSON.parse(await readFile(path, "utf8"));
+    return TensorBundle.#load(manifest, path, async (file) => new Uint8Array(await readFile(resolve(dirname(path), file))));
+  }
+
+  /** Open a bundle over HTTP (browser or Node >= 18). `manifestUrl` may be relative to the page. */
+  static async fromUrl(manifestUrl) {
+    const base = new URL(manifestUrl, globalThis.location?.href);
+    const manifest = await (await fetch(base)).json();
+    return TensorBundle.#load(manifest, String(base), async (file) => {
+      const response = await fetch(new URL(file, base));
+      if (!response.ok) throw new Error(`${file}: HTTP ${response.status}`);
+      return new Uint8Array(await response.arrayBuffer());
+    });
+  }
+
+  static async #load(manifest, label, readBytes) {
     if (manifest.formatVersion !== 1 || manifest.tensors === undefined) {
-      throw new Error(`${path} is not a version 1 tensor bundle`);
+      throw new Error(`${label} is not a version 1 tensor bundle`);
     }
     const files = new Map();
     const tensors = new Map();
     for (const [name, record] of Object.entries(manifest.tensors)) {
       if (record.dtype !== "float32") throw new Error(`${name}: unsupported dtype ${record.dtype}`);
-      if (!files.has(record.file)) files.set(record.file, await readFile(resolve(dirname(path), record.file)));
+      if (!files.has(record.file)) files.set(record.file, await readBytes(record.file));
       const bytes = files.get(record.file);
       const count = record.shape.reduce((a, b) => a * b, 1);
       const end = record.byteOffset + count * 4;

@@ -60,6 +60,12 @@ A re-run with the same inputs resumes where it stopped. Ligand sources, options,
 limits, the optional reference bootstrap and fine-tuned heads are described in
 [docs/usage.md](docs/usage.md) and [docs/finetuning.md](docs/finetuning.md).
 
+## WebGPU (experimental)
+
+`webgpu/` contains a WebGPU implementation of the affinity module (Node and browser)
+that scores Boltz-2 trunk outputs, checked against the PyTorch module. It does not
+run the trunk yet. See [docs/webgpu.md](docs/webgpu.md).
+
 ## License
 
 [MIT License](LICENSE). Derived from [Boltz](https://github.com/jwohlwend/boltz) and
