@@ -142,7 +142,7 @@ def main() -> None:
 
     processed_dir = run_dir / "processed"
     manifest = Manifest.load(processed_dir / "manifest.json")  # ty: ignore[invalid-argument-type]
-    pending = filter_inputs_affinity(  # ty: ignore[invalid-argument-type]
+    pending = filter_inputs_affinity(
         manifest=cast(Any, manifest),
         outdir=run_dir,
         override=True,
