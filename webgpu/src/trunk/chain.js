@@ -9,8 +9,9 @@ import { affinityBatch, buildBatch, importOracleAtomFeatures, tokenMasks } from 
 import { runTrunk } from "./run.js";
 
 /** Load LocalFold, the trunk weights and the affinity pack once; score many inputs with `engine.score`. */
-export async function createChain({ localfold, trunkWeights, affinityPack, device, onStatus }) {
+export async function createChain({ localfold, trunkWeights, affinityPack, device, adapter, onStatus }) {
   const lf = await loadLocalFold(localfold);
+  device ??= await lf.requestAlphaFoldDevice(adapter);
   onStatus?.("opening trunk weights");
   const { store, close } = await openTrunkStore(lf, trunkWeights);
   if (typeof store.prefetch === "function") store.prefetch();

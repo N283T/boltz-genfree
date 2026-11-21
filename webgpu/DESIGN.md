@@ -42,7 +42,7 @@ HTTP) and the tensor-store format in `shared/bundles/`.
 
 | piece | decision |
 |---|---|
-| Trunk (`s_inputs`-side embedder, MSA, pairformer, `z`) | **Reuse, via `LOCALFOLD_DIR`.** Not wired yet, see "Open items". |
+| Trunk (`s_inputs`-side embedder, MSA, pairformer, `z`) | **Reused via `LOCALFOLD_DIR`**, wired in `src/trunk/`. |
 | Device creation | **Reused when available**: with `LOCALFOLD_DIR` set, `src/device.js` calls LocalFold's `requestAlphaFoldDevice` (features, raised limits). Otherwise a plain device with the adapter's maximum limits. |
 | Weight pack layout | **Compatible**: the converter writes LocalFold's tensor-manifest layout (`{formatVersion, tensors:{name:{file,byteOffset,dtype,shape}}}`, read by `FileTensorStore`), float32. Not quantised: the module is 8.7 M parameters (35 MB). |
 | Pair-track kernels (triangle mult., triangle attention, transition) | **Not reused; written new** (`src/gpu/wgsl.js`). Reason below. |
@@ -77,7 +77,7 @@ kernels is the main performance follow-up (see below).
 - `src/gpu/`: WGSL kernels and `AffinityGpu` (distance-bin embedding,
   `s_to_z_prod` projections, pairwise conditioner, PairformerNoSeq stack,
   protein-ligand pair pooling, affinity heads, ensemble).
-- `src/cli.js`, `web/index.html`: entry points that score one trunk dump.
+- `src/cli.js`, `web/index.html`, `tools/serve.js`: entry points for the full chain (and for scoring one trunk dump).
 
 ## Module recap (what the kernels implement)
 
@@ -91,20 +91,27 @@ g  = pool(z)                  # mean over protein-ligand and ligand-ligand pairs
 value, logit = MLP heads(g)   # members averaged: value mean, probability = mean(sigmoid(logit))
 ```
 
-## Open items (not done, not guessed)
+## Trunk wiring (done) and open items
 
-1. **Trunk wiring.** LocalFold's trunk returns `pair` and `single` and its
-   `target_feat` is the trunk-side input embedding. Three things must be verified
-   before `s_inputs`/`z` from it can feed these weights: (a) LocalFold's `boltz2`
-   bundle carries the trunk, diffusion and confidence tensors and no affinity module
-   (its manifest lists `diffuser/...` scopes only), while GenFree's affinity heads
-   come with `boltz2_aff.ckpt`, whose own trunk weights are not known to be
-   identical, so the two trunks must be compared numerically; (b) GenFree uses `profile_affinity` features for
-   `s_inputs`, which LocalFold's `buildTargetFeat` does not produce; (c) LocalFold
-   needs its own featurisation of the ligand (SMILES path) to match RDKit-based
-   GenFree features (reference conformer mode `skip`/`etkdg`). Until then the CLI
-   scores a trunk dump file.
-2. **Performance.** Naive f32 kernels; triangle attention is O(N^3 · heads · width)
-   per thread-per-output. Fine for the parity sizes, not tuned for N~256.
-3. **Browser.** `web/index.html` uses the same code over `fetch`; it has not been
-   exercised in a browser here.
+The trunk is wired in `src/trunk/` (see docs/webgpu.md for numbers):
+
+- `localfold.js` imports LocalFold's featuriser, weight loaders, `Af3TrunkGpu` and `buildTargetFeat`
+  from `LOCALFOLD_DIR` (a directory in Node, a served URL in a browser).
+- `featurise.js` builds LocalFold's batch for GenFree's route (ligand from SMILES, `skip` conformer, bond
+  type + 1, A3M parsing like `a3m.py`, size limits) and the affinity `profile_affinity` variant.
+- `canonical.js` replaces RDKit for ligand order and names (exact for non-stereo molecules).
+- `weights.js` opens a trunk weight set (the f32 pack from `tools/convert_trunk_weights.py`, or LocalFold's
+  int5 bundle) and applies the two route adaptations (method row, zeroed template output).
+- `run.js` is `foldHolding`'s trunk part: embedding, MSA draw, trunk passes and recycles; `chain.js` ties
+  the trunk to `AffinityGpu`.
+
+The three questions the earlier draft left open: (a) LocalFold's boltz2 weights are the same Boltz-2 weights
+as `boltz2_aff.ckpt` (value-for-value up to int5 round-off; the checkpoint also carries the trunk), the f32 pack
+removes the round-off; (b) `profile_affinity` is the one-hot of the query residue types with zero deletion mean
+(`process_msa_features(..., max_seqs_batch=1, affinity=True)`), built in `affinityBatch`; (c) ligand features:
+`skip` zeroes ligand `ref_pos`, and atom order and names come from RDKit's canonical SMILES and ranks.
+
+Remaining gaps: protein `ref_pos` (Boltz rotates RDKit conformers with a seeded torch RNG; not reproducible
+here, GenFree's own seed noise is ~0.02 in value), stereo ligands, the MSA convention differences above, kernel
+performance of the affinity module beyond ~200 tokens (naive f32 kernels; LocalFold's tuned pair kernels are the
+follow-up), and checks on GPUs other than the Apple M4.

@@ -62,9 +62,12 @@ limits, the optional reference bootstrap and fine-tuned heads are described in
 
 ## WebGPU (experimental)
 
-`webgpu/` contains a WebGPU implementation of the affinity module (Node and browser)
-that scores Boltz-2 trunk outputs, checked against the PyTorch module. It does not
-run the trunk yet. See [docs/webgpu.md](docs/webgpu.md).
+`webgpu/` runs the full structure-free chain on WebGPU, in Node and in a browser:
+featurisation, the Boltz-2 trunk (through a [LocalFold](https://github.com/sokrypton/localfold)
+checkout) and the affinity module, from a protein sequence (+ optional A3M) and a ligand
+SMILES. With exact PyTorch features it agrees with GenFree to |value diff| <= 1e-3; with its
+own featuriser to within GenFree's seed-to-seed spread. See [docs/webgpu.md](docs/webgpu.md)
+for setup, tolerances, timings and limits.
 
 ## License
 
