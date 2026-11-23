@@ -1,6 +1,11 @@
 // Loader for the Boltz-2 trunk pack written by tools/convert_boltz_trunk.py.
 // Tensor names are the PyTorch parameter names with "." replaced by "/"; layouts are
 // untouched ((out, in) linear weights). Node: OwnWeights.open(path); browser: fromUrl(url).
+//
+// Nothing is held in memory: every `get` reads that tensor's byte range (Node: fs.readSync on a kept file handle) and
+// returns a fresh array, so the modules, which already stream weights layer by layer, never hold the whole pack.
+// Browser: fromUrl(url, { lazy: true }) fetches nothing up front; `await weights.ensure(prefix)` loads one layer's
+// tensors by HTTP Range request before the module reads them, `release(prefix)` drops them again.
 
 import { TensorBundle } from "../bundle.js";
 
@@ -12,9 +17,16 @@ export class OwnWeights {
     this.model = bundle.meta.model;
   }
 
-  static async open(manifestPath) { return new OwnWeights(await TensorBundle.open(manifestPath)); }
+  static async open(manifestPath) { return new OwnWeights(await TensorBundle.open(manifestPath, { cache: false })); }
 
-  static async fromUrl(manifestUrl) { return new OwnWeights(await TensorBundle.fromUrl(manifestUrl)); }
+  static async fromUrl(manifestUrl, options = {}) { return new OwnWeights(await TensorBundle.fromUrl(manifestUrl, options)); }
+
+  /** Lazy URL packs: load every tensor under `prefix` (no-op for Node packs and eagerly fetched URL packs). */
+  async ensure(prefix) { await this.bundle.ensure(this.names(prefix)); }
+
+  release(prefix) { this.bundle.release(this.names(prefix)); }
+
+  close() { this.bundle.close(); }
 
   has(name) { return this.bundle.has(name); }
 

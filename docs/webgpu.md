@@ -112,6 +112,14 @@ draw is used.
 The affinity module's own kernels are plain f32 and dominate beyond ~200 tokens (DESIGN.md). Browser page,
 124 tokens: trunk 2.1 s, affinity 1.0 s, 0.84 s weight load (f32 pack served locally).
 
+### LocalFold-free chain (`webgpu/src/trunk/own/chain.js`)
+
+`createOwnChain({trunkPack, affinityPack, device})` runs own featuriser -> embedder -> recycling -> MSA module ->
+pairformer -> affinity module (no LocalFold, no `LOCALFOLD_DIR`); test: `BOLTZ_GENFREE_GPU_TESTS=1 node --test
+test/own-chain.test.js`, timing/memory: `node tools/bench_own_chain.js --case NAME | --long 384`. With the oracle's atom
+features the trunk z agrees to relRMS ~1e-6 and the value to <= 3e-6 (MSA included). The weight pack is read tensor by
+tensor from the file (no whole-pack copy): peak RSS 0.25-0.4 GB. It is about 2.5x slower than the LocalFold trunk.
+
 ### Limits and what is not verified
 
 * Token limits are GenFree's (above). The GPU limit is LocalFold's: a pair of N tokens x 128 channels must fit
