@@ -1,6 +1,7 @@
 cff-version: 1.2.0
 message: >-
-  If you use this software, please cite the archived release below.
+  If you use this software, please cite the preprint in preferred-citation and
+  the archived release below.
 title: "Boltz-GenFree: structure-generation-free Boltz-2 affinity screening"
 type: software
 authors:
@@ -39,6 +40,21 @@ keywords:
   - virtual screening
   - structure-generation-free screening
   - Boltz-2
+preferred-citation:
+  type: article
+  title: "Boltz-GenFree: structure-generation-free ranking for first-stage affinity screening"
+  authors:
+    - family-names: "Nagae"
+      given-names: "Tsubasa"
+      orcid: "https://orcid.org/0009-0003-2202-8741"
+    - family-names: "Tomii"
+      given-names: "Kentaro"
+      orcid: "https://orcid.org/0000-0002-4567-4768"
+  journal: "ChemRxiv"
+  year: 2026
+  month: 11
+  doi: "10.26434/chemrxiv.15012606/v1"
+  url: "https://doi.org/10.26434/chemrxiv.15012606/v1"
 references:
   - type: software
     title: "Boltz"

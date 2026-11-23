@@ -68,6 +68,10 @@ preserved.
 
 ## Citation
 
+Preprint: T. Nagae and K. Tomii, Boltz-GenFree: structure-generation-free ranking for
+first-stage affinity screening, *ChemRxiv* (2026),
+[10.26434/chemrxiv.15012606/v1](https://doi.org/10.26434/chemrxiv.15012606/v1).
+
 Release v0.1.0 is archived on Zenodo:
 [10.5281/zenodo.24400635](https://doi.org/10.5281/zenodo.24400635)
 (all versions: [10.5281/zenodo.24400634](https://doi.org/10.5281/zenodo.24400634)).
