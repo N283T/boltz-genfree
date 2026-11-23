@@ -20,6 +20,9 @@ import { GROUP_WIDTH, LAYERNORM, MATMUL, ADD, PAIR_ADD_ROWCOL } from "../../gpu/
 
 export const ATOM_QUERIES = 32;
 export const ATOM_KEYS = 128;
+/** Every non-layer tensor group the embedder, initial embeddings and recycling read. */
+const EMBEDDER_PREFIXES = ["input_embedder/", "s_init/", "z_init_1/", "z_init_2/", "rel_pos/", "token_bonds/", "token_bonds_type/",
+  "contact_conditioning/", "s_norm/", "z_norm/", "s_recycle/", "z_recycle/"];
 const ATOM_S = 128;
 const ATOM_Z = 16;
 const HEADS = 4;
@@ -277,6 +280,12 @@ export class Embedder {
     this.zeros = ctx.upload("emb.zeros", new Float32Array(TOKEN_S), true);
     this.dummy = ctx.buffer("emb.dummy", 4, true);
   }
+
+  /** Lazy URL packs: Range-fetch the embedder's tensors (about 6 MB; no-op for Node packs). Call before sInputs/initial/recycle. */
+  async prepare() { for (const prefix of EMBEDDER_PREFIXES) await this.weights.ensure(prefix); }
+
+  /** Drop the lazily fetched JS copies (uploaded GPU buffers stay cached). */
+  releaseWeights() { for (const prefix of EMBEDDER_PREFIXES) this.weights.release(prefix); }
 
   /** Weight buffer by tensor name, uploaded once. */
   w(name) {

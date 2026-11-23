@@ -1,5 +1,5 @@
 // The pure-JS Boltz-2 featuriser (src/trunk/own) against the PyTorch oracle dumps, feature by feature, plus unit tests of
-// its MSA rules, atom windows and ref_pos handling. The LocalFold cross-check runs only when LOCALFOLD_DIR is set.
+// its MSA rules, atom windows and ref_pos handling.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
@@ -256,63 +256,4 @@ test("featuriseOwn carries window tables for its atoms", () => {
   const r = featuriseOwn({ sequence: "MKTV", smiles: "CO" });
   assert.equal(r.windows.subsets, Math.ceil(r.atoms / 32));
   assert.equal(r.windows.tokensToQueries.mask.reduce((s, v) => s + v, 0), r.atoms);
-});
-
-// ---- LocalFold cross-check (needs a LocalFold checkout) ----
-
-const localfoldDir = process.env.LOCALFOLD_DIR;
-test("cross-check against LocalFold's buildBatch (boltz2 dialect)", { skip: !localfoldDir && "LOCALFOLD_DIR not set" }, async () => {
-  const { loadLocalFold } = await import("../src/trunk/localfold.js");
-  const { buildBatch } = await import("../src/trunk/featurise.js");
-  const lf = await loadLocalFold(localfoldDir);
-  const oracle = await TensorBundle.open(dumpPath("phenol-msa"));
-  const input = inputOf(oracle);
-  const { batch } = await buildBatch(lf, { sequence: input.sequence, a3m: input.a3m, smiles: input.smiles });
-  const own = featuriseOwn({ ...input, conformers: new Array(input.sequence.length).fill(0), refPosAugment: "none" });
-  const T = own.tokens;
-  const n = own.receptorTokens;
-  assert.equal(batch.tokens, T);
-  assert.equal(batch.atomCount, own.atoms);
-
-  // atoms per token, elements, charges, names (LocalFold's dense (token, slot) layout against our compact order)
-  const dense = batch.dense;
-  let atom = 0;
-  const a2t = own.compact.atomToToken;
-  const refCharge = own.features.ref_charge.data;
-  for (let t = 0; t < T; t += 1) {
-    for (let slot = 0; slot < dense; slot += 1) {
-      if (batch.refMask[t * dense + slot] === 0) continue;
-      assert.equal(a2t[atom], t, `atom ${atom}: token`);
-      assert.equal(batch.refElement[t * dense + slot], own.compact.refElement[atom], `atom ${atom}: element`);
-      assert.equal(batch.refCharge[t * dense + slot], refCharge[atom], `atom ${atom} (token ${t}): charge`);
-      for (let k = 0; k < 4; k += 1) assert.equal(batch.refAtomNameChars[(t * dense + slot) * 4 + k], own.compact.atomNameCodes[atom * 4 + k], `atom ${atom}: name`);
-      atom += 1;
-    }
-  }
-  assert.equal(atom, own.atoms);
-
-  // bonds: ligand block of type_bonds
-  const typeBonds = own.features.type_bonds.data;
-  for (let i = 0; i < T * T; i += 1) assert.equal(batch.bondOrderMatrix[i], typeBonds[i], `type_bonds ${i}`);
-
-  // MSA rows (AF3 codes + 2 = Boltz token ids, AF3 gap 21 = Boltz gap 1) and profile over the protein columns
-  assert.equal(batch.sequences, own.msaRows);
-  const boltzOf = (code) => (code === 21 ? 1 : code + 2);
-  for (let r = 0; r < own.msaRows; r += 1) {
-    for (let t = 0; t < n; t += 1) assert.equal(boltzOf(batch.msa[r * T + t]), own.compact.msa[r * T + t], `msa row ${r} col ${t}`);
-  }
-  const profile = own.features.profile.data;
-  for (let t = 0; t < n; t += 1) {
-    for (let code = 0; code < 22; code += 1) {
-      assert.ok(Math.abs(batch.profile[t * 31 + code] - profile[t * 33 + boltzOf(code)]) < 1e-6, `profile ${t} ${code}`);
-    }
-  }
-  // ref_pos: LocalFold's boltz2 batch takes protein reference conformers from its own tables (not Boltz's stored
-  // conformers: no one of Boltz's ten matches a residue's intra-residue distances better than 0.3-2.1 A), so only the ligand
-  // rows (zero under `skip`) can be compared; the protein rows are compared against the oracle above instead.
-  for (let t = n; t < T; t += 1) {
-    for (let slot = 0; slot < dense; slot += 1) {
-      for (let k = 0; k < 3; k += 1) assert.equal(batch.refPos[(t * dense + slot) * 3 + k], 0);
-    }
-  }
 });

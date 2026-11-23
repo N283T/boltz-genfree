@@ -1,7 +1,7 @@
 // The from-scratch chain (own featuriser -> own embedder -> recycling -> own MSA module -> own pairformer -> affinity
-// module, no LocalFold) against GenFree's PyTorch run. Mirrors test/chain.test.js.
+// module) against GenFree's PyTorch run.
 // Needs BOLTZ_GENFREE_GPU_TESTS=1, a WebGPU adapter, packs/boltz2-trunk-own, packs/genfree-affinity and the oracle dumps
-// (tools/dump_trunk_oracle.py); skips visibly otherwise. No LOCALFOLD_DIR.
+// (tools/dump_trunk_oracle.py); skips visibly otherwise.
 //   exact      : the oracle's protein reference positions / atom-name one-hots are imported (engine parity)
 //   standalone : everything from the own featuriser (Boltz's random reference-conformer augmentation is not reproduced)
 import { after, test } from "node:test";
@@ -15,7 +15,7 @@ import { createOwnChain } from "../src/trunk/own/chain.js";
 const here = (p) => new URL(`../${p}`, import.meta.url).pathname;
 const TRUNK = here("packs/boltz2-trunk-own/boltz2-trunk-own.json");
 const AFFINITY = here("packs/genfree-affinity.json");
-// Tolerances of test/chain.test.js (the LocalFold-backed chain); the own chain is expected to be far inside them.
+// Tolerances set well above the measured error (docs/webgpu.md).
 const CASES = [
   { name: "phenol-nomsa", exact: { z: 2e-3, value: 3e-3 }, js: { value: 0.06 } },
   { name: "acetaminophen-nomsa", exact: { z: 2e-3, value: 3e-3 }, js: { value: 0.06 } },

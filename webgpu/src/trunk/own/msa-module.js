@@ -141,8 +141,12 @@ export class MsaModule {
       const pairMask = up("msa.pair_mask", pairMaskData);
 
       // ---- embedding -----------------------------------------------------------
+      await this.weights.ensure("msa_module/s_proj/");
+      await this.weights.ensure("msa_module/msa_proj/");
       const sProj = up("msa.s_proj", this.weights.get("msa_module/s_proj/weight"));
       const mProj = up("msa.msa_proj", this.weights.get("msa_module/msa_proj/weight"));
+      this.weights.release("msa_module/s_proj/");
+      this.weights.release("msa_module/msa_proj/");
       const sp = buf("msa.sp", n * C_M);
       ops.ctx.dispatch("matmul", K.MATMUL, [sBuf, sProj, ops.dummy, ops.dummy, sp], [n, 384, C_M, 0, 0], Math.ceil(C_M / 16), Math.ceil(n / 16));
       const f32 = (a) => (a instanceof Float32Array ? a : Float32Array.from(a));
@@ -191,6 +195,7 @@ export class MsaModule {
       ctx.flush();
 
       for (let block = 0; block < this.blocks; block++) {
+        await this.weights.ensure(`msa_module/layers/${block}/`); // lazy URL packs: Range-fetch this block only
         this.current = this.weights.slice(`msa_module/layers/${block}`);
         const pre = `msa_block${block}`;
         const pwa = "pair_weighted_averaging";
@@ -258,6 +263,7 @@ export class MsaModule {
         await idle();
         ops.dropWeights();
         this.current = null;
+        this.weights.release(`msa_module/layers/${block}/`);
       }
       await tap("z_msa_module_out", zBuf, pairRows * C_Z);
       if (z instanceof Float32Array) return await ctx.read(zBuf, pairRows * C_Z);
@@ -266,6 +272,7 @@ export class MsaModule {
       await idle();
       ops.dropWeights();
       this.current = null;
+      this.weights.release("msa_module/layers/");
       for (const b of owned) {
         if (b !== z && b !== sInputs) b.destroy();
       }

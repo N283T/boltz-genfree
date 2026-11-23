@@ -1,25 +1,15 @@
 // WebGPU device creation for Node and the browser.
 //
-// Node: uses the optional `webgpu` package (Dawn's node binding, the same one
-// LocalFold uses). If LOCALFOLD_DIR points at a LocalFold checkout, the device
-// is requested through LocalFold's own `requestAlphaFoldDevice`
-// (webgpu/runtime/device.js) so that limits and features match its kernels;
-// otherwise a plain device with the adapter's maximum buffer limits is used.
+// Node: uses the optional `webgpu` package (Dawn's node binding). The device is a plain one with the adapter's maximum
+// buffer / workgroup limits; the own kernels use no optional features (no shader-f16 etc.).
 // Browser: call `deviceFromAdapter(await navigator.gpu.requestAdapter())`.
-import { pathToFileURL } from "node:url";
-import { join } from "node:path";
-
 const LIMITS = [
   "maxStorageBufferBindingSize", "maxBufferSize", "maxComputeWorkgroupStorageSize",
   "maxComputeInvocationsPerWorkgroup", "maxComputeWorkgroupSizeX", "maxComputeWorkgroupsPerDimension",
 ];
 
-export async function deviceFromAdapter(adapter, { localfoldDir } = {}) {
+export async function deviceFromAdapter(adapter) {
   if (adapter === null || adapter === undefined) throw new Error("no WebGPU adapter available");
-  if (localfoldDir) {
-    const mod = await import(pathToFileURL(join(localfoldDir, "webgpu/runtime/device.js")).href);
-    return mod.requestAlphaFoldDevice(adapter);
-  }
   const requiredLimits = {};
   for (const name of LIMITS) if (typeof adapter.limits?.[name] === "number") requiredLimits[name] = adapter.limits[name];
   return adapter.requestDevice({ requiredLimits });
@@ -30,7 +20,7 @@ export async function deviceFromAdapter(adapter, { localfoldDir } = {}) {
 // InstanceBase::ProcessEvents (observed as exit code 139 mid-readback).
 const keepAlive = [];
 
-export async function createNodeDevice(options = {}) {
+export async function createNodeDevice() {
   let binding;
   try {
     binding = await import("webgpu");
@@ -42,6 +32,6 @@ export async function createNodeDevice(options = {}) {
   keepAlive.push(gpu);
   const adapter = await gpu.requestAdapter({ powerPreference: "high-performance" });
   if (adapter === null) throw new Error("no WebGPU adapter: Dawn found no usable GPU on this machine");
-  const device = await deviceFromAdapter(adapter, { localfoldDir: options.localfoldDir ?? process.env.LOCALFOLD_DIR });
+  const device = await deviceFromAdapter(adapter);
   return { device, adapter, gpu };
 }

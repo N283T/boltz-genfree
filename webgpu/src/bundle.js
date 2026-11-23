@@ -1,5 +1,5 @@
 // Reader for the float32 tensor bundles written by webgpu/tools/tensor_bundle.py.
-// The layout is LocalFold's manifest layout (shared/bundles/tensor-store.js):
+// The layout follows the tensor-manifest layout of LocalFold (sokrypton/localfold, shared/bundles/tensor-store.js):
 // { formatVersion, meta, tensors: { name: { file, byteOffset, dtype, shape } } }.
 //
 // Reads are lazy and by byte range: opening a bundle reads only the manifest, `get(name)` reads that tensor's bytes

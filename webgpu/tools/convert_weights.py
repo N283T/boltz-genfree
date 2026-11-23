@@ -1,7 +1,7 @@
 """Convert Boltz-2 affinity checkpoint tensors to a WebGPU weight pack.
 
 Reads ``affinity_module1.*`` and ``affinity_module2.*`` from the checkpoint and
-writes a LocalFold-compatible tensor bundle (see ``tensor_bundle.py``). Tensor
+writes a float32 tensor bundle (see ``tensor_bundle.py``). Tensor
 names use ``/`` separators and a ``affinity1`` / ``affinity2`` root, for example
 ``affinity1/pairformer_stack/layers/0/tri_mul_out/p_in/weight``. Shapes are kept
 in the PyTorch ``(out, in)`` layout; the JS side reads them as such.

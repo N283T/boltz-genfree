@@ -105,6 +105,7 @@ export class OwnTrunk {
     let prevS = null;
     let prevZ = null;
     try {
+      await embedder.prepare(); // lazy URL packs: the ~6 MB of embedder tensors by Range; layers stream per block below
       const { sIn, sInit, zInit } = await mark("embed", async () => {
         const sIn = embedder.sInputs(features, { taps });
         const { sInit, zInit } = embedder.initial(features, sIn, { taps });
@@ -150,6 +151,7 @@ export class OwnTrunk {
       }
       return { pair, single, sInputsTrunk, sInputsAffinity, tokens: n, msaRows, timings };
     } finally {
+      embedder.releaseWeights();
       prevS?.destroy();
       prevZ?.destroy();
       for (const buffer of keep) buffer.destroy();

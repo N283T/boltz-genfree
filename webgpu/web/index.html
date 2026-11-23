@@ -15,39 +15,38 @@
 </head>
 <body>
 <h1>Boltz-GenFree on WebGPU</h1>
-<p>Protein sequence (+ optional A3M) and a ligand SMILES go through featurisation, the Boltz-2 trunk
-(LocalFold's WebGPU port) and the structure-free affinity module, all in this page. Serve it with
-<code>LOCALFOLD_DIR=... node tools/serve.js</code> (see <code>docs/webgpu.md</code>).</p>
+<p>Protein sequence (+ optional A3M) and a ligand SMILES go through the featuriser, the Boltz-2 trunk and the
+structure-free affinity module, all written in this repository and run in this page. The 805 MB trunk pack is read
+lazily by HTTP Range requests, one layer at a time. Serve it with <code>node tools/serve.js</code>
+(see <code>docs/webgpu.md</code>). Only the ligand conformer mode <code>skip</code> (GenFree's default) is available.</p>
 <label for="seq">Protein sequence (receptor chain)</label>
 <textarea id="seq" rows="3">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
 <label for="a3m">A3M (optional; first row = the query)</label>
 <textarea id="a3m" rows="3" placeholder=">query&#10;SEQUENCE&#10;&gt;hit&#10;..."></textarea>
 <label for="smiles">Ligand SMILES</label>
 <input id="smiles" value="Oc1ccccc1">
-<label for="weights">Trunk weights (manifest directory URL)</label>
-<input id="weights" value="/packs/boltz2-trunk-f32/">
-<label for="precision">Trunk precision</label>
-<select id="precision"><option value="f32">f32 (parity)</option><option value="auto">auto (f16 where available)</option></select>
+<label for="weights">Trunk pack (manifest URL)</label>
+<input id="weights" value="/packs/boltz2-trunk-own/boltz2-trunk-own.json">
+<label for="size">Extended size limits</label>
+<select id="size"><option value="0">GenFree limits (receptor &lt;= 200, total &lt;= 256 tokens)</option><option value="1">allow extended (needs more GPU memory, slow)</option></select>
 <p><button id="run">Score</button></p>
 <pre id="out">idle</pre>
 <script type="module">
-import { TensorBundle } from "../src/bundle.js";
-import { createChain } from "../src/trunk/chain.js";
+import { deviceFromAdapter } from "../src/device.js";
+import { createOwnChain } from "../src/trunk/own/chain.js";
 
 const out = document.getElementById("out");
 let chain;
 document.getElementById("run").addEventListener("click", async () => {
   try {
     if (!navigator.gpu) throw new Error("this browser has no WebGPU");
-    const origin = location.origin;
     if (!chain) {
-      out.textContent = "loading weights...";
-      const adapter = await navigator.gpu.requestAdapter();
-      chain = await createChain({
-        localfold: `${origin}/localfold/`,
-        trunkWeights: new URL(document.getElementById("weights").value, location.href).href,
-        affinityPack: await TensorBundle.fromUrl("../packs/genfree-affinity.json"),
-        adapter, onStatus: (s) => { out.textContent = s; },
+      out.textContent = "opening packs...";
+      const device = await deviceFromAdapter(await navigator.gpu.requestAdapter());
+      chain = await createOwnChain({
+        trunkPack: new URL(document.getElementById("weights").value, location.href).href, // lazy: Range requests per layer
+        affinityPack: new URL("../packs/genfree-affinity.json", import.meta.url).href,
+        device, onStatus: (s) => { out.textContent = s; },
       });
     }
     out.textContent = "running...";
@@ -55,7 +54,7 @@ document.getElementById("run").addEventListener("click", async () => {
       sequence: document.getElementById("seq").value.replace(/\s+/g, ""),
       a3m: document.getElementById("a3m").value.trim() || null,
       smiles: document.getElementById("smiles").value.trim(),
-    }, { precision: document.getElementById("precision").value });
+    }, { allowExtended: document.getElementById("size").value === "1", onStage: (name, ms) => { out.textContent = `running... ${name} ${Math.round(ms)} ms`; } });
     out.textContent = JSON.stringify({
       affinity_pred_value: r.value, affinity_probability_binary: r.probability,
       tokens: r.tokens, receptor_tokens: r.receptorTokens, ligand_tokens: r.ligandTokens, msa_rows: r.msaRows,

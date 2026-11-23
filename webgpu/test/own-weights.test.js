@@ -1,4 +1,4 @@
-// Unit tests for the PyTorch-named trunk pack (tools/convert_boltz_trunk.py). No GPU, no LocalFold.
+// Unit tests for the PyTorch-named trunk pack (tools/convert_boltz_trunk.py). No GPU.
 // Needs ~/.boltz/boltz2_aff.ckpt (or BOLTZ_CKPT); generates packs/boltz2-trunk-own if absent.
 // Skips visibly when the checkpoint and pack are both missing.
 import { before, test } from "node:test";
@@ -103,4 +103,36 @@ guard("values round-trip against the checkpoint", (t) => {
 test("manifest is readable without loading tensors", (t) => {
   if (!existsSync(manifest)) return t.skip("pack absent");
   assert.equal(JSON.parse(readFileSync(manifest, "utf8")).meta.model, "boltz2");
+});
+
+test("lazy URL packs: ensure() fetches only the prefix's byte range, get needs ensure, release drops it", async () => {
+  const bytes = new Uint8Array(new Float32Array([1, 2, 3, 4, 5, 6]).buffer);
+  const manifest = {
+    formatVersion: 1, meta: {},
+    tensors: {
+      "a/layers/1/w": { file: "w.bin", byteOffset: 0, dtype: "float32", shape: [2] },
+      "a/layers/10/w": { file: "w.bin", byteOffset: 8, dtype: "float32", shape: [2] },
+      "b/w": { file: "w.bin", byteOffset: 16, dtype: "float32", shape: [2] },
+    },
+  };
+  const requests = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    if (new URL(url).pathname.endsWith(".json")) return new Response(JSON.stringify(manifest));
+    const range = /bytes=(\d+)-(\d+)/.exec(init.headers?.Range ?? "");
+    requests.push(range?.[0]);
+    return new Response(bytes.slice(Number(range[1]), Number(range[2]) + 1), { status: 206 });
+  };
+  try {
+    const weights = await OwnWeights.fromUrl("http://x/pack.json", { lazy: true });
+    assert.equal(requests.length, 0);
+    assert.throws(() => weights.get("b/w"), /ensure/);
+    await weights.ensure("a/layers/1/"); // must not pull in layers/10
+    assert.deepEqual(Array.from(weights.get("a/layers/1/w")), [1, 2]);
+    assert.deepEqual(requests, ["bytes=0-7"]);
+    weights.release("a/layers/1/");
+    assert.throws(() => weights.get("a/layers/1/w"), /ensure/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

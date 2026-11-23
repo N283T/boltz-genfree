@@ -1,6 +1,6 @@
 // The whole chain without LocalFold: sequence (+ A3M) + SMILES -> own featuriser -> own embedder -> recycling ->
 // own MSA module -> own pairformer -> affinity module -> affinity value and probability.
-// Same contract as ../chain.js: `createOwnChain(...)` returns { score(input, options), destroy() }.
+// `createOwnChain(...)` returns { score(input, options), destroy() }.
 import { AffinityGpu } from "../../gpu/affinity-gpu.js";
 import { TensorBundle } from "../../bundle.js";
 import { affinityMasks } from "../../distogram.js";
@@ -26,17 +26,23 @@ function overlay(base, oracle, names) {
 
 /**
  * @param {{trunkPack: OwnWeights|string, affinityPack: TensorBundle|string, device: GPUDevice, onStatus?: Function}} args
- *   `trunkPack`: an OwnWeights or the path of packs/boltz2-trunk-own/boltz2-trunk-own.json; `affinityPack`: a TensorBundle
- *   or the path of packs/genfree-affinity.json.
+ *   `trunkPack`: an OwnWeights, the path of packs/boltz2-trunk-own/boltz2-trunk-own.json, or an http(s) URL of that manifest
+ *   (opened lazily: tensors are fetched by HTTP Range as the modules reach them, see OwnWeights.fromUrl);
+ *   `affinityPack`: a TensorBundle, a path or a URL of packs/genfree-affinity.json.
  */
 export async function createOwnChain({ trunkPack, affinityPack, device, onStatus }) {
   onStatus?.("opening packs");
-  const weights = typeof trunkPack === "string" ? await OwnWeights.open(trunkPack) : trunkPack;
-  const bundle = typeof affinityPack === "string" ? await TensorBundle.open(affinityPack) : affinityPack;
+  const isUrl = (value) => /^https?:\/\//.test(value);
+  const opened = performance.now();
+  const weights = typeof trunkPack !== "string" ? trunkPack
+    : isUrl(trunkPack) ? await OwnWeights.fromUrl(trunkPack, { lazy: true }) : await OwnWeights.open(trunkPack);
+  const bundle = typeof affinityPack !== "string" ? affinityPack
+    : isUrl(affinityPack) ? await TensorBundle.fromUrl(affinityPack) : await TensorBundle.open(affinityPack);
+  const weightLoadMs = performance.now() - opened;
   const trunkEngine = new OwnTrunk(device, weights);
   const affinity = new AffinityGpu(device, bundle);
   return {
-    device, weights,
+    device, weights, weightLoadMs,
     /**
      * @param {{sequence: string, a3m?: string|null, smiles: string}} input
      * @param {{recycles?: number, mode?: string, seed?: number, allowExtended?: boolean, maxMsa?: number,

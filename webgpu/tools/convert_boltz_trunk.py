@@ -1,8 +1,7 @@
 """Convert the Boltz-2 trunk in ``boltz2_aff.ckpt`` to a float32 pack with PyTorch names.
 
-Unlike ``convert_trunk_weights.py`` (LocalFold's haiku-style layout), this keeps the
-original PyTorch parameter names (only ``.`` becomes ``/``) and layouts: no transposes,
-no interleaving, no zeroed or swapped rows. Linear weights stay ``(out, in)``.
+This keeps the original PyTorch parameter names (only ``.`` becomes ``/``) and layouts:
+no transposes, no interleaving, no zeroed or swapped rows. Linear weights stay ``(out, in)``.
 
 Included: everything needed to run Boltz-2 up to the affinity module input
 (``input_embedder`` incl. atom encoders, ``s_init``, ``z_init_1/2``, ``rel_pos``,

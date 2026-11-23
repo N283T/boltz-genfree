@@ -34,7 +34,8 @@ export class Pairformer {
   }
 
   // ---- weight streaming ------------------------------------------------------
-  #loadLayer(i) {
+  async #loadLayer(i) {
+    await this.weights.ensure(`${this.prefix}/layers/${i}/`); // lazy URL packs: Range-fetch this layer only
     const slice = this.weights.slice(`${this.prefix}/layers/${i}`);
     const buffers = new Map();
     for (const [name, t] of Object.entries(slice)) {
@@ -181,7 +182,7 @@ export class Pairformer {
     try {
       for (let i = startLayer; i < Math.min(this.numBlocks, startLayer + layers); i++) {
         const t0 = performance.now();
-        const W = this.#loadLayer(i);
+        const W = await this.#loadLayer(i);
         this.#triMul(W, "tri_mul_out", S, true);
         this.#triMul(W, "tri_mul_in", S, false);
         this.#triAtt(W, "tri_att_start", S, true);
@@ -197,6 +198,7 @@ export class Pairformer {
         }
         if (onLayer) await onLayer(i, { s: sBuf, z: zBuf });
         for (const b of W.values()) b.destroy();
+        this.weights.release(`${this.prefix}/layers/${i}/`);
         await ctx.release();
       }
       await this.device.queue.onSubmittedWorkDone();

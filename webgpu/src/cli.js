@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Boltz-GenFree on WebGPU.
 //
-// Full chain (needs LocalFold for the trunk, see docs/webgpu.md):
-//   LOCALFOLD_DIR=/path/to/localfold node src/cli.js --sequence MKT... [--a3m target.a3m] --smiles 'Oc1ccccc1'
+// Full chain (own featuriser, trunk and affinity module on WebGPU; packs from docs/webgpu.md):
+//   node src/cli.js --sequence MKT... [--a3m target.a3m] --smiles 'Oc1ccccc1'
 //
 // Affinity module only, from a stored trunk output:
 //   node src/cli.js --trunk oracle-dumps/ckpt-dump.json [--cpu]
@@ -21,15 +21,12 @@ const { values } = parseArgs({
     "sequence-file": { type: "string" },
     a3m: { type: "string" },
     smiles: { type: "string" },
-    localfold: { type: "string", default: process.env.LOCALFOLD_DIR ?? "" },
-    "trunk-weights": { type: "string" },
+    "trunk-pack": { type: "string", default: here("packs/boltz2-trunk-own/boltz2-trunk-own.json") },
     pack: { type: "string", default: here("packs/genfree-affinity.json") },
     trunk: { type: "string" },
     mode: { type: "string", default: "zero_distogram_features" },
     seed: { type: "string", default: "0" },
     recycles: { type: "string", default: "0" },
-    precision: { type: "string", default: "f32" },
-    "ligand-conformer": { type: "string", default: "skip" },
     "ligand-atoms": { type: "string" },
     "allow-extended": { type: "boolean", default: false },
     cpu: { type: "boolean", default: false },
@@ -39,8 +36,8 @@ const { values } = parseArgs({
 });
 
 const usage = `usage:
-  node src/cli.js --sequence <protein> --smiles <SMILES> [--a3m file] [--localfold DIR] [--trunk-weights DIR|URL]
-                  [--recycles 0..5] [--precision f32|auto] [--ligand-atoms ligand.json] [--allow-extended] [--json]
+  node src/cli.js --sequence <protein> --smiles <SMILES> [--a3m file] [--trunk-pack manifest.json|URL]
+                  [--recycles 0..5] [--pack affinity.json] [--ligand-atoms ligand.json] [--allow-extended] [--json]
   node src/cli.js --trunk <trunk dump manifest> [--cpu]       (affinity module on a stored trunk output)`;
 if (!STRUCTURE_FREE_MODES.includes(values.mode)) {
   console.error(`unknown mode ${values.mode}; expected one of ${STRUCTURE_FREE_MODES.join(", ")}`);
@@ -62,24 +59,24 @@ if (fullChain) {
   if (values.cpu) { console.error("--cpu applies to --trunk dumps only; the trunk needs WebGPU"); process.exit(2); }
   const sequence = (values.sequence ?? readFileSync(values["sequence-file"], "utf8")).replace(/\s+/g, "");
   const a3m = values.a3m ? readFileSync(values.a3m, "utf8") : null;
-  const trunkWeights = values["trunk-weights"] ?? (existsSync(here("packs/boltz2-trunk-f32/manifest.json")) ? here("packs/boltz2-trunk-f32") : undefined);
-  if (!trunkWeights) {
-    console.error("no trunk weights: run tools/convert_trunk_weights.py (packs/boltz2-trunk-f32) or pass --trunk-weights DIR|URL");
+  const trunkPack = values["trunk-pack"];
+  if (!/^https?:\/\//.test(trunkPack) && !existsSync(trunkPack)) {
+    console.error(`no trunk pack at ${trunkPack}: run tools/convert_boltz_trunk.py (packs/boltz2-trunk-own) or pass --trunk-pack`);
     process.exit(2);
   }
   const { createNodeDevice } = await import("./device.js");
-  const { createChain } = await import("./trunk/chain.js");
-  const { device, adapter } = await createNodeDevice({ localfoldDir: values.localfold });
-  const chain = await createChain({ localfold: values.localfold, trunkWeights, affinityPack, device });
+  const { createOwnChain } = await import("./trunk/own/chain.js");
+  const { device, adapter } = await createNodeDevice();
+  const chain = await createOwnChain({ trunkPack, affinityPack, device });
   const result = await chain.score({ sequence, a3m, smiles: values.smiles }, {
-    recycles: Number(values.recycles), precision: values.precision, mode: values.mode, seed: Number(values.seed),
-    ligandConformer: values["ligand-conformer"], allowExtended: values["allow-extended"],
+    recycles: Number(values.recycles), mode: values.mode, seed: Number(values.seed),
+    allowExtended: values["allow-extended"],
     ligandAtoms: values["ligand-atoms"] ? JSON.parse(readFileSync(values["ligand-atoms"], "utf8")) : undefined,
   });
   report = {
     backend: `webgpu (${adapter.info?.vendor ?? "?"} ${adapter.info?.architecture ?? ""})`.trim(),
     mode: values.mode, tokens: result.tokens, receptor_tokens: result.receptorTokens, ligand_tokens: result.ligandTokens,
-    msa_rows: result.msaRows, recycles: Number(values.recycles), precision: values.precision,
+    msa_rows: result.msaRows, recycles: Number(values.recycles),
     affinity_pred_value: mwCorrect(result.value, values["mw-correction"]),
     affinity_probability_binary: result.probability,
     members: result.members.map((m) => ({ affinity_pred_value: m.value, affinity_probability_binary: m.probability })),
@@ -127,7 +124,7 @@ if (values.json) {
   ];
   if (report.timings_ms) {
     const t = report.timings_ms;
-    lines.push(`timings      featurise ${t.featuriseMs} ms, trunk ${Object.entries(t).filter(([k]) => k.startsWith("trunk-pass")).reduce((a, [, v]) => a + v, 0)} ms, affinity ${t.affinityMs} ms, total ${t.totalMs} ms (weights ${report.weight_load_ms} ms)`);
+    lines.push(`timings      featurise ${t.featuriseMs} ms, trunk ${t.totalMs - t.featuriseMs - t.affinityMs} ms (embed ${t.embed}, msa ${t.msa}, pairformer ${t.pairformer}), affinity ${t.affinityMs} ms, total ${t.totalMs} ms (weights ${report.weight_load_ms} ms)`);
   } else {
     lines.push(`elapsed      ${report.elapsed_ms} ms`);
   }

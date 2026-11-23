@@ -1,4 +1,4 @@
-"""Write named float32 tensors as a LocalFold-compatible tensor bundle.
+"""Write named float32 tensors as a tensor bundle (manifest layout modelled on LocalFold's).
 
 Layout: ``<name>.json`` holds ``{"formatVersion": 1, "tensors": {...}}`` and
 ``<name>.bin`` holds the raw little-endian float32 data. Each tensor record is
