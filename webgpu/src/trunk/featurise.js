@@ -55,31 +55,154 @@ export function normalizeA3m(text, maxSeqs = 8192) {
   return out.join("\n") + "\n";
 }
 
+/** Deterministic PRNG (mulberry32) for the seeded ligand rotation. */
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function gaussian(random) {
+  return Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
+}
+
+/** Random rotation matrix from a uniform unit quaternion. */
+function randomRotation(random) {
+  let q = [gaussian(random), gaussian(random), gaussian(random), gaussian(random)];
+  const norm = Math.hypot(...q);
+  q = q.map((v) => v / norm);
+  const [w, x, y, z] = q;
+  return [
+    [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+    [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+    [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+  ];
+}
+
+/**
+ * Ligand reference conformer modes (GenFree `ligand_reference_conformer`).
+ *  skip     ref_pos = 0 (GenFree's default; exact).
+ *  etkdg    a conformer from LocalFold's JavaScript embedder (seeded by `etkdgSeed`), centred and given a seeded
+ *           random rotation and translation, as Boltz's `center_random_augmentation` does to RDKit's ETKDG one.
+ *  rdkit_2d the same conformer flattened onto its principal plane (z = 0, a stand-in for RDKit's 2D depiction), then
+ *           rotated and translated the same way.
+ * Neither reproduces RDKit's coordinates or torch's random stream; see docs/webgpu.md for the measured effect.
+ */
+export function applyLigandConformer(batch, first, count, mode, seed) {
+  const dense = batch.dense;
+  const base = first * dense * 3;
+  if (mode === "skip") { batch.refPos.fill(0, base, (first + count) * dense * 3); return; }
+  const pos = [];
+  for (let t = 0; t < count; t += 1) pos.push(Array.from(batch.refPos.slice((first + t) * dense * 3, (first + t) * dense * 3 + 3)));
+  const centre = [0, 1, 2].map((k) => pos.reduce((a, p) => a + p[k], 0) / count);
+  let work = pos.map((p) => p.map((v, k) => v - centre[k]));
+  if (mode === "rdkit_2d") {
+    // principal axes by power iteration on the covariance, drop the smallest axis
+    const cov = [0, 1, 2].map((a) => [0, 1, 2].map((b) => work.reduce((s, p) => s + p[a] * p[b], 0)));
+    const axes = [];
+    for (let k = 0; k < 3; k += 1) {
+      let v = [1, 0.3 + k, 0.1];
+      for (let it = 0; it < 100; it += 1) {
+        v = [0, 1, 2].map((a) => cov[a].reduce((s, c, b) => s + c * v[b], 0));
+        for (const u of axes) { const d = v.reduce((s, x, i) => s + x * u[i], 0); v = v.map((x, i) => x - d * u[i]); }
+        const n = Math.hypot(...v) || 1;
+        v = v.map((x) => x / n);
+      }
+      axes.push(v);
+    }
+    work = work.map((p) => [0, 1].map((a) => p.reduce((s, x, i) => s + x * axes[a][i], 0)).concat([0]));
+  }
+  const random = rng(seed);
+  const rotation = randomRotation(random);
+  const shift = [gaussian(random), gaussian(random), gaussian(random)];
+  work.forEach((p, t) => {
+    const out = [0, 1, 2].map((a) => rotation[a].reduce((s, r, k) => s + r * p[k], 0) + shift[a]);
+    batch.refPos.set(out, (first + t) * dense * 3);
+  });
+}
+
+/** Column-crop an A3M to the query positions in `keep` (insertions before a dropped column go with it). */
+export function cropA3m(text, keep) {
+  const wanted = new Set(keep);
+  const out = [];
+  for (const line of text.split("\n")) {
+    if (line === "" || line.startsWith(">")) { out.push(line); continue; }
+    let column = 0;
+    let pending = "";
+    let result = "";
+    for (const ch of line) {
+      if (ch !== "-" && ch >= "a" && ch <= "z") { pending += ch; continue; }
+      if (wanted.has(column)) result += pending + ch;
+      pending = "";
+      column += 1;
+    }
+    out.push(result);
+  }
+  return out.join("\n");
+}
+
 /**
  * @param {object} lf loadLocalFold result
- * @param {{sequence: string, a3m?: string|null, smiles: string, ligandConformer?: "skip"|"conformer",
- *          ligandAtoms?: {smiles: string, atomNames: string[]}, allowExtended?: boolean, maxMsa?: number}} input
+ * @param {{sequence: string, a3m?: string|null, smiles: string, ligandKind?: "smiles"|"ccd",
+ *          ligandConformer?: "skip"|"etkdg"|"rdkit_2d"|"conformer", etkdgSeed?: number, conformerSeed?: number,
+ *          receptorIndices?: number[], ligandAtoms?: {smiles: string, atomNames: string[]},
+ *          allowExtended?: boolean, maxMsa?: number, maxMsaSeqs?: number}} input
+ *   `receptorIndices` (sorted residue indices, a reference crop) keeps only those residues; their original indices
+ *   stay in the relative-position features, as in Boltz's crop.
  */
 export async function buildBatch(lf, input) {
-  const { sequence, a3m = null, smiles, ligandConformer = "skip", allowExtended = false } = input;
+  const { sequence, a3m = null, smiles, allowExtended = false, ligandKind = "smiles" } = input;
+  const ligandConformer = input.ligandConformer === "conformer" ? "etkdg" : (input.ligandConformer ?? "skip");
+  if (!["skip", "etkdg", "rdkit_2d"].includes(ligandConformer)) throw new Error(`unknown ligand conformer mode ${ligandConformer}`);
   if (!/^[A-Za-z]+$/.test(sequence)) throw new Error("sequence must contain letters only (one protein chain)");
   const dialect = lf.dialectFor("boltz2");
   const notes = [];
-  // GenFree standardises the SMILES with RDKit (the atoms then follow the canonical SMILES) and names the
-  // atoms from RDKit's canonical ranks; `ligandAtoms` (tools/ligand_atoms.py) carries both.
+  const fullSequence = sequence.toUpperCase();
+  const indices = input.receptorIndices ?? [...fullSequence].map((_, i) => i);
+  const kept = indices.map((i) => fullSequence[i]).join("");
+
+  let ligand;
   let ligandAtoms = input.ligandAtoms;
-  if (ligandAtoms === undefined) {
-    const { ligandAtomsFromSmiles } = await import("./canonical.js");
-    const derived = ligandAtomsFromSmiles(smiles);
-    ligandAtoms = { smiles: derived.smiles, atomNames: derived.atomNames };
-    if (!derived.exact) {
-      notes.push(`ligand atom order/names are approximate (${derived.warnings.join("; ") || "outside the RDKit-free subset"}); `
-        + "stereo ligands need tools/ligand_atoms.py (--ligand-atoms) to match GenFree exactly");
+  if (ligandKind === "ccd") {
+    const response = await fetch(lf.ccdUrl(smiles));
+    if (!response.ok) throw new Error(`CCD component ${smiles}: HTTP ${response.status}`);
+    ligand = lf.parseCcdComponent(await response.text());
+    ligandAtoms = undefined;
+  } else {
+    // GenFree standardises the SMILES with RDKit (the atoms then follow the canonical SMILES) and names the
+    // atoms from RDKit's canonical ranks; `ligandAtoms` (tools/ligand_atoms.py) carries both.
+    if (ligandAtoms === undefined) {
+      const { ligandAtomsFromSmiles } = await import("./canonical.js");
+      const derived = ligandAtomsFromSmiles(smiles);
+      ligandAtoms = { smiles: derived.smiles, atomNames: derived.atomNames };
+      if (!derived.exact) {
+        notes.push(`ligand atom order/names are approximate (${derived.warnings.join("; ") || "outside the RDKit-free subset"}); `
+          + "stereo ligands need tools/ligand_atoms.py (--ligand-atoms) to match GenFree exactly");
+      }
     }
+    ligand = await lf.smilesComponent(ligandAtoms.smiles, input.etkdgSeed === undefined ? {} : { seed: input.etkdgSeed });
   }
-  const ligand = await lf.smilesComponent(ligandAtoms?.smiles ?? smiles, {});
-  const alignment = a3m ? { paired: null, unpaired: normalizeA3m(a3m, input.maxMsaSeqs) } : null;
-  const { batch, rows } = lf.af3BatchFromA3m(sequence.toUpperCase(), alignment, {
+
+  // Unknown residues: Boltz's UNK has the five atoms N CA C O CB, LocalFold's only four; featurise X as alanine
+  // (the same five atoms) and re-label the token, its query MSA column and its profile afterwards.
+  const unknown = [];
+  [...kept].forEach((letter, i) => { if (!/[ACDEFGHIKLMNPQRSTVWY]/.test(letter)) unknown.push(i); });
+  const featSequence = [...kept].map((letter, i) => (unknown.includes(i) ? "A" : letter)).join("");
+
+  let alignment = null;
+  if (a3m) {
+    let text = normalizeA3m(a3m, input.maxMsaSeqs);
+    if (input.receptorIndices !== undefined) text = cropA3m(text, indices);
+    const lines = text.split("\n");
+    lines[1] = featSequence;
+    alignment = { paired: null, unpaired: lines.join("\n") };
+  }
+  const { batch, rows } = lf.af3BatchFromA3m(featSequence, alignment, {
     ...(input.maxMsa === undefined ? {} : { maxSequences: input.maxMsa }),
     ...lf.featuriserDialect(dialect),
     ligands: [ligand],
@@ -88,10 +211,42 @@ export async function buildBatch(lf, input) {
   const ligandSpan = batch.ligandSpans[0];
   const receptorTokens = ligandSpan.from;
   const ligandTokens = ligandSpan.count;
-  if (receptorTokens !== sequence.length || receptorTokens + ligandTokens !== tokens) {
+  if (receptorTokens !== kept.length || receptorTokens + ligandTokens !== tokens) {
     throw new Error(`unexpected tokenisation: ${receptorTokens} receptor + ${ligandTokens} ligand != ${tokens} tokens`);
   }
-  checkSize({ receptorTokens, ligandTokens, atoms: batch.atomCount }, { allowExtended });
+  if (input.receptorIndices === undefined) checkSize({ receptorTokens, ligandTokens, atoms: batch.atomCount }, { allowExtended });
+  else if (ligandTokens > LIMITS.ligandTokens) checkSize({ receptorTokens: 0, ligandTokens, atoms: 0 });
+
+  // the LocalFold batch carries the query twice (paired and unpaired block); Boltz's alignment holds it once
+  if (batch.sequences >= 2) {
+    const same = Array.from({ length: receptorTokens }, (_, t) => batch.msa[tokens + t] === batch.msa[t]).every(Boolean);
+    if (same) {
+      const drop = (array, Type) => { const out = new Type(array.length - tokens); out.set(array.subarray(0, tokens)); out.set(array.subarray(2 * tokens), tokens); return out; };
+      batch.msa = drop(batch.msa, batch.msa.constructor);
+      batch.msaMask = drop(batch.msaMask, batch.msaMask.constructor);
+      batch.deletionMatrix = drop(batch.deletionMatrix, batch.deletionMatrix.constructor);
+      const before = batch.sequences;
+      batch.sequences = before - 1;
+      rows.depth = Math.max(1, rows.depth);
+      // the profile was already taken over the de-duplicated rows; re-labelled X tokens move one query weight
+      batch.dedupedFrom = before;
+    }
+  }
+  const unk = 20;
+  for (const t of unknown) {
+    const old = batch.aatype[t];
+    batch.aatype[t] = unk;
+    batch.msa[t] = unk;
+    const weight = 1 / batch.sequences;
+    batch.profile[t * RESTYPES + old] -= weight;
+    batch.profile[t * RESTYPES + unk] += weight;
+  }
+
+  // original residue positions of a cropped receptor
+  if (input.receptorIndices !== undefined) {
+    const { residueIndex } = batch.features;
+    indices.forEach((original, t) => { residueIndex[t] = original + 1; });
+  }
 
   if (ligandAtoms !== undefined) {
     if (ligandAtoms.atomNames.length !== ligandTokens) {
@@ -106,14 +261,7 @@ export async function buildBatch(lf, input) {
   // Boltz's type_bonds = bond type + 1
   for (let i = 0; i < batch.bondOrderMatrix.length; i += 1) if (batch.bondMatrix[i] !== 0) batch.bondOrderMatrix[i] += 1;
 
-  const dense = batch.dense;
-  if (ligandConformer === "skip") {
-    for (let token = receptorTokens; token < tokens; token += 1) {
-      batch.refPos.fill(0, token * dense * 3, (token + 1) * dense * 3);
-    }
-  } else if (ligandConformer !== "conformer") {
-    throw new Error(`ligand conformer mode ${ligandConformer} is not available here (skip or conformer)`);
-  }
+  applyLigandConformer(batch, receptorTokens, ligandTokens, ligandConformer, (input.conformerSeed ?? input.etkdgSeed ?? 42) >>> 0);
   return { batch, rows, receptorTokens, ligandTokens, notes };
 }
 

@@ -19,7 +19,7 @@ export async function loadLocalFold(root) {
     throw new Error("LocalFold is required for the trunk: set LOCALFOLD_DIR (or pass --localfold) to a "
       + "checkout of https://github.com/sokrypton/localfold");
   }
-  const [weights, diffusionWeights, batch, dialect, component, contact, trunk, fold, device, msaDraw] = await Promise.all([
+  const [weights, diffusionWeights, batch, dialect, component, contact, trunk, fold, device, msaDraw, ccd] = await Promise.all([
     importFrom(root, "shared/af3/weights/weights.js"),
     importFrom(root, "shared/af3/weights/diffusion-weights.js"),
     importFrom(root, "shared/af3/featurise/batch.js"),
@@ -30,6 +30,7 @@ export async function loadLocalFold(root) {
     importFrom(root, "webgpu/af3/fold.js"),
     importFrom(root, "webgpu/runtime/device.js"),
     importFrom(root, "shared/af3/msa-draw.js"),
+    importFrom(root, "shared/af3/featurise/ccd-component.js"),
   ]);
   return {
     root,
@@ -47,5 +48,7 @@ export async function loadLocalFold(root) {
     defaultPairWeightPrecision: fold.defaultPairWeightPrecision,
     requestAlphaFoldDevice: device.requestAlphaFoldDevice,
     msaDrawRows: msaDraw.msaDrawRows,
+    ccdUrl: ccd.ccdUrl,
+    parseCcdComponent: ccd.parseCcdComponent,
   };
 }
