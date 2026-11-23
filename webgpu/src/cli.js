@@ -21,6 +21,9 @@ const { values } = parseArgs({
     "sequence-file": { type: "string" },
     a3m: { type: "string" },
     smiles: { type: "string" },
+    "ligand-ccd": { type: "string" },
+    "ligand-conformer": { type: "string", default: "skip" },
+    "receptor-indices": { type: "string" },
     "trunk-pack": { type: "string", default: here("packs/boltz2-trunk-own/boltz2-trunk-own.json") },
     pack: { type: "string", default: here("packs/genfree-affinity.json") },
     trunk: { type: "string" },
@@ -35,8 +38,19 @@ const { values } = parseArgs({
   },
 });
 
+/** "0-99,120,130-135" -> sorted 0-based residue indices (inclusive ranges). */
+function parseIndexList(text) {
+  const out = new Set();
+  for (const part of text.split(",")) {
+    const m = part.trim().match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) { console.error(`bad --receptor-indices entry ${JSON.stringify(part)}; expected N or A-B, comma separated`); process.exit(2); }
+    for (let i = Number(m[1]); i <= Number(m[2] ?? m[1]); i += 1) out.add(i);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 const usage = `usage:
-  node src/cli.js --sequence <protein> --smiles <SMILES> [--a3m file] [--trunk-pack manifest.json|URL]
+  node src/cli.js --sequence <protein> (--smiles <SMILES> | --ligand-ccd <CODE>) [--receptor-indices 0-99,120] [--ligand-conformer skip|etkdg|rdkit_2d] [--a3m file] [--trunk-pack manifest.json|URL]
                   [--recycles 0..5] [--pack affinity.json] [--ligand-atoms ligand.json] [--allow-extended] [--json]
   node src/cli.js --trunk <trunk dump manifest> [--cpu]       (affinity module on a stored trunk output)`;
 if (!STRUCTURE_FREE_MODES.includes(values.mode)) {
@@ -55,7 +69,7 @@ let report;
 const started = performance.now();
 
 if (fullChain) {
-  if (!values.smiles) { console.error(usage); process.exit(2); }
+  if (!values.smiles === !values["ligand-ccd"]) { console.error(usage); process.exit(2); }
   if (values.cpu) { console.error("--cpu applies to --trunk dumps only; the trunk needs WebGPU"); process.exit(2); }
   const sequence = (values.sequence ?? readFileSync(values["sequence-file"], "utf8")).replace(/\s+/g, "");
   const a3m = values.a3m ? readFileSync(values.a3m, "utf8") : null;
@@ -68,7 +82,9 @@ if (fullChain) {
   const { createOwnChain } = await import("./trunk/own/chain.js");
   const { device, adapter } = await createNodeDevice();
   const chain = await createOwnChain({ trunkPack, affinityPack, device });
-  const result = await chain.score({ sequence, a3m, smiles: values.smiles }, {
+  const ligand = values["ligand-ccd"] ? { smiles: values["ligand-ccd"], ligandKind: "ccd" } : { smiles: values.smiles };
+  const receptorIndices = values["receptor-indices"] ? parseIndexList(values["receptor-indices"]) : undefined;
+  const result = await chain.score({ sequence, a3m, ...ligand, receptorIndices, ligandConformer: values["ligand-conformer"] }, {
     recycles: Number(values.recycles), mode: values.mode, seed: Number(values.seed),
     allowExtended: values["allow-extended"],
     ligandAtoms: values["ligand-atoms"] ? JSON.parse(readFileSync(values["ligand-atoms"], "utf8")) : undefined,

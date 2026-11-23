@@ -147,7 +147,6 @@ test("unknown residues are UNK with the five atoms N CA C O CB", () => {
 test("size limits follow GenFree unless allowExtended", () => {
   assert.throws(() => featuriseOwn({ sequence: "A".repeat(201), smiles: "CO" }), /allow-extended/);
   assert.ok(featuriseOwn({ sequence: "A".repeat(201), smiles: "CO", allowExtended: true }).receptorTokens === 201);
-  assert.throws(() => featuriseOwn({ sequence: "AAA", smiles: "CO", ligandConformer: "etkdg" }), /not supported/);
 });
 
 test("ligandAtoms override sets the token order and the names", () => {
@@ -256,4 +255,23 @@ test("featuriseOwn carries window tables for its atoms", () => {
   const r = featuriseOwn({ sequence: "MKTV", smiles: "CO" });
   assert.equal(r.windows.subsets, Math.ceil(r.atoms / 32));
   assert.equal(r.windows.tokensToQueries.mask.reduce((s, v) => s + v, 0), r.atoms);
+});
+
+test("ligand conformer modes fill ligand ref_pos only, with sensible geometry", () => {
+  const base = { sequence: "MKTAYIAKQR", smiles: "Oc1ccccc1", seed: 3 };
+  const skip = featuriseOwn(base);
+  const etkdg = featuriseOwn({ ...base, ligandConformer: "etkdg" });
+  const flat = featuriseOwn({ ...base, ligandConformer: "rdkit_2d" });
+  const pos = (r) => r.features.ref_pos.data;
+  const first = skip.atoms - skip.ligandTokens; // ligand atoms are the last heavy atoms, one per token
+  assert.ok(Array.from(pos(skip).subarray(first * 3, skip.atoms * 3)).every((v) => v === 0));
+  for (const r of [etkdg, flat]) {
+    assert.deepEqual(Array.from(pos(r).subarray(0, first * 3)), Array.from(pos(skip).subarray(0, first * 3)));
+    assert.ok(Array.from(pos(r).subarray(first * 3, r.atoms * 3)).some((v) => v !== 0));
+  }
+  // the first ring bond (atoms 1-2 of canonical phenol) keeps a normal aromatic C-C length
+  const at = (r, i) => Array.from(pos(r).subarray((first + i) * 3, (first + i) * 3 + 3));
+  const d = Math.hypot(...at(etkdg, 1).map((v, k) => v - at(etkdg, 2)[k]));
+  assert.ok(d > 1.25 && d < 1.55, `ring C-C distance ${d}`);
+  assert.throws(() => featuriseOwn({ ...base, ligandConformer: "nope" }), /unknown ligand conformer mode/);
 });

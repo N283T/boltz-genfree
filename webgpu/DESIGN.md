@@ -95,7 +95,7 @@ The trunk lives in `src/trunk/own/` (numbers in docs/webgpu.md):
 - `chain.js` ties the trunk to `AffinityGpu`.
 
 Remaining gaps: protein `ref_pos` (Boltz rotates RDKit conformers with a seeded torch RNG; not reproducible here,
-GenFree's own seed noise is ~0.02 in value), stereo ligands, the dropped `etkdg` / `rdkit_2d` conformer modes, CCD
-ligands and receptor cropping, speed (naive triangle attention; LocalFold's tuned kernels are 2.8x faster at 211
+GenFree's own seed noise is ~0.02 in value), stereo ligands, the `etkdg` / `rdkit_2d` conformer modes (approximate; built-in embedder, CCD
+ligands and receptor cropping are implemented, see docs/webgpu.md), speed (naive triangle attention; LocalFold's tuned kernels are 2.8x faster at 211
 tokens), the browser path (verified once on one machine; the affinity pack is not streamed), and checks on GPUs other
 than the Apple M4.

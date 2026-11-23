@@ -14,6 +14,8 @@
 //     dialect). `has_deletion`, `deletion_value` and `deletion_mean` follow;
 //   * the profile is the mean one-hot over every row kept, ligand columns included.
 //
+// `keep` (receptor crop) is described at its use in buildMsa.
+//
 // Not implemented: trimming an alignment whose query is longer than the input (Boltz's _trim_msa_to_input); such an
 // alignment falls back to the query alone with a note (GenFree crops the A3M itself before featurising).
 
@@ -128,17 +130,29 @@ function pairingOrder(rows, maxPairs = 8192, maxTotal = 16384) {
  * @param {Int32Array|number[]} inputTypes protein token ids
  * @param {number} ligandTokens
  * @param {string|null} a3m
- * @param {{maxRows?: number, maxSeqs?: number}} [options] `maxRows` caps the rows of the result (default 8192)
+ * @param {{maxRows?: number, maxSeqs?: number, keep?: number[]|null, fullTypes?: Int32Array|null}} [options]
+ *   `maxRows` caps the rows of the result (default 8192); `keep` (sorted full-sequence column indices) crops the
+ *   alignment, `fullTypes` being the uncropped protein token ids the A3M query is checked against
  * @returns {{rows: number, tokens: number, msa: Int32Array, paired: Uint8Array, deletion: Int32Array,
  *            queryDeletion: Int32Array, profile: Float32Array, deletionMean: Float32Array,
  *            profileAffinity: Float32Array, deletionMeanAffinity: Float32Array, notes: string[]}}
  */
-export function buildMsa(inputTypes, ligandTokens, a3m, { maxRows = 8192, maxSeqs = 8192 } = {}) {
+export function buildMsa(inputTypes, ligandTokens, a3m, { maxRows = 8192, maxSeqs = 8192, keep = null, fullTypes = null } = {}) {
   const notes = [];
   const n = inputTypes.length;
   const tokens = n + ligandTokens;
   let rows = null;
-  if (a3m) rows = matchQuery(parseA3m(a3m, maxSeqs), inputTypes, notes);
+  // Receptor crop: Boltz featurises the whole alignment (query check, de-duplication, row limit on the full chains)
+  // and crops afterwards, so the alignment is parsed and matched against the full sequence (`fullTypes`) and each row is
+  // then cut to the columns in `keep`; a deletion count stays with the column that follows it (as cropA3m).
+  if (a3m) rows = matchQuery(parseA3m(a3m, maxSeqs), keep ? fullTypes : inputTypes, notes);
+  if (rows !== null && keep) {
+    rows = rows.map((row) => {
+      const deletions = new Map();
+      keep.forEach((column, k) => { if (row.deletions.has(column)) deletions.set(k, row.deletions.get(column)); });
+      return { ...row, residues: Int32Array.from(keep, (column) => row.residues[column]), deletions };
+    });
+  }
   if (rows === null) rows = [{ residues: Int32Array.from(inputTypes), deletions: new Map(), taxonomy: -1 }];
   const order = pairingOrder(rows).slice(0, maxRows);
   const R = order.length;
@@ -181,4 +195,28 @@ export function buildMsa(inputTypes, ligandTokens, a3m, { maxRows = 8192, maxSeq
     deletionMeanAffinity[t] = Math.fround(Math.fround(Math.PI / 2) * Math.fround(Math.atan(Math.fround(queryDeletion[t] / 3))));
   }
   return { rows: R, tokens, msa, paired, deletion, queryDeletion, profile, deletionMean, profileAffinity, deletionMeanAffinity, notes };
+}
+
+/**
+ * Column-crop A3M text to the query positions in `keep` (insertions before a dropped column go with it). A text-level
+ * utility; the featuriser crops the parsed alignment instead (`keep` of buildMsa), which de-duplicates before cropping
+ * as Boltz does.
+ */
+export function cropA3m(text, keep) {
+  const wanted = new Set(keep);
+  const out = [];
+  for (const line of text.split("\n")) {
+    if (line === "" || line.startsWith(">") || line.startsWith("#")) { out.push(line); continue; }
+    let column = 0;
+    let pending = "";
+    let result = "";
+    for (const ch of line) {
+      if (ch !== "-" && ch >= "a" && ch <= "z") { pending += ch; continue; }
+      if (wanted.has(column)) result += pending + ch;
+      pending = "";
+      column += 1;
+    }
+    out.push(result);
+  }
+  return out.join("\n");
 }

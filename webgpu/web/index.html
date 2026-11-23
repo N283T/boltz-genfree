@@ -18,13 +18,16 @@
 <p>Protein sequence (+ optional A3M) and a ligand SMILES go through the featuriser, the Boltz-2 trunk and the
 structure-free affinity module, all written in this repository and run in this page. The 805 MB trunk pack is read
 lazily by HTTP Range requests, one layer at a time. Serve it with <code>node tools/serve.js</code>
-(see <code>docs/webgpu.md</code>). Only the ligand conformer mode <code>skip</code> (GenFree's default) is available.</p>
+(see <code>docs/webgpu.md</code>). Receptor cropping and CCD ligands are supported; only the ligand conformer mode <code>skip</code> (GenFree's default) is available.</p>
 <label for="seq">Protein sequence (receptor chain)</label>
 <textarea id="seq" rows="3">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
 <label for="a3m">A3M (optional; first row = the query)</label>
 <textarea id="a3m" rows="3" placeholder=">query&#10;SEQUENCE&#10;&gt;hit&#10;..."></textarea>
 <label for="smiles">Ligand SMILES</label>
 <input id="smiles" value="Oc1ccccc1">
+<label for="ccd"><input type="checkbox" id="ccd" style="width:auto"> the ligand field is a CCD code (e.g. GOL; fetched from files.rcsb.org)</label>
+<label for="crop">Receptor crop (optional, 0-based residues, e.g. 0-99,120)</label>
+<input id="crop" placeholder="keep all residues">
 <label for="weights">Trunk pack (manifest URL)</label>
 <input id="weights" value="/packs/boltz2-trunk-own/boltz2-trunk-own.json">
 <label for="size">Extended size limits</label>
@@ -37,6 +40,17 @@ import { createOwnChain } from "../src/trunk/own/chain.js";
 
 const out = document.getElementById("out");
 let chain;
+function parseIndices(text) {
+  if (!text.trim()) return undefined;
+  const out = new Set();
+  for (const part of text.split(",")) {
+    const m = part.trim().match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) throw new Error(`bad crop entry ${JSON.stringify(part)}`);
+    for (let i = Number(m[1]); i <= Number(m[2] ?? m[1]); i += 1) out.add(i);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
 document.getElementById("run").addEventListener("click", async () => {
   try {
     if (!navigator.gpu) throw new Error("this browser has no WebGPU");
@@ -54,6 +68,8 @@ document.getElementById("run").addEventListener("click", async () => {
       sequence: document.getElementById("seq").value.replace(/\s+/g, ""),
       a3m: document.getElementById("a3m").value.trim() || null,
       smiles: document.getElementById("smiles").value.trim(),
+      ligandKind: document.getElementById("ccd").checked ? "ccd" : "smiles",
+      receptorIndices: parseIndices(document.getElementById("crop").value),
     }, { allowExtended: document.getElementById("size").value === "1", onStage: (name, ms) => { out.textContent = `running... ${name} ${Math.round(ms)} ms`; } });
     out.textContent = JSON.stringify({
       affinity_pred_value: r.value, affinity_probability_binary: r.probability,

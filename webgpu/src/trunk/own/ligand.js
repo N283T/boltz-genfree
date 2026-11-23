@@ -41,3 +41,14 @@ export function ligandGraph(smiles, ligandAtoms) {
   });
   return { atoms, bonds, smiles: given.smiles, notes };
 }
+
+/**
+ * The ligand graph of a parsed CCD component (ccd.js `parseCcdComponent`), in the shape `ligandGraph` returns: tokens in
+ * the dictionary's heavy-atom order, names from `atom_id`. A quadruple bond is Boltz's OTHER type (0), which
+ * `type_bonds` encodes as 1 like every other type + 1.
+ */
+export function ligandGraphFromCcd(component) {
+  const atoms = component.atoms.map(({ element, charge, name }) => ({ element, charge, name }));
+  const bonds = component.bonds.map(({ a, b, bondType }) => ({ a, b, type: BOND_TYPE[bondType] ?? 0 }));
+  return { atoms, bonds, smiles: null, notes: [] };
+}

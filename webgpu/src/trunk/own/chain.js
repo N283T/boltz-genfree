@@ -8,6 +8,7 @@ import { maskTrunkPair } from "../../trunk-input.js";
 import { OwnWeights } from "../own-weights.js";
 import { featuriseOwn, featureBundle } from "./featurise.js";
 import { OwnTrunk } from "./run.js";
+import { fetchCcdComponent } from "./ccd.js";
 
 /** `base` features with the named `feat/*` tensors taken from `oracle` (same shapes required). */
 function overlay(base, oracle, names) {
@@ -44,9 +45,11 @@ export async function createOwnChain({ trunkPack, affinityPack, device, onStatus
   return {
     device, weights, weightLoadMs,
     /**
-     * @param {{sequence: string, a3m?: string|null, smiles: string}} input
+     * @param {{sequence: string, a3m?: string|null, smiles: string, ligandKind?: "smiles"|"ccd",
+     *          receptorIndices?: number[]}} input
+     *   `ligandKind: "ccd"`: `smiles` is the CCD code. `receptorIndices`: sorted 0-based residues of `sequence` to keep (crop)
      * @param {{recycles?: number, mode?: string, seed?: number, allowExtended?: boolean, maxMsa?: number,
-     *          ligandAtoms?: object, oracle?: object, importPositions?: boolean, importNames?: boolean,
+     *          ligandAtoms?: object, fetch?: Function, oracle?: object, importPositions?: boolean, importNames?: boolean,
      *          onStage?: Function, taps?: Map}} [options]
      *   `oracle` (a dump bundle) replaces the protein reference positions and the atom-name one-hots with GenFree's PyTorch
      *   ones (the 'exact' path: separates engine error from the featuriser's seeded-augmentation difference).
@@ -54,7 +57,10 @@ export async function createOwnChain({ trunkPack, affinityPack, device, onStatus
     async score(input, options = {}) {
       const t0 = performance.now();
       const { oracle, recycles = 0, mode = "zero_distogram_features", seed = 0, ...rest } = options;
-      const made = featuriseOwn({ ...input, ...rest, seed });
+      // ligandKind "ccd": `smiles` holds the 3-letter CCD code, fetched here (options.fetch overrides the global fetch)
+      const ligandComponent = input.ligandKind === "ccd" && input.ligandComponent === undefined
+        ? await fetchCcdComponent(input.smiles, options.fetch) : input.ligandComponent;
+      const made = featuriseOwn({ ...input, ligandComponent, ...rest, seed });
       let features = featureBundle(made);
       if (oracle) {
         const names = [];

@@ -16,14 +16,15 @@
 //     applies a random rotation and translation, all from numpy/torch generators; here the pick, rotation and
 //     translation come from a seeded JS generator (`refPosAugment: "none"` keeps the centred conformer; `conformers`
 //     pins the picks). Given the same pick, pairwise distances inside a residue are identical to Boltz's.
-//   * the ligand conformer modes etkdg / rdkit_2d and CCD ligands are not part of this module (ligand ref_pos = 0).
+//   * ligand `ref_pos`: 0 under `skip` (default); `etkdg` / `rdkit_2d` use ./conformer.js (approximate, seeded).
 
 import { PROTEIN_CONFORMERS } from "./conformers.js";
 import {
   ELEMENT_OF_LETTER, METHOD_OTHER, MOL_NONPOLYMER, MOL_PROTEIN, NUM_BACKBONE_CLASSES, NUM_ELEMENTS, NUM_TOKENS,
   PROTEIN_BACKBONE, RESIDUE_CHARGES, THREE_LETTER, TOKEN_ID, TOKEN_UNK, atomNameCodes, chiralityOf, letterToTokenId,
 } from "./boltz-const.js";
-import { ligandGraph } from "./ligand.js";
+import { ligandConformerPositions } from "./conformer.js";
+import { ligandGraph, ligandGraphFromCcd } from "./ligand.js";
 import { buildMsa } from "./msa.js";
 import { atomWindows } from "./windows.js";
 
@@ -63,8 +64,10 @@ function randomRotation(random) {
 
 /**
  * @param {{sequence: string, smiles: string, a3m?: string|null, ligandAtoms?: {smiles: string, atomNames: string[]},
+ *          receptorIndices?: number[], ligandKind?: "smiles"|"ccd", ligandComponent?: object,
  *          allowExtended?: boolean, maxMsa?: number, maxMsaSeqs?: number, seed?: number,
- *          refPosAugment?: "seeded"|"none", conformers?: number[], ligandConformer?: "skip"}} input
+ *          refPosAugment?: "seeded"|"none", conformers?: number[], ligandConformer?: "skip"|"etkdg"|"rdkit_2d",
+ *          conformerSeed?: number}} input
  *   `maxMsa` caps the MSA rows of the result (default 8192, Boltz's `max_msa_seqs`; no subsampling to 1024 here).
  * @returns {{features: Record<string, {data: Float32Array, shape: number[]}>, tokens: number, atoms: number,
  *            atomsPadded: number, conformerIndex: Int32Array, receptorTokens: number, ligandTokens: number, msaRows: number, notes: string[],
@@ -73,13 +76,37 @@ function randomRotation(random) {
 export function featuriseOwn(input) {
   const { sequence, smiles, a3m = null, allowExtended = false } = input;
   const ligandConformer = input.ligandConformer ?? "skip";
-  if (ligandConformer !== "skip") throw new Error(`ligand conformer mode ${ligandConformer} is not supported by the own featuriser (skip only)`);
+  if (!["skip", "etkdg", "rdkit_2d"].includes(ligandConformer)) {
+    throw new Error(`unknown ligand conformer mode ${ligandConformer} (skip, etkdg or rdkit_2d)`);
+  }
   if (!/^[A-Za-z]+$/.test(sequence)) throw new Error("sequence must contain letters only (one protein chain)");
-  const letters = [...sequence.toUpperCase()];
+  const fullLetters = [...sequence.toUpperCase()];
+  // Receptor crop (Boltz's crop of a large receptor): keep only these 0-based residues of the full sequence.
+  let keep = null;
+  if (input.receptorIndices !== undefined) {
+    keep = Array.from(input.receptorIndices);
+    if (keep.length === 0) throw new Error("receptorIndices is empty");
+    keep.forEach((index, k) => {
+      if (!Number.isInteger(index) || index < 0 || index >= fullLetters.length) {
+        throw new Error(`receptorIndices[${k}] = ${index} is outside the ${fullLetters.length}-residue sequence`);
+      }
+      if (k > 0 && index <= keep[k - 1]) throw new Error("receptorIndices must be strictly increasing (Boltz's crop keeps token order)");
+    });
+  }
+  const letters = keep ? keep.map((index) => fullLetters[index]) : fullLetters;
   const n = letters.length;
   const notes = [];
 
-  const ligand = ligandGraph(smiles, input.ligandAtoms);
+  let ligand;
+  if (input.ligandKind === "ccd") {
+    if (input.ligandComponent === undefined) {
+      throw new Error("ligandKind \"ccd\": pass the parsed component as ligandComponent (chain.score fetches it from `smiles` = the CCD code)");
+    }
+    ligand = ligandGraphFromCcd(input.ligandComponent);
+    notes.push(`ligand: CCD component ${input.ligandComponent.code} (atom order and names from the dictionary; chirality and ref_pos are zero)`);
+  } else {
+    ligand = ligandGraph(smiles, input.ligandAtoms);
+  }
   notes.push(...ligand.notes);
   const m = ligand.atoms.length;
   const T = n + m;
@@ -110,7 +137,7 @@ export function featuriseOwn(input) {
     tokenIndex[t] = t;
     if (t < n) {
       resTypeId[t] = TOKEN_ID[names[t]];
-      residueIndex[t] = t;
+      residueIndex[t] = keep ? keep[t] : t; // Boltz keeps each cropped residue's original res_idx
     } else {
       resTypeId[t] = TOKEN_UNK; // a ligand token is the protein UNK token
       asymId[t] = 1; entityId[t] = 1; molType[t] = MOL_NONPOLYMER; affinityMask[t] = 1;
@@ -186,15 +213,27 @@ export function featuriseOwn(input) {
     });
     if (atom === first) throw new Error(`residue ${t} has no atoms`);
   }
+  const ligandFirstAtom = atom;
   ligand.atoms.forEach((a, i) => {
-    // one residue (reference space) for the whole ligand group; its ref_pos stays zero (`skip`)
+    // one residue (reference space) for the whole ligand group; its ref_pos stays zero under `skip`
     setAtom(n + i, n, a.element, a.charge, 0, a.name, 0);
     atom += 1;
   });
+  if (ligandConformer !== "skip") {
+    // etkdg / rdkit_2d: our own embedder (no RDKit coordinates, no torch random stream: see docs/webgpu.md)
+    const positions = ligandConformerPositions(
+      { elements: ligand.atoms.map((a) => a.element), bonds: ligand.bonds },
+      ligandConformer, (input.conformerSeed ?? input.seed ?? 0) >>> 0);
+    for (let i = 0; i < m; i += 1) for (let a = 0; a < 3; a += 1) refPos[(ligandFirstAtom + i) * 3 + a] = positions[i * 3 + a];
+    notes.push(`ligand ref_pos: ${ligandConformer} conformer from the built-in embedder (approximate; not RDKit's coordinates)`);
+  }
 
   // ---- MSA ----
   const protein = Int32Array.from(resTypeId.subarray(0, n));
-  const msa = buildMsa(protein, m, a3m, { maxRows: input.maxMsa ?? 8192, maxSeqs: input.maxMsaSeqs ?? 8192 });
+  const msa = buildMsa(protein, m, a3m, {
+    maxRows: input.maxMsa ?? 8192, maxSeqs: input.maxMsaSeqs ?? 8192,
+    keep, fullTypes: keep ? Int32Array.from(fullLetters, (letter) => TOKEN_ID[residueName(letter)]) : null,
+  });
   notes.push(...msa.notes);
   const R = msa.rows;
   const msaMask = f32(R * T).fill(1);

@@ -110,8 +110,18 @@ follow-up. `node tools/bench_own_chain.js --case NAME | --long 384` reproduces t
 
 ### Remaining gaps and what is not verified
 
-* Dropped for now (not implemented): the `etkdg` / `rdkit_2d` ligand conformer modes, CCD ligands
-  (`ligandKind: "ccd"`) and receptor cropping (`receptorIndices` / cropped A3M). Only the `skip` conformer remains.
+* The `etkdg` / `rdkit_2d` ligand conformer modes (`ligandConformer`, `--ligand-conformer`) use the built-in embedder below; `skip` (GenFree's default) is the exact one. The embedded coordinates are not RDKit's, and the effect on the affinity value has not been measured against GenFree.
+* CCD ligands (`ligandKind: "ccd"`, `smiles` = the code, `--ligand-ccd CODE`; the component is fetched from
+  files.rcsb.org at run time) use the dictionary's heavy-atom order, `atom_id` names, charges and bond types
+  (`pdbx_aromatic_flag` -> AROMATIC; a quadruple bond -> OTHER). Not verified against a Boltz oracle dump. Gaps: Boltz
+  loads RDKit molecules from its own CCD pickle (aromaticity and charges come from RDKit's perception, ours from the
+  dictionary flags), `ref_chirality` is 0 (Boltz uses the RDKit chiral tag), atom names longer than four characters are
+  rejected, multi-residue CCD ligands are not supported.
+* Receptor cropping (`receptorIndices`, `--receptor-indices 0-99,120`: sorted 0-based residues of the full sequence):
+  only those residues are featurised, each keeps its original `residue_index` (as Boltz's crop; `token_index` is
+  renumbered 0..T-1), the A3M is checked and de-duplicated on the full chain and then cut to the kept columns
+  (insertions go with the column that follows), and the size limits apply to the cropped size. Boltz's own crop
+  *selection* (spatial / contiguous sampling) is not reimplemented: the caller supplies the indices.
 * Protein `ref_pos` random rotation (above); stereo ligands without `--ligand-atoms`.
 * Speed against LocalFold's tuned kernels (above). Token limits: a pair of N tokens x 128 channels must fit
   `maxStorageBufferBindingSize` (N <= ~1000-2000 depending on device).
@@ -130,3 +140,17 @@ cd webgpu && BOLTZ_GENFREE_GPU_TESTS=1 npm test   # adds the WebGPU tests (needs
 ```
 
 Dumps and packs are git-ignored.
+
+### Ligand conformers (`etkdg`, `rdkit_2d`): own embedder
+
+`webgpu/src/trunk/own/conformer.js` (with `chem/bounds.js`) is a self-contained, LocalFold-free replacement for the
+former LocalFold conformer modes; `featuriseOwn` calls it when `ligandConformer` is `etkdg` or `rdkit_2d`. `embedConformer(graph, {seed})` runs an ETKDG-like distance-geometry embedding on the
+heavy-atom graph (hydrogens implicit): hybridisation-based bond lengths and angles (ring-size aware), 1-4 cis/trans
+windows (fixed cis in planar 5/6/7 rings), triangle smoothing, random distances, 4D metric-matrix embedding, L-BFGS
+against the bounds, then a 3D refinement with planarity terms at sp2 centres and in planar rings.
+`ligandConformerPositions(graph, mode, seed)` applies Boltz's centring plus a seeded random rotation and translation
+(`rigidMotion`); `rdkit_2d` first flattens onto the principal plane. `skip` stays with the caller.
+Measured on phenol, acetaminophen, naphthalene, indole, cyclohexane, an ester and a 56-heavy-atom peptide: worst bond
+length error 0.9% of ideal, worst angle error 5.3 degrees, planar rings within 0.01 A. Limits: no stereochemistry
+(chiral centres and E/Z get whatever configuration the embedding finds), no torsional preferences beyond the 1-4
+window, no RDKit parity (coordinates and the torch random stream differ, as for the previous LocalFold conformers).
