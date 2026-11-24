@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "docs/site/v2/**"
+      - "docs/site/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Publish docs/site/v2
+    name: Publish docs/site
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
@@ -30,12 +30,12 @@ jobs:
       - uses: actions/checkout@v6
 
       # Only the main page and its assets are public; the other pages under
-      # docs/site/v2 are working tools and stay unpublished.
+      # docs/site/internal holds working tools and stays unpublished.
       - name: Assemble site
         run: |
           mkdir -p _site
-          cp docs/site/v2/index.html _site/
-          cp -r docs/site/v2/assets _site/
+          cp docs/site/research.html _site/index.html
+          cp -r docs/site/assets _site/
 
       - uses: actions/configure-pages@v6
 
