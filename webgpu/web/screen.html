@@ -14,6 +14,107 @@
   .btn:disabled, .tbtn:disabled { opacity: .45; cursor: not-allowed; }
   .btn:disabled:hover, .tbtn:disabled:hover { border-color: var(--line); color: var(--ink); }
   .cli { margin-top: 22px; }
+  /* ---------- WebGPU tool: its own layout, the site's tokens ---------- */
+  .tool-head .row { padding-bottom: 30px; }
+  .ic { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: square; stroke-linejoin: miter; }
+
+  /* intro: one sentence and the two guides */
+  .intro { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 32px; margin-top: 28px; padding: 16px 18px; border: 1px solid var(--line); border-left: 4px solid var(--accent); background: var(--panel); }
+  .intro p { flex: 1 1 420px; font-size: 16px; line-height: 1.5; color: var(--ink-2); }
+  .intro-links { display: flex; flex-wrap: wrap; gap: 8px; }
+  .intro-links a { display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--line); color: var(--ink); text-decoration: none; font: 700 14px/1 var(--sans); }
+  .intro-links a .ic { color: var(--accent); }
+  .intro-links a:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* steps: a numbered head over a rule */
+  .tstep { padding-top: 44px; }
+  .tstep > .shead { margin-bottom: 18px; padding-bottom: 12px; border-bottom: 2px solid var(--ink); }
+
+  /* inputs: receptor full width; ligands as input and parsed table side by side */
+  .inputs-v { display: grid; gap: 16px; }
+  .inputs-v .ipanel { border: 1px solid var(--line); background: var(--panel); min-width: 0; }
+  .inputs-v .ph { align-items: center; min-height: 48px; padding: 6px 8px 6px 14px; }
+  .inputs-v .ph .fl { font-size: 12.5px; color: var(--ink); }
+  .inputs-v .acts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .inputs-v .acts .tbtn { font: 700 14px/1 var(--sans); padding: 8px 12px; }
+  .inputs-v .tbtn.msa.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .inputs-v .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .inputs-v .vh:focus-visible + label { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .inputs-v textarea.ta { min-height: 240px; }
+  .inputs-v textarea.seqta { min-height: 104px; }
+  .inputs-v .pf { justify-content: space-between; }
+  .inputs-v .pf .info { flex: 0 1 auto; }
+  .inputs-v .pf .fmt { flex-basis: auto; }
+  .inputs-v .msast { display: inline-flex; align-items: center; gap: 4px; }
+  .ligs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 16px; }
+  .ligview { display: flex; flex-direction: column; }
+  .lt { flex: 1; max-height: 316px; overflow: auto; }
+  .lt table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .lt th, .lt td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+  .lt thead th { position: sticky; top: 0; background: var(--panel); font: 600 11.5px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); border-bottom: 2px solid var(--ink); }
+  .lt .n { text-align: right; font-family: var(--mono); }
+  .lt td.rk { width: 40px; color: var(--ink-3); font-size: 13px; }
+  .lt td.id { font-weight: 700; }
+  .lt td.smi { max-width: 0; width: 60%; overflow: hidden; text-overflow: ellipsis; font: 500 13px/1.3 var(--mono); color: var(--ink-2); }
+  .lt tr.bad td { background: var(--accent-tint); }
+  .lt tr.bad td.n:last-child { color: var(--accent); font-weight: 700; }
+  .lt tr.more td { text-align: center; font: 500 13px/1.3 var(--mono); color: var(--ink-3); }
+  .lt-empty { padding: 22px 14px; font: 500 13.5px/1.4 var(--mono); color: var(--ink-3); }
+  .lt-empty.bad { color: var(--accent); }
+
+  /* run: centred */
+  .runnote { margin: 26px 0 0; max-width: none; text-align: left; font: 500 13.5px/1.5 var(--mono); color: var(--ink-3); }
+  .runbar { margin-top: 14px; }
+  .runbar .rb { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 14px 16px; }
+  .runbar .rb-main { display: flex; flex-wrap: wrap; gap: 10px; }
+  .runbar .btn { min-width: 116px; justify-content: center; padding-left: 18px; padding-right: 18px; }
+  /* Run starts something: a play icon in front, not the link arrow */
+  .runbar #run::after { content: none; }
+  .runbar #stop::after { content: none; }
+  .runbar #stop::before { content: ""; width: 11px; height: 11px; flex: 0 0 auto; background: currentColor; }
+  .runbar #run::before { content: ""; width: 13px; height: 13px; flex: 0 0 auto; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 4l15 8-15 8z' fill='%23000'/%3E%3C/svg%3E") center/contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 4l15 8-15 8z' fill='%23000'/%3E%3C/svg%3E") center/contain no-repeat; }
+  .runbar #status { flex: 1 1 200px; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+  .runbar .tbtn.dl { background: none; border-color: var(--t-line); color: var(--tile-ink); font: 700 14px/1 var(--sans); padding: 10px 16px; }
+  .runbar .tbtn.dl .ic { width: 15px; height: 15px; color: var(--hot); }
+  .runbar .tbtn.dl:hover:not(:disabled) { border-color: var(--hot); color: #fff; }
+  .runbar .tbtn.dl:disabled { opacity: .4; cursor: not-allowed; }
+  .runbar .btn.wl { background: none; border-color: var(--t-line); color: var(--tile-ink); }
+  .runbar .btn.wl::after { content: none; }
+  .runbar .btn.wl .ic { color: var(--hot); }
+  .runbar .btn.wl:hover:not(:disabled) { border-color: var(--hot); }
+  .runbar .btn.wl.ready { opacity: 1; color: var(--t-ink2); border-style: dashed; }
+  .runbar .btn.wl.ready .ic { color: var(--t-mute); }
+
+  /* WebGPU missing */
+  .gpuwarn { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; padding: 12px 16px; border: 1px solid var(--accent); background: var(--accent-tint); }
+  .gpuwarn .ic { width: 20px; height: 20px; color: var(--accent); margin-top: 1px; }
+  .gpuwarn p { font-size: 15.5px; line-height: 1.5; color: var(--ink); }
+  .gpuwarn[hidden] { display: none; }
+  /* step heads with an action on the right */
+  .tstep > .shead .tbtn.ex { margin-left: auto; font: 700 14px/1 var(--sans); padding: 8px 12px; }
+  /* settings: label with a help tip */
+  .settings .lh { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .settings .lh .fl { margin: 0; }
+  .help { position: relative; flex: 0 0 auto; width: 18px; height: 18px; padding: 0; border: 1px solid var(--line); background: var(--panel); color: var(--ink-3); font: 700 11px/1 var(--mono); cursor: help; }
+  .help:hover, .help:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+  .help::after { content: attr(data-tip); position: absolute; z-index: 20; left: -6px; top: calc(100% + 8px); width: 280px; padding: 10px 12px; background: var(--tile); color: #fff; font: 400 13.5px/1.45 var(--sans); text-align: left; text-transform: none; letter-spacing: 0; pointer-events: none; display: none; box-shadow: 0 6px 18px rgba(0,0,0,.18); }
+  .help:hover::after, .help:focus-visible::after { display: block; }
+  .settings { position: relative; z-index: 2; }
+  .settings > div:last-child .help::after { left: auto; right: -6px; }
+  @media (max-width: 759px) { .help::after { width: min(280px, calc(100vw - 48px)); } }
+  /* recycling ticks under the slider thumb positions */
+  .settings .ticks { margin: 2px calc(46px + 8px) 0 8px; position: relative; display: flex; justify-content: space-between; }
+  .settings .ticks span { width: 0; display: flex; justify-content: center; }
+  /* run bar: time estimate */
+  .runbar .eta { font: 600 13.5px/1.3 var(--mono); color: var(--hot); white-space: nowrap; }
+  .runbar .eta:empty { display: none; }
+  .runnote kbd { font: 600 12px/1 var(--mono); padding: 2px 5px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); }
+  /* results before the first run: one slim line */
+  #empty { min-height: 0; flex-direction: row; gap: 10px; padding: 14px 16px; }
+  #empty::before { width: 12px; height: 12px; }
+  #empty p { font-size: 15px; }
+  @media (max-width: 899px) { .ligs { grid-template-columns: minmax(0, 1fr); } .lt { max-height: 260px; } }
+  @media (max-width: 759px) { .intro-links a { flex: 1 1 100%; } }
 </style>
 </head>
 <body>
@@ -24,11 +125,12 @@
     <a class="brand" href="../../index.html"><img src="../../logo-on-dark.svg" alt="Boltz-GenFree home"></a>
     <nav class="site-nav" aria-label="Site">
       <ol>
-        <li><a href="../../index.html"><span class="nn">01</span>Home</a></li>
-        <li><a href="../../docs/index.html"><span class="nn">02</span>Docs</a></li>
-        <li><a href="../../how-it-works.html"><span class="nn">03</span>How it works</a></li>
-        <li><a href="../../results.html"><span class="nn">04</span>Results</a></li>
-        <li><a class="wgpu" href="screen.html" aria-current="page"><span class="nn">05</span>WebGPU</a></li>
+        <li><a href="../../index.html">Home</a></li>
+        <li><a href="../../docs/index.html">Docs</a></li>
+        <li><a href="../../how-it-works.html">How it works</a></li>
+        <li><a href="../../results.html">Results</a></li>
+        <li><a class="wgpu" href="screen.html" aria-current="page">WebGPU</a></li>
+        <li class="gh-li pp-li"><a class="gh pp" href="https://doi.org/10.26434/chemrxiv.15012606/v1">Preprint</a></li>
         <li class="gh-li"><a class="gh" href="https://github.com/N283T/boltz-genfree">GitHub</a></li>
       </ol>
     </nav>
@@ -39,19 +141,10 @@
   <div class="wrap">
     <div class="row">
       <div>
-        <p class="crumb"><b>04</b> &middot; WebGPU tool</p>
+        <p class="crumb">WebGPU tool</p>
         <h1>Screen in the <em>browser</em></h1>
         <p>Rank ligands against one receptor on your own GPU. Nothing is uploaded.</p>
       </div>
-      <a class="doclink" href="../../docs/index.html">Larger libraries: command line</a>
-    </div>
-  </div>
-  <div class="wrap">
-    <div class="reqs" aria-label="Requirements">
-      <div><i></i><span><b>WebGPU browser</b>Recent Chrome or Edge; other browsers not verified</span></div>
-      <div><i></i><span><b>About 380 MB first load</b>Trunk weights from Hugging Face, cached in the browser</span></div>
-      <div><i></i><span><b>Nothing uploaded</b>Sequences and ligands stay on your machine</span></div>
-      <div><i class="o"></i><span><b>Receptor up to 200 residues</b>Longer ones: crop with a reference complex</span></div>
     </div>
   </div>
 </section>
@@ -59,31 +152,60 @@
 <main id="main" class="tool">
   <div class="wrap">
 
+    <div class="intro">
+      <p>Paste a receptor and a list of ligands, keep or adjust the settings, and run. Each ligand gets a GenFree score; the table ranks them and saves as <code>scores.csv</code>.</p>
+      <nav class="intro-links" aria-label="Guides">
+        <a href="../../docs/browser-tool.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h7l2 2 2-2h7v14h-7l-2 2-2-2H3zM12 7v14"/></svg>How to use this tool</a>
+        <a href="../../docs/index.html"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v16H3zM7 9l3 3-3 3M12 15h5"/></svg>Larger libraries: command line</a>
+      </nav>
+    </div>
+    <div class="gpuwarn" id="gpuWarn" role="alert" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l10 18H2zM12 10v5M12 18v.5"/></svg><p id="gpuWarnText"></p></div>
+
     <!-- ============ STEP 1: inputs ============ -->
     <section class="tstep" aria-labelledby="s1">
-      <div class="shead"><span class="num">1</span><h2 id="s1">Inputs</h2><span class="hint">Type, paste, or choose a file</span></div>
-      <div class="grid inputs">
+      <div class="shead"><span class="num">1</span><h2 id="s1">Inputs</h2><button type="button" class="tbtn ex" id="example">Load example</button></div>
+      <div class="inputs-v">
         <div class="ipanel">
-          <div class="ph"><label class="fl" for="seq">Sequence</label><span class="info" id="seqInfo"></span></div>
-          <textarea class="ta" id="seq" spellcheck="false" placeholder="Paste a protein sequence (one letter per residue, no header)">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
+          <div class="ph">
+            <label class="fl" for="seq">Receptor</label>
+            <span class="acts">
+              <input class="vh" type="file" id="seqFile" accept=".fasta,.fa,.faa,.fas,.seq,.txt"><label class="tbtn" for="seqFile"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M4 15v5h16v-5"/></svg>Open FASTA</label>
+              <input class="vh" type="file" id="a3mFile" accept=".a3m,.txt"><label class="tbtn msa" id="a3mBtn" for="a3mFile"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 10h16M4 14h11M4 18h7"/></svg>MSA</label>
+            </span>
+          </div>
+          <textarea class="ta seqta" id="seq" spellcheck="false" placeholder="Paste a protein sequence or a FASTA record"></textarea>
           <div class="pf">
-            <span class="opt">Optional</span>
-            <span class="fl">MSA, A3M file</span>
-            <input type="file" id="a3mFile" accept=".a3m,.fasta,.fa,.txt" aria-label="MSA, A3M file">
-            <button type="button" class="tbtn txt" id="a3mClear" hidden>Remove</button>
-            <span class="info" id="a3mInfo">none: single sequence</span>
+            <span class="info" id="seqInfo"></span>
+            <span class="msast"><span class="info" id="a3mInfo">No MSA: scored as a single sequence</span><button type="button" class="tbtn txt" id="a3mClear" hidden>Remove</button></span>
           </div>
         </div>
+        <div class="ligs">
         <div class="ipanel">
-          <div class="ph"><label class="fl" for="ligands">Ligands</label><span class="info" id="ligInfo"></span></div>
-          <textarea class="ta" id="ligands" spellcheck="false" placeholder="One SMILES per line, or id,SMILES">id,smiles
-glycine,NCC(=O)O
-phenol,Oc1ccccc1
-acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
-          <div class="pf">
-            <input type="file" id="ligFile" accept=".csv,.tsv,.txt,.smi" aria-label="Ligand file">
-            <span class="fmt">One SMILES per line, <code>id,SMILES</code>, or a CSV/TSV with a <code>smiles</code> column (the id column is optional).</span>
+          <div class="ph">
+            <label class="fl" for="ligands">Ligands</label>
+            <span class="acts">
+              <input class="vh" type="file" id="ligFile" accept=".csv,.tsv,.txt,.smi"><label class="tbtn" for="ligFile"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M4 15v5h16v-5"/></svg>Open file</label>
+            </span>
           </div>
+          <textarea class="ta" id="ligands" spellcheck="false" placeholder="One SMILES per line, or id,SMILES"></textarea>
+          <div class="pf">
+            <span class="info" id="ligInfo"></span>
+            <span class="fmt">SMILES per line, <code>id,SMILES</code>, or CSV/TSV</span>
+          </div>
+        </div>
+        <div class="ipanel ligview">
+          <div class="ph">
+            <span class="fl">Parsed ligands</span>
+            <span class="info" id="ligSum"></span>
+          </div>
+          <div class="lt">
+            <table id="ligTable">
+              <thead><tr><th class="n">#</th><th>ID</th><th>SMILES</th><th class="n">Atoms</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <p class="lt-empty" id="ligEmpty" hidden></p>
+          </div>
+        </div>
         </div>
       </div>
     </section>
@@ -93,16 +215,16 @@ acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
       <div class="shead"><span class="num">2</span><h2 id="s2">Settings</h2><span class="hint">The defaults are GenFree's</span></div>
       <div class="settings">
         <div>
-          <label class="fl" for="recycles">Recycling</label>
+          <div class="lh"><label class="fl" for="recycles">Recycling</label><button type="button" class="help" aria-label="About recycling" data-tip="Extra passes through the trunk before scoring. GenFree's default is 0; each extra pass adds about one more trunk run of time.">?</button></div>
           <div class="rng"><input type="range" id="recycles" min="0" max="5" step="1" value="0"><output id="recyclesOut" for="recycles">0</output></div>
           <div class="ticks" aria-hidden="true"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>
         </div>
         <div>
-          <label class="fl" for="seed">Seed</label>
+          <div class="lh"><label class="fl" for="seed">Seed</label><button type="button" class="help" aria-label="About the seed" data-tip="Fixes the random choices, such as which MSA rows are sampled, so the same inputs give the same scores again.">?</button></div>
           <input class="inp mono" type="number" id="seed" value="0" step="1">
         </div>
         <div>
-          <label class="fl" for="conformer">Ligand conformer</label>
+          <div class="lh"><label class="fl" for="conformer">Ligand conformer</label><button type="button" class="help" aria-label="About the ligand conformer" data-tip="How the ligand reference positions are made. skip, GenFree's default, sets them to zero; etkdg and rdkit_2d compute them in the browser.">?</button></div>
           <select class="sel" id="conformer">
             <option value="skip">skip (GenFree default)</option>
             <option value="etkdg">etkdg</option>
@@ -161,11 +283,18 @@ acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
         </div>
       </details>
 
+      <p class="runnote" id="runnote">Runs on your GPU in Chrome or Edge; nothing is uploaded. The trunk weights (about 380 MB, from Hugging Face) download once, with the button or at the first Run, and are then read from the browser cache. <kbd>Ctrl</kbd>/<kbd>&#8984;</kbd> + <kbd>Enter</kbd> runs.</p>
+
       <div class="runbar on-dark">
         <div class="rb">
-          <button type="button" class="btn pri" id="run">Run</button>
-          <button type="button" class="btn stop" id="stop" disabled>Stop</button>
+          <div class="rb-main">
+            <button type="button" class="btn wl" id="loadW"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M4 20h16"/></svg><span id="loadWLabel">Download weights</span></button>
+            <button type="button" class="btn pri" id="run" title="Ctrl or Cmd + Enter">Run</button>
+            <button type="button" class="btn stop" id="stop" disabled>Stop</button>
+          </div>
+          <span class="eta" id="eta"></span>
           <span id="status" role="status">idle</span>
+          <button type="button" class="tbtn dl" id="dlAll" disabled title="scores.csv, run.yaml and the MSA file in one zip"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M4 20h16"/></svg>All</button>
         </div>
         <div id="bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div></div></div>
       </div>
@@ -268,14 +397,31 @@ const WEIGHT_URLS = {
   own: "../packs/boltz2-trunk-own/boltz2-trunk-own.json",
 };
 
-let a3mText = "";
+let a3mText = "", a3mName = "";
+let adapterInfo = null;
+let lastRun = null;   // settings, environment and timing of the latest run, for run.yaml
 let chain = null, chainKey = "", device = null;
 let rows = [];          // {index, lig, result?, error?, ms}
 let stopRequested = false;
+let running = false;
+let gpuOk = true;       // false when this browser has no usable WebGPU: Run and Download weights stay off
+let msPerToken2 = null; // measured scoring time per ligand / tokens^2 from the latest run, for the estimate
 let refStructure = null, refInfo = null;
 let manual = false;     // true once the residue list was edited by hand: the reference's choice is then not re-applied automatically
 
-const sequenceText = () => $("seq").value.replace(/\s+/g, "");
+// The receptor box takes a bare sequence or FASTA; with several records the first one is used.
+function parseReceptor(text) {
+  const lines = text.split(/\r?\n/);
+  if (!lines.some((l) => l.trim().startsWith(">"))) return { seq: text.replace(/\s+/g, "").toUpperCase(), name: "", records: 0 };
+  let name = "", records = 0, seq = "";
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith(">")) { records += 1; if (records === 1) name = t.slice(1).trim().split(/\s+/)[0] ?? ""; continue; }
+    if (records === 1) seq += t;
+  }
+  return { seq: seq.replace(/\s+/g, "").replace(/\*$/, "").toUpperCase(), name, records };
+}
+const sequenceText = () => parseReceptor($("seq").value).seq;
 
 function parseIndices(text, lenient = false) {
   if (!text.trim()) return undefined;
@@ -301,15 +447,60 @@ function formatIndices(list) {
 // ---- sequence, MSA, ligands --------------------------------------------------------------------------------------------------
 function updateSeqInfo() {
   const n = sequenceText().length;
+  if (n === 0) { $("seqInfo").textContent = ""; scheduleFitCheck(); return; }
   const cropped = parseIndices($("crop").value, true);
   const used = cropped ? cropped.length : n;
-  $("seqInfo").textContent = `${n} residues${cropped ? `, keeping ${used}` : ""}${used > MAX_RECEPTOR ? " - crop to 200 or fewer" : ""}`;
-  $("seqInfo").className = used > MAX_RECEPTOR ? "info bad" : "info ok";
+  const { seq, name, records } = parseReceptor($("seq").value);
+  const odd = seq.match(/[^A-Z]/);
+  const parts = [];
+  if (name) parts.push(name);
+  parts.push(`${n} residues${cropped ? `, keeping ${used}` : ""}`);
+  if (records > 1) parts.push(`first of ${records} FASTA records`);
+  if (odd) parts.push(`unexpected character ${JSON.stringify(odd[0])}`);
+  else if (used > MAX_RECEPTOR) parts.push("crop to 200 or fewer");
+  $("seqInfo").textContent = parts.join(" · ");
+  $("seqInfo").className = odd || used > MAX_RECEPTOR ? "info bad" : "info ok";
   scheduleFitCheck();
 }
 function updateLigInfo() {
-  try { $("ligInfo").textContent = `${parseLigandText($("ligands").value).length} ligands`; $("ligInfo").className = "info ok"; }
+  try { const n = parseLigandText($("ligands").value).length; $("ligInfo").textContent = n ? `${n} ligand${n === 1 ? "" : "s"}` : ""; $("ligInfo").className = "info ok"; }
   catch (e) { $("ligInfo").textContent = String(e.message); $("ligInfo").className = "info bad"; }
+  scheduleLigTable();
+}
+// The parsed list beside the ligand box: id, SMILES and heavy-atom count, checked against the 128-token ligand limit.
+const LIG_TABLE_ROWS = 300;
+let ligTableTimer = 0;
+function scheduleLigTable() { clearTimeout(ligTableTimer); ligTableTimer = setTimeout(renderLigTable, 200); }
+function renderLigTable() {
+  const body = $("ligTable").tBodies[0], empty = $("ligEmpty");
+  let ligands;
+  try { ligands = parseLigandText($("ligands").value); }
+  catch (e) { body.replaceChildren(); empty.hidden = false; empty.className = "lt-empty bad"; empty.textContent = String(e.message); $("ligSum").textContent = ""; return; }
+  if (ligands.length === 0) { body.replaceChildren(); empty.hidden = false; empty.className = "lt-empty"; empty.textContent = "Ligands appear here as you type."; $("ligSum").textContent = ""; return; }
+  empty.hidden = true;
+  let over = 0, failed = 0;
+  const rowsOut = ligands.slice(0, LIG_TABLE_ROWS).map((lig, i) => {
+    const tr = document.createElement("tr");
+    const atoms = ligandTokens(lig.value);
+    const cells = [String(i + 1), lig.id, lig.value];
+    cells.forEach((text, k) => { const td = document.createElement("td"); td.textContent = text; td.className = ["n rk", "id", "smi"][k]; if (k === 2) td.title = text; tr.append(td); });
+    const td = document.createElement("td"); td.className = "n";
+    if (typeof atoms === "string") { failed += 1; tr.className = "bad"; td.textContent = "error"; td.title = atoms; }
+    else { td.textContent = String(atoms); if (atoms > LIMITS.ligandTokens) { over += 1; tr.className = "bad"; td.title = `over the ${LIMITS.ligandTokens}-atom ligand limit`; } }
+    tr.append(td);
+    return tr;
+  });
+  if (ligands.length > LIG_TABLE_ROWS) {
+    const tr = document.createElement("tr"); tr.className = "more";
+    const td = document.createElement("td"); td.colSpan = 4; td.textContent = `and ${ligands.length - LIG_TABLE_ROWS} more`;
+    tr.append(td); rowsOut.push(tr);
+  }
+  body.replaceChildren(...rowsOut);
+  const notes = [];
+  if (over) notes.push(`${over} over ${LIMITS.ligandTokens} atoms`);
+  if (failed) notes.push(`${failed} not parsed`);
+  $("ligSum").textContent = notes.length ? notes.join(" · ") : "all within limits";
+  $("ligSum").className = notes.length ? "info bad" : "info ok";
 }
 $("seq").addEventListener("input", () => { updateSeqInfo(); onInputsChanged(); });
 $("ligands").addEventListener("input", () => { updateLigInfo(); onInputsChanged(); scheduleFitCheck(); });
@@ -318,11 +509,24 @@ $("recycles").addEventListener("input", () => { $("recyclesOut").textContent = $
 $("a3mFile").addEventListener("change", async () => {
   const file = $("a3mFile").files[0];
   if (!file) return;
-  a3mText = await file.text();
-  $("a3mInfo").textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB`;
+  a3mText = await file.text(); a3mName = file.name;
+  const size = file.size < 1024 ? `${file.size} B` : `${(file.size / 1024).toFixed(0)} KB`;
+  $("a3mInfo").textContent = `MSA: ${file.name} · ${size}`;
   $("a3mClear").hidden = false;
+  $("a3mBtn").classList.add("on");
 });
-$("a3mClear").addEventListener("click", () => { a3mText = ""; $("a3mFile").value = ""; $("a3mInfo").textContent = "none: single sequence"; $("a3mClear").hidden = true; });
+$("a3mClear").addEventListener("click", () => {
+  a3mText = ""; a3mName = ""; $("a3mFile").value = "";
+  $("a3mInfo").textContent = "No MSA: scored as a single sequence";
+  $("a3mClear").hidden = true; $("a3mBtn").classList.remove("on");
+});
+$("seqFile").addEventListener("change", async () => {
+  const file = $("seqFile").files[0];
+  if (!file) return;
+  $("seq").value = await file.text();
+  $("seqFile").value = "";
+  updateSeqInfo(); onInputsChanged();
+});
 $("ligFile").addEventListener("change", async () => {
   const file = $("ligFile").files[0];
   if (!file) return;
@@ -528,16 +732,98 @@ $("thProb").addEventListener("click", () => { $("sort").value = "p-desc"; render
 $("thValue").addEventListener("click", () => { $("sort").value = $("sort").value === "value-desc" ? "value-asc" : "value-desc"; render(); });
 $("sort").addEventListener("change", render);
 
-$("download").addEventListener("click", () => {
-  const out = rows.filter((r) => r.result).map((r) => scoreRow(r.lig, r.index, r.result));
-  const failed = rows.filter((r) => r.error).map((r) => ({ record_id: `${String(r.index + 1).padStart(6, "0")}_${r.lig.id}`, ligand_id: r.lig.id, ligand_kind: r.lig.kind, ligand_value: r.lig.value, error: r.error }));
-  const blob = new Blob([scoresCsv([...out, ...failed], ["error"])], { type: "text/csv" });
+function saveFile(name, content, type) {
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "scores.csv";
+  a.href = URL.createObjectURL(content instanceof Blob ? content : new Blob([content], { type }));
+  a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+function scoresText() {
+  const out = rows.filter((r) => r.result).map((r) => scoreRow(r.lig, r.index, r.result));
+  const failed = rows.filter((r) => r.error).map((r) => ({ record_id: `${String(r.index + 1).padStart(6, "0")}_${r.lig.id}`, ligand_id: r.lig.id, ligand_kind: r.lig.kind, ligand_value: r.lig.value, error: r.error }));
+  return scoresCsv([...out, ...failed], ["error"]);
+}
+function downloadScores() { saveFile("scores.csv", scoresText(), "text/csv"); }
+$("download").addEventListener("click", downloadScores);
+$("dlAll").addEventListener("click", () => {
+  if (!lastRun) return;
+  const files = [["scores.csv", scoresText()], ["run.yaml", runYaml(lastRun)]];
+  if (lastRun.a3mName && lastRun.a3mText) files.push([lastRun.a3mName, lastRun.a3mText]);
+  const stamp = lastRun.started.replace(/[-:]/g, "").replace(/\..*$/, "").replace("T", "-");
+  saveFile(`boltz-genfree-webgpu-${stamp}.zip`, zipStore(files), "application/zip");
 });
+
+// A store-only zip (no compression): enough for a few text files, no library needed.
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+function crc32(bytes) { let c = 0xffffffff; for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+function zipStore(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  const d = new Date(), dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  let offset = 0;
+  for (const [name, text] of files) {
+    const nameBytes = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const local = new DataView(new ArrayBuffer(30));
+    [[0, 0x04034b50, 4], [4, 20, 2], [6, 0x0800, 2], [8, 0, 2], [10, dosTime, 2], [12, dosDate, 2], [14, crc, 4], [18, data.length, 4], [22, data.length, 4], [26, nameBytes.length, 2], [28, 0, 2]]
+      .forEach(([at, v, n]) => (n === 4 ? local.setUint32(at, v, true) : local.setUint16(at, v, true)));
+    const head = new DataView(new ArrayBuffer(46));
+    [[0, 0x02014b50, 4], [4, 20, 2], [6, 20, 2], [8, 0x0800, 2], [10, 0, 2], [12, dosTime, 2], [14, dosDate, 2], [16, crc, 4], [20, data.length, 4], [24, data.length, 4], [28, nameBytes.length, 2], [30, 0, 2], [32, 0, 2], [34, 0, 2], [36, 0, 2], [38, 0, 4], [42, offset, 4]]
+      .forEach(([at, v, n]) => (n === 4 ? head.setUint32(at, v, true) : head.setUint16(at, v, true)));
+    parts.push(local, nameBytes, data); central.push(head, nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+  const size = central.reduce((n, p) => n + p.byteLength, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  [[0, 0x06054b50, 4], [4, 0, 2], [6, 0, 2], [8, files.length, 2], [10, files.length, 2], [12, size, 4], [16, offset, 4], [20, 0, 2]]
+    .forEach(([at, v, n]) => (n === 4 ? end.setUint32(at, v, true) : end.setUint16(at, v, true)));
+  return new Blob([...parts, ...central, end]);
+}
+
+// run.yaml: the run as a boltz-genfree screen config (rerun it with `boltz-genfree screen run.yaml`),
+// with what happened in this browser as YAML comments, so the file stays a valid config.
+const yq = (v) => `'${String(v).replace(/'/g, "''")}'`;
+function runYaml(run) {
+  const L = [];
+  const c = (text = "") => L.push(text ? `# ${text}` : "#");
+  const fmt = (x, d) => (typeof x === "number" && Number.isFinite(x) ? x.toFixed(d) : "");
+  c("Boltz-GenFree WebGPU tool: one run in the browser.");
+  c("The settings below are a boltz-genfree screen config: `boltz-genfree screen run.yaml` repeats this screen in Python.");
+  c("Scores from the browser agree with the Python screen to within its seed-to-seed spread, not exactly.");
+  c();
+  c(`started   ${run.started}`);
+  c(`finished  ${run.finished ?? "not finished"}${run.stopped ? " (stopped)" : ""}`);
+  c(`ligands   ${run.done} of ${run.ligands.length} scored${run.failed ? `, ${run.failed} failed` : ""}${run.seconds != null ? ` in ${run.seconds} s` : ""}`);
+  c(`browser   ${navigator.userAgent}`);
+  if (run.adapter) c(`gpu       ${[run.adapter.vendor, run.adapter.architecture, run.adapter.description].filter(Boolean).join(" / ") || "unknown"}`);
+  c(`weights   trunk ${run.weights.source}: ${run.weights.trunk}`);
+  c(`          affinity: ${run.weights.affinity}`);
+  if (run.a3mName) c(`msa       ${run.a3mName} (saved next to this file by the All button)`);
+  if (run.receptorIndices) {
+    c(`crop      receptor residues kept in the browser (0-based): ${formatIndices(run.receptorIndices)}`);
+    c("          the Python screen crops with target.crop.reference instead; add it there to crop the same way.");
+  }
+  L.push("");
+  L.push("version: 1");
+  L.push("target:");
+  L.push(`  sequence: ${run.sequence}`);
+  L.push(`  msa: ${run.a3mName ? yq(`./${run.a3mName}`) : "empty"}`);
+  L.push("ligands:");
+  L.push("  smiles:");
+  for (const lig of run.ligands) L.push(`    - {id: ${yq(lig.id)}, smiles: ${yq(lig.value)}}`);
+  L.push("output_dir: ./screen-output");
+  L.push("options:");
+  L.push(`  seed: ${run.options.seed}`);
+  L.push(`  affinity_recycling_steps: ${run.options.recycles}`);
+  L.push(`  ligand_reference_conformer: ${run.conformer}`);
+  L.push("");
+  c("results in the browser (also in scores.csv)");
+  c("rank  id  value  P(binder)  tokens  ms");
+  const scored = rows.filter((r) => r.result).sort((a, b) => b.result.probability - a.result.probability);
+  scored.forEach((r, i) => c(`${i + 1}  ${r.lig.id}  ${fmt(r.result.value, 4)}  ${fmt(r.result.probability, 3)}  ${r.result.tokens ?? ""}  ${Math.round(r.ms ?? 0)}`));
+  for (const r of rows.filter((x) => x.error)) c(`-  ${r.lig.id}  error: ${r.error}`);
+  return `${L.join("\n")}\n`;
+}
 
 $("stop").addEventListener("click", () => { stopRequested = true; $("stop").disabled = true; status("stopping after the current ligand..."); });
 
@@ -547,15 +833,19 @@ $("weightsSource").addEventListener("change", () => {
   $("advSummary").textContent = $("weightsSource").value === "localfold" ? "LocalFold int5 \u00b7 default" : "own float32 pack";
 });
 
+function weightsKey() {
+  const source = $("weightsSource").value;
+  return `${source}|${new URL($("weights").value, location.href).href}|${new URL($("affinity").value, location.href).href}`;
+}
 async function ensureChain() {
   const source = $("weightsSource").value;
   const trunkUrl = new URL($("weights").value, location.href).href;
   const affinityPack = new URL($("affinity").value, location.href).href;
-  const key = `${source}|${trunkUrl}|${affinityPack}`;
+  const key = weightsKey();
   if (chain && chainKey === key) return chain;
   if (chain) { await chain.destroy(); chain = null; }
   if (!navigator.gpu) throw new Error("this browser has no WebGPU");
-  if (!device) device = await deviceFromAdapter(await navigator.gpu.requestAdapter());
+  if (!device) { const adapter = await navigator.gpu.requestAdapter(); adapterInfo = adapter?.info ?? null; device = await deviceFromAdapter(adapter); }
   status("opening weights...");
   const mb = (n) => (n / 1e6).toFixed(0);
   const onProgress = (p) => { status(`downloading weights ${mb(p.loadedBytes)} of ${mb(p.totalBytes)} MB${p.fromCache ? " (cached)" : ""}`); if (p.totalBytes) progress(p.loadedBytes / p.totalBytes); };
@@ -566,9 +856,38 @@ async function ensureChain() {
   return chain;
 }
 
+// "Download weights" does what Run does first (download, cache, upload to the GPU); Run then reuses it.
+let loadingChain = null;
+function loadWeights() {
+  if (!loadingChain) loadingChain = ensureChain().finally(() => { loadingChain = null; updateWeightsButton(); });
+  return loadingChain;
+}
+const ICON_DOWNLOAD = "M12 4v11M7 10l5 5 5-5M4 20h16", ICON_READY = "M5 12l5 5 9-10";
+async function updateWeightsButton() {
+  const btn = $("loadW"), label = $("loadWLabel");
+  btn.querySelector("path").setAttribute("d", chain && chainKey === weightsKey() && !loadingChain ? ICON_READY : ICON_DOWNLOAD);
+  if (loadingChain) { btn.disabled = true; btn.classList.remove("ready"); label.textContent = "Downloading..."; return; }
+  if (chain && chainKey === weightsKey()) { btn.disabled = true; btn.classList.add("ready"); label.textContent = "Weights ready"; return; }
+  btn.disabled = !gpuOk || running; btn.classList.remove("ready");
+  let cached = false;
+  if ($("weightsSource").value === "localfold" && "caches" in window) {
+    try { cached = (await (await caches.open("localfold-int5")).keys()).length > 0; } catch { cached = false; }
+  }
+  label.textContent = cached ? "Load weights (cached)" : "Download weights";
+}
+$("loadW").addEventListener("click", async () => {
+  $("run").disabled = true;
+  const pending = loadWeights(); updateWeightsButton();
+  try { await pending; progress(0); status("weights ready: press Run"); }
+  catch (e) { status(String(e?.message ?? e), true); }
+  finally { $("run").disabled = !gpuOk; updateWeightsButton(); updateEta(); }
+});
+["weightsSource", "weights", "affinity"].forEach((id) => $(id).addEventListener("change", () => updateWeightsButton()));
+
 $("run").addEventListener("click", async () => {
-  $("run").disabled = true; $("download").disabled = true; $("stop").disabled = false;
-  stopRequested = false;
+  if (!gpuOk) return;
+  $("run").disabled = true; $("loadW").disabled = true; $("download").disabled = true; $("dlAll").disabled = true; $("stop").disabled = false;
+  stopRequested = false; running = true; updateEta();
   try {
     const sequence = sequenceText();
     if (!sequence) throw new Error("enter a protein sequence");
@@ -580,8 +899,15 @@ $("run").addEventListener("click", async () => {
     const options = { recycles: Number($("recycles").value), seed: Number($("seed").value) };
     const conformer = $("conformer").value;
     rows = ligands.map((lig, index) => ({ index, lig }));
+    lastRun = {
+      started: new Date().toISOString(), finished: null, stopped: false, done: 0, failed: 0, seconds: null,
+      sequence, a3mName: a3mText.trim() ? a3mName : "", a3mText: a3mText.trim() ? a3mText : "", ligands, options, conformer, receptorIndices,
+      weights: { source: $("weightsSource").value, trunk: new URL($("weights").value, location.href).href, affinity: new URL($("affinity").value, location.href).href },
+      adapter: null,
+    };
     render(); progress(0);
-    const c = await ensureChain();
+    const pending = loadWeights(); updateWeightsButton();
+    const c = await pending;
     const started = performance.now();
     let done = 0;
     for (const r of rows) {
@@ -598,24 +924,105 @@ $("run").addEventListener("click", async () => {
       }
       r.running = false;
       r.ms = performance.now() - t0;
+      if (r.result?.tokens) { const k = r.ms / (r.result.tokens * r.result.tokens); msPerToken2 = msPerToken2 == null ? k : 0.7 * msPerToken2 + 0.3 * k; }
       done += 1;
       progress(done / rows.length);
       render();
-      $("download").disabled = false;
+      $("download").disabled = false; $("dlAll").disabled = false;
+      lastRun.done = done;
     }
     const secs = Math.round((performance.now() - started) / 1000);
     const failed = rows.filter((r) => r.error).length;
+    Object.assign(lastRun, { finished: new Date().toISOString(), stopped: stopRequested, done, failed, seconds: secs, adapter: adapterInfo });
     status(`${stopRequested ? "stopped" : "done"}: ${done} of ${rows.length} ligands in ${secs} s${failed ? `, ${failed} failed` : ""}`, failed > 0);
   } catch (e) {
     status(String(e?.message ?? e), true);
   } finally {
-    $("run").disabled = false; $("stop").disabled = true;
+    running = false; updateEta();
+    $("run").disabled = !gpuOk; $("stop").disabled = true;
     $("download").disabled = !rows.some((r) => r.result || r.error);
+    $("dlAll").disabled = $("download").disabled;
+    if (lastRun && !lastRun.adapter) lastRun.adapter = adapterInfo;
+    updateWeightsButton();
   }
 });
 
 updateSeqInfo();
+// ---- WebGPU check on load ------------------------------------------------------------------------------------------------------
+function gpuMissing(text) {
+  gpuOk = false;
+  $("gpuWarnText").textContent = text;
+  $("gpuWarn").hidden = false;
+  $("run").disabled = true; $("loadW").disabled = true;
+  status("WebGPU is not available in this browser", true);
+}
+async function checkGpu() {
+  if (!navigator.gpu) { gpuMissing("This browser has no WebGPU, so the tool cannot run here. Use a recent Chrome or Edge on a desktop or laptop."); return; }
+  try {
+    if (!(await navigator.gpu.requestAdapter())) gpuMissing("WebGPU is present but no GPU adapter is available. Check that hardware acceleration is on, or try Chrome or Edge.");
+  } catch (e) { gpuMissing(`WebGPU could not start: ${e?.message ?? e}`); }
+}
+
+// ---- time estimate -----------------------------------------------------------------------------------------------------------
+// About 10 s per ligand at 124 tokens on an Apple M4 (int5 weights), growing with tokens squared; replaced by this
+// browser's own rate once a ligand has been scored.
+const MS_PER_TOKEN2_DEFAULT = 10000 / (124 * 124);
+function fmtDuration(sec) {
+  if (sec < 60) return `${Math.max(5, Math.round(sec / 5) * 5)} s`;
+  if (sec < 3600) return `${Math.round(sec / 60)} min`;
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+let etaTimer = 0;
+function updateEta() { clearTimeout(etaTimer); etaTimer = setTimeout(renderEta, 150); }
+async function renderEta() {
+  const el = $("eta");
+  if (running || !gpuOk) { el.textContent = ""; return; }
+  let ligands;
+  try { ligands = parseLigandText($("ligands").value); } catch { el.textContent = ""; return; }
+  const seq = sequenceText();
+  if (!seq || ligands.length === 0) { el.textContent = ""; return; }
+  const receptor = parseIndices($("crop").value, true)?.length ?? seq.length;
+  const recycles = Number($("recycles").value);
+  const k = msPerToken2 ?? MS_PER_TOKEN2_DEFAULT;
+  let ms = 0;
+  for (const lig of ligands) {
+    const atoms = ligandTokens(lig.value);
+    const t = receptor + (typeof atoms === "number" ? atoms : 0);
+    ms += k * t * t * (1 + recycles);
+  }
+  let text = `about ${fmtDuration(ms / 1000)} for ${ligands.length} ligand${ligands.length === 1 ? "" : "s"}`;
+  if (!(chain && chainKey === weightsKey()) && $("weightsSource").value === "localfold") {
+    let cached = false;
+    try { cached = (await (await caches.open("localfold-int5")).keys()).length > 0; } catch { cached = false; }
+    if (!cached) text += " + 380 MB download";
+  }
+  el.textContent = text;
+  el.title = msPerToken2 == null ? "Estimate from an Apple M4; your GPU may be faster or slower." : "Estimate from this browser's last run.";
+}
+["seq", "ligands", "crop", "recycles"].forEach((id) => $(id).addEventListener("input", updateEta));
+["weightsSource", "weights", "affinity"].forEach((id) => $(id).addEventListener("change", updateEta));
+
+// ---- leaving during a run --------------------------------------------------------------------------------------------------
+window.addEventListener("beforeunload", (e) => { if (running) { e.preventDefault(); e.returnValue = ""; } });
+
+// ---- Ctrl/Cmd + Enter runs -----------------------------------------------------------------------------------------------------
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("run").disabled) { e.preventDefault(); $("run").click(); }
+});
+
+// ---- example inputs ------------------------------------------------------------------------------------------------------------
+const EXAMPLE_SEQ = ">example receptor\nQLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG";
+const EXAMPLE_LIGANDS = "id,smiles\nglycine,NCC(=O)O\nphenol,Oc1ccccc1\nacetaminophen,CC(=O)Nc1ccc(O)cc1";
+$("example").addEventListener("click", () => {
+  $("seq").value = EXAMPLE_SEQ; $("ligands").value = EXAMPLE_LIGANDS;
+  updateSeqInfo(); updateLigInfo(); onInputsChanged(); scheduleFitCheck(); updateEta();
+});
+
 updateLigInfo();
+renderLigTable();
+updateWeightsButton();
+checkGpu().then(() => { updateWeightsButton(); updateEta(); });
 renderStrip();
 render();
 fitCheck();

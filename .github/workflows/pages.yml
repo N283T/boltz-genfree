@@ -6,6 +6,7 @@ on:
     paths:
       - "docs/site/**"
       - "docs/*.md"
+      - "docs/guide/**"
       - "README.md"
       - "webgpu/src/**"
       - "webgpu/web/**"

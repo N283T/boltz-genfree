@@ -405,14 +405,16 @@ def chrome_head(title: str, description: str) -> str:
 <img src="../logo-on-dark.svg" alt="Boltz-GenFree home"></a>
     <nav class="site-nav" aria-label="Site">
       <ol>
-        <li><a href="../index.html"><span class="nn">01</span>Home</a></li>
+        <li><a href="../index.html">Home</a></li>
         <li><a href="index.html" aria-current="page">\
-<span class="nn">02</span>Docs</a></li>
+Docs</a></li>
         <li><a href="../how-it-works.html">\
-<span class="nn">03</span>How it works</a></li>
-        <li><a href="../results.html"><span class="nn">04</span>Results</a></li>
+How it works</a></li>
+        <li><a href="../results.html">Results</a></li>
         <li><a class="wgpu" href="../webgpu/web/screen.html">\
-<span class="nn">05</span>WebGPU</a></li>
+WebGPU</a></li>
+        <li class="gh-li pp-li"><a class="gh pp" \
+href="https://doi.org/10.26434/chemrxiv.15012606/v1">Preprint</a></li>
         <li class="gh-li"><a class="gh" href="{GITHUB}">GitHub</a></li>
       </ol>
     </nav>

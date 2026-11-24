@@ -599,7 +599,9 @@ header.bar .site-nav a[aria-current="page"]::after{background:var(--accent)}
 header.bar .site-nav a.gh{border-right:1px solid var(--t-line);font:600 13px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--t-mute)}
 header.bar .site-nav a.gh::before{content:"";width:9px;height:9px;background:var(--hot)}
 header.bar .site-nav a:focus-visible{outline:3px solid var(--hot);outline-offset:-3px}
-header.bar .site-nav a.wgpu .nn::after{content:"";display:inline-block;width:6px;height:6px;margin-left:6px;vertical-align:1px;background:var(--hot)}
+header.bar .site-nav a.wgpu{color:var(--hot);background:color-mix(in srgb,var(--accent) 22%,var(--tile))}
+header.bar .site-nav a.wgpu:hover,header.bar .site-nav a.wgpu[aria-current="page"]{color:#fff;background:color-mix(in srgb,var(--accent) 45%,var(--tile))}
+header.bar .site-nav a.pp{border-right:0}
 @media (min-width:760px) and (max-width:1023px){header.bar .site-nav a{padding:0 10px;gap:6px;white-space:nowrap}header.bar .wrap{gap:12px}}
 @media (min-width:760px) and (max-width:899px){header.bar .site-nav .gh-li{display:none}}
 @media (max-width:759px){
@@ -674,11 +676,12 @@ footer.foot .rule{height:6px;background:linear-gradient(90deg,var(--tile) 0 70%,
     <a class="brand" href="index.html"><img src="logo-on-dark.svg" alt="Boltz-GenFree home"></a>
     <nav class="site-nav" aria-label="Site">
       <ol>
-        <li><a href="index.html"><span class="nn">01</span>Home</a></li>
-        <li><a href="docs/index.html"><span class="nn">02</span>Docs</a></li>
-        <li><a href="how-it-works.html" aria-current="page"><span class="nn">03</span>How it works</a></li>
-        <li><a href="results.html"><span class="nn">04</span>Results</a></li>
-        <li><a class="wgpu" href="webgpu/web/screen.html"><span class="nn">05</span>WebGPU</a></li>
+        <li><a href="index.html">Home</a></li>
+        <li><a href="docs/index.html">Docs</a></li>
+        <li><a href="how-it-works.html" aria-current="page">How it works</a></li>
+        <li><a href="results.html">Results</a></li>
+        <li><a class="wgpu" href="webgpu/web/screen.html">WebGPU</a></li>
+        <li class="gh-li pp-li"><a class="gh pp" href="https://doi.org/10.26434/chemrxiv.15012606/v1">Preprint</a></li>
         <li class="gh-li"><a class="gh" href="https://github.com/N283T/boltz-genfree">GitHub</a></li>
       </ol>
     </nav>

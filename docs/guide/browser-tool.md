@@ -6,16 +6,23 @@ Score a few ligands in the browser, with no install.
 
 Open the [WebGPU tool](../../webgpu/web/screen.html) in a browser with WebGPU enabled.
 
-1. Paste the receptor sequence. An A3M file is optional; without one the receptor is scored as a single sequence.
-2. Add ligands: one SMILES per line, `id,SMILES` lines, or a CSV/TSV file with a `smiles` column.
-3. Set recycling, seed and the ligand conformer mode if needed.
-4. Press **Run**. Results appear per ligand, sorted by P(binder); **Download scores.csv** saves them with the same columns as `boltz-genfree screen`, plus `error`.
+1. Paste the receptor sequence or a FASTA record, or open a FASTA file. With several records, the first is used.
+2. Optional: press **MSA** to load an A3M file. Without one, the receptor is scored as a single sequence.
+3. Add ligands: one SMILES per line, `id,SMILES` lines, or open a CSV/TSV file with a `smiles` column.
+4. Set recycling, seed and the ligand conformer mode if needed.
+5. Press **Run**. Results appear per ligand, sorted by P(binder); **Download scores.csv** saves them with the same columns as `boltz-genfree screen`, plus `error`.
 
 A ligand that fails, for example one over the size limit, is listed with its error and the
 run continues.
 
-The first run downloads the trunk weights (about 380 MB, from LocalFold's public bundle on
-Hugging Face) and keeps them in the browser cache. Later visits read them from disk.
+**All** in the run bar saves one zip: `scores.csv`, the MSA file if one was used, and
+`run.yaml`, the run as a `boltz-genfree screen` config with a log of the run (date,
+browser, GPU, weights, timings and scores) in comments. Unpack it and run
+`boltz-genfree screen run.yaml` to repeat the screen in Python.
+
+The trunk weights (about 380 MB, from LocalFold's public bundle on Hugging Face) are
+downloaded once and kept in the browser cache; later visits read them from disk. Press
+**Download weights** to fetch them before you run, or let **Run** fetch them first.
 Each ligand then takes about 10 s for a 117-residue receptor on an Apple M4.
 
 ### Receptor crop

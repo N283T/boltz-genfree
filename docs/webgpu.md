@@ -81,8 +81,9 @@ note; write `msa: empty` to say so explicitly), `ligands.sdf`, `affinity_adapter
 cd webgpu && node tools/serve.js && open http://127.0.0.1:4180/web/screen.html
 ```
 
-Sequence and ligands sit side by side (ligands: one SMILES per line, `id,SMILES`, or a CSV/TSV with a `smiles` column).
-The MSA is an optional A3M file (none = single sequence). Below them, one row of settings: recycling (slider, 0-5), seed and
+The receptor and ligand boxes are stacked, each with a file button in its header. The receptor box takes a bare sequence or
+FASTA (the first record is used); the MSA button loads an optional A3M file (none = single sequence). Ligands: one SMILES
+per line, `id,SMILES`, or a CSV/TSV with a `smiles` column. Below them, one row of settings: recycling (slider, 0-5), seed and
 ligand conformer mode. Then the receptor-crop section, Advanced (weights URLs), and Run / Stop with the progress. Results
 appear per ligand in a table sorted by P(binder) (also by value or input order); Download scores.csv sits beside it and writes
 GenFree's columns plus `error`. A ligand that fails (for example over the size limit) is listed with its error and the run
