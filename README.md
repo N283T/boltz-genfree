@@ -60,8 +60,8 @@ boltz-genfree screen screen.yaml                  # run; scores are written to s
 ```
 
 A re-run with the same inputs resumes where it stopped. Ligand sources, options, size
-limits, the optional reference bootstrap and fine-tuned heads are described in
-[docs/usage.md](docs/usage.md) and [docs/finetuning.md](docs/finetuning.md).
+limits, outputs, the optional reference bootstrap and fine-tuned heads are described in
+[docs/guide/configuration.md](docs/guide/configuration.md).
 
 ## Website
 

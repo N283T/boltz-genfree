@@ -9,7 +9,7 @@
     uv run docs/site/build_docs.py --check <outdir>  # verify links of built pages
 
 Pages are served at /docs/<page>.html; shared site files live one level up
-(../site.css, ../logo-*.svg, ../index.html, ../research.html,
+(../site.css, ../logo-*.svg, ../index.html, ../how-it-works.html, ../results.html,
 ../webgpu/web/screen.html).
 The output is deterministic: no timestamps, stable slugs, sorted iteration.
 """
@@ -35,6 +35,8 @@ if TYPE_CHECKING:
 
 REPO = Path(__file__).resolve().parents[2]
 GITHUB = "https://github.com/N283T/boltz-genfree"
+# Published site; Markdown links to it become relative links on the built pages.
+SITE_URL = "https://n283t.github.io/boltz-genfree/"
 BRANCH = "main"
 H2_LEVEL = 2
 CHECK_ARGC = 3
@@ -43,37 +45,39 @@ BUILD_ARGC = 2
 # (output file, source file, sidebar label, page heading override,
 #  take the first paragraph as lede)
 PAGES = [
-    ("index.html", "README.md", "Getting started", "Getting started", True),
-    ("usage.html", "docs/usage.md", "Usage details", None, False),
-    ("finetuning.html", "docs/finetuning.md", "Fine-tuning", None, False),
-    ("webgpu.html", "docs/webgpu.md", "WebGPU chain", None, False),
+    ("index.html", "docs/guide/getting-started.md", "Getting started", None, True),
+    ("configuration.html", "docs/guide/configuration.md", "Configuration", None, True),
+    ("browser-tool.html", "docs/guide/browser-tool.md", "Browser tool", None, True),
 ]
 SIDEBAR = [
-    ("A", "Start", ["index.html"]),
-    ("B", "Guides", ["usage.html", "finetuning.html"]),
-    ("C", "WebGPU", ["webgpu.html"]),
+    ("Start", ["index.html"]),
+    ("Guide", ["configuration.html"]),
+    ("Browser", ["browser-tool.html"]),
 ]
+# 24px line icons (2px square-capped stroke), one per page
+ICONS = {
+    "index.html": '<path d="M5 3l14 9-14 9z"/>',
+    "configuration.html": (
+        '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/>'
+        '<path d="M14 4v4M8 10v4M16 16v4"/>'
+    ),
+    "browser-tool.html": (
+        '<path d="M3 4h18v16H3zM3 9h18"/><path d="M10 12.5v5l4.5-2.5z"/>'
+    ),
+}
 # Pages of the deployed site that docs pages may link to (relative to the site root).
 SITE_FILES = {
     "site.css",
     "logo-on-dark.svg",
     "logo-on-light.svg",
     "index.html",
-    "research.html",
+    "how-it-works.html",
+    "results.html",
     "webgpu/web/screen.html",
 }
-TOOL_HREF = "../webgpu/web/screen.html"
+TOOL_PATH = "webgpu/web/screen.html"
+TOOL_HREF = f"../{TOOL_PATH}"
 SOURCE_TO_PAGE = {src: out for out, src, *_ in PAGES}
-
-# Extra intro markup per page (inserted right after the title block).
-INTROS = {
-    "webgpu.html": (
-        '<div class="call tip"><span class="ct">Tool</span><div class="cb">'
-        f'<p><a href="{TOOL_HREF}">Open the tool</a>: score ligands in your '
-        "browser on WebGPU. "
-        "This page documents how it works and how it was checked.</p></div></div>"
-    )
-}
 
 COPY_SCRIPT = """<script>
 document.querySelectorAll('.code .copy').forEach(function (b) {
@@ -126,6 +130,12 @@ def resolve_repo_path(href_path: str, source: str) -> str:
 
 def rewrite_link(href: str, source: str) -> str:
     """Map a Markdown link target to a generated page, GitHub URL or itself."""
+    if href.startswith(SITE_URL):
+        path, _, frag = href[len(SITE_URL) :].partition("#")
+        if path not in SITE_FILES:
+            warnings.append(f"{source}: link to a page the site does not have: {href}")
+            return href
+        return f"../{path}" + (f"#{frag}" if frag else "")
     parsed = urlparse(href)
     if parsed.scheme or parsed.netloc or href.startswith(("#", "mailto:")):
         return href
@@ -133,6 +143,8 @@ def rewrite_link(href: str, source: str) -> str:
     frag = f"#{parsed.fragment}" if parsed.fragment else ""
     if rel in SOURCE_TO_PAGE:
         return SOURCE_TO_PAGE[rel] + frag
+    if rel == TOOL_PATH:
+        return TOOL_HREF + frag
     return repo_url(rel) + frag
 
 
@@ -337,7 +349,6 @@ class Renderer:
             out.append(t)
             i += 1
         used: set[str] = set()
-        n2 = 0
         for k, t in enumerate(out):
             if t.type != "heading_open":
                 continue
@@ -349,9 +360,6 @@ class Renderer:
                 hid = f"{base}-{c}"
             used.add(hid)
             number = ""
-            if t.tag == "h2":
-                n2 += 1
-                number = str(n2)
             t.meta = {"id": hid, "number": number}
             if t.tag in ("h2", "h3"):
                 self.outline.append((int(t.tag[1]), hid, text_, number))
@@ -400,9 +408,11 @@ def chrome_head(title: str, description: str) -> str:
         <li><a href="../index.html"><span class="nn">01</span>Home</a></li>
         <li><a href="index.html" aria-current="page">\
 <span class="nn">02</span>Docs</a></li>
-        <li><a href="../research.html"><span class="nn">03</span>Research</a></li>
+        <li><a href="../how-it-works.html">\
+<span class="nn">03</span>How it works</a></li>
+        <li><a href="../results.html"><span class="nn">04</span>Results</a></li>
         <li><a class="wgpu" href="../webgpu/web/screen.html">\
-<span class="nn">04</span>WebGPU</a></li>
+<span class="nn">05</span>WebGPU</a></li>
         <li class="gh-li"><a class="gh" href="{GITHUB}">GitHub</a></li>
       </ol>
     </nav>
@@ -427,7 +437,8 @@ def chrome_foot() -> str:
         <ul>
           <li><a href="../index.html">Home</a></li>
           <li><a href="index.html" aria-current="page">Docs</a></li>
-          <li><a href="../research.html">Research</a></li>
+          <li><a href="../how-it-works.html">How it works</a></li>
+          <li><a href="../results.html">Results</a></li>
           <li><a href="../webgpu/web/screen.html">WebGPU</a></li>
         </ul>
       </div>
@@ -443,6 +454,7 @@ def chrome_foot() -> str:
         <h3>Cite</h3>
         <ul>
           <li><a href="https://doi.org/10.26434/chemrxiv.15012606/v1">Preprint</a></li>
+          <li><a href="../results.html#cite">How to cite</a></li>
           <li><a href="https://doi.org/10.5281/zenodo.23949585">Data on Zenodo</a></li>
         </ul>
       </div>
@@ -461,13 +473,19 @@ def sidebar(current: str) -> str:
     """Return the docs menu with the current page marked."""
     labels = {out: label for out, _s, label, _h, _l in PAGES}
     groups = []
-    for letter, name, pages in SIDEBAR:
+    for name, pages in SIDEBAR:
         items = []
         for p in pages:
             cur = ' aria-current="page"' if p == current else ""
-            items.append(f'          <li><a href="{p}"{cur}>{esc(labels[p])}</a></li>')
+            icon = (
+                '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">'
+                f"{ICONS[p]}</svg>"
+            )
+            items.append(
+                f'          <li><a href="{p}"{cur}>{icon}{esc(labels[p])}</a></li>'
+            )
         groups.append(
-            f'      <div class="dgroup">\n        <h4><i>{letter}</i>{esc(name)}</h4>\n'
+            f'      <div class="dgroup">\n        <h4>{esc(name)}</h4>\n'
             "        <ul>\n" + "\n".join(items) + "\n        </ul>\n      </div>"
         )
     return (
@@ -479,19 +497,16 @@ def sidebar(current: str) -> str:
 
 
 def toc(outline: list[tuple[int, str, str, str]]) -> str:
-    """Return the "On this page" list."""
-    items = []
-    for level, hid, text, number in outline:
-        nn = f'<span class="nn">{number}</span>' if number else ""
-        cls = "" if level == H2_LEVEL else ' class="sub"'
-        items.append(f'      <li{cls}><a href="#{esc(hid)}">{nn}{esc(text)}</a></li>')
+    """Return the "On this page" list (section headings only)."""
+    items = [
+        f'      <li><a href="#{esc(hid)}">{esc(text)}</a></li>'
+        for level, hid, text, _number in outline
+        if level == H2_LEVEL
+    ]
     return (
         '<aside class="dtoc" aria-label="On this page">\n'
         '    <span class="lab">On this page</span>\n'
-        "    <ol>\n" + "\n".join(items) + "\n    </ol>\n"
-        '    <div class="side-cta">\n'
-        "      <p>No GPU nearby? Score a few ligands in the browser.</p>\n"
-        f'      <a href="{TOOL_HREF}">WebGPU tool &rarr;</a>\n    </div>\n  </aside>'
+        "    <ol>\n" + "\n".join(items) + "\n    </ol>\n  </aside>"
     )
 
 
@@ -531,28 +546,31 @@ def build(outdir: Path) -> None:
         )
         heading = h1 or title
         desc = plain(lede) if lede else f"{heading}: Boltz-GenFree documentation."
-        lede_html = f'    <p class="lede">{lede}</p>\n' if lede else ""
-        crumb = f'<p class="crumb"><a href="index.html">Docs</a> / {esc(label)}</p>'
         edit = f"{GITHUB}/edit/{BRANCH}/{src}"
+        lede_html = f"\n      <p>{lede}</p>" if lede else ""
+        head = (
+            '<header class="pagehead dhead">\n    <div class="wrap">\n'
+            f'      <p class="crumb">Docs <b>/</b> {esc(label)}</p>\n'
+            f"      <h1>{esc(heading)}</h1>{lede_html}\n"
+            "    </div>\n  </header>"
+        )
         page = (
             chrome_head(heading, desc)
+            + "\n"
+            + '<main id="main">\n'
+            + head
             + '\n<div class="docs">\n  '
             + sidebar(out)
-            + '\n\n  <main id="main" class="darticle">\n    '
-            + crumb
-            + f"\n    <h1>{esc(heading)}</h1>\n"
-            + lede_html
-            + (f"    {INTROS[out]}\n" if out in INTROS else "")
-            + "\n"
+            + '\n\n  <article class="darticle">\n'
             + "\n".join(
                 "    " + ln if ln else ln for ln in body.rstrip("\n").split("\n")
             )
             + "\n\n    "
             + pager(idx)
             + '\n    <p class="edit">Found a mistake? '
-            + f'<a href="{edit}">Edit this page on GitHub</a></p>\n  </main>\n\n  '
+            + f'<a href="{edit}">Edit this page on GitHub</a></p>\n  </article>\n\n  '
             + toc(r.outline)
-            + "\n</div>\n"
+            + "\n</div>\n</main>\n"
             + chrome_foot()
         )
         (outdir / out).write_text(page, encoding="utf-8")
