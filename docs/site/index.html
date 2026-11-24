@@ -20,16 +20,42 @@
 .h-hero h1 em{font-style:normal;color:var(--hot)}
 .h-hero .sub{margin-top:20px;max-width:44ch;font:700 clamp(18px,2.3vw,23px)/1.3 var(--display);color:var(--t-ink2)}
 .h-hero .btns{margin-top:30px}
+.h-hero .hg{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,.85fr);gap:40px 56px;align-items:end}
+/* preprint card: a paper thumbnail + title, offset on a magenta block */
+.h-pub{display:flex;flex-direction:column;gap:1px;background:var(--t-line);border:1px solid var(--t-line);box-shadow:10px 10px 0 var(--accent);margin-right:10px}
+.h-pub a{display:block;background:var(--tile);color:var(--tile-ink);text-decoration:none}
+.h-pub a:hover{background:var(--t-cell)}
+.h-pub a:focus-visible{outline:3px solid var(--hot);outline-offset:-3px}
+.h-pub .main{display:grid;grid-template-columns:78px minmax(0,1fr);gap:18px;padding:18px}
+.h-pub .pg{position:relative;height:100px;background:#fafaf7;border:1px solid var(--t-line);
+  background-image:linear-gradient(var(--accent),var(--accent)),repeating-linear-gradient(#fafaf7 0 7px,#cfcfca 7px 9px);
+  background-size:46px 9px,58px 52px;background-position:9px 12px,9px 34px;background-repeat:no-repeat}
+.h-pub .pg::after{content:"";position:absolute;right:-1px;top:-1px;border-top:16px solid var(--tile);border-left:16px solid #e0e0db}
+.h-pub .kk{display:flex;align-items:center;gap:8px;font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--t-mute)}
+.h-pub .kk::before{content:"";width:8px;height:8px;background:var(--hot)}
+.h-pub b{display:block;margin-top:10px;font:800 18px/1.25 var(--sans)}
+.h-pub .go{display:block;margin-top:10px;overflow-wrap:anywhere;font:600 13px/1.3 var(--mono);color:var(--hot)}
+.h-pub .row{display:flex;align-items:center;gap:12px;padding:11px 18px;font:600 13px/1.3 var(--mono);color:var(--t-ink2)}
+.h-pub .row .ic{width:18px;height:18px;color:var(--t-mute)}
+.h-pub .row span.ar,.h-pub .go span.ar{margin-left:auto}
+.h-pub .row:hover{color:var(--tile-ink)}
 
 /* section head: short label column + content */
 .h-sec{padding:64px 0;border-top:1px solid var(--line-2)}
 .h-sec:first-of-type{border-top:0}
-.h-head{display:flex;align-items:baseline;gap:14px;margin-bottom:24px}
-.h-head .num{flex:0 0 auto;font:700 14px/1 var(--mono);background:var(--tile);color:var(--tile-ink);padding:7px 8px}
+.h-head{display:flex;align-items:center;flex-wrap:wrap;gap:12px 20px;margin-bottom:24px;min-height:44px}
 .h-head h2{font:800 clamp(24px,3.4vw,34px)/1.1 var(--sans);letter-spacing:-.014em}
-.h-head .more{margin-left:auto;font:600 13.5px/1.3 var(--mono);color:var(--ink);text-decoration:none;border-bottom:2px solid var(--line);white-space:nowrap}
-.h-head .more::after{content:" \2192"}
-.h-head .more:hover{color:var(--accent);border-bottom-color:var(--accent)}
+/* destination tag: the page this section leads to */
+.dest{margin-left:auto;display:inline-flex;align-items:stretch;border:1px solid var(--ink);background:var(--panel);color:var(--ink);text-decoration:none;white-space:nowrap}
+.dest .di{display:flex;align-items:center;justify-content:center;width:42px;background:var(--tile);color:var(--tile-ink)}
+.dest .di .ic{width:20px;height:20px}
+.dest b{display:flex;align-items:center;padding:0 12px;font:800 16px/1 var(--sans)}
+.dest span.what{display:flex;align-items:center;padding:0 12px;border-left:1px solid var(--line-2);font:600 12.5px/1 var(--mono);color:var(--ink-3)}
+.dest span.what::after{content:"\2192";margin-left:10px;font:400 17px/1 var(--sans);color:var(--ink-2)}
+.dest{height:42px}
+.dest:hover{border-color:var(--accent)}
+.dest:hover .di{background:var(--accent)}
+.dest:hover span.what,.dest:hover span.what::after{color:var(--accent)}
 
 /* guide: three icon tiles */
 .h-go{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-top:3px solid var(--accent)}
@@ -64,14 +90,18 @@
 .h-kpi .n{margin-top:10px;font:800 clamp(34px,4.6vw,50px)/1 var(--sans);letter-spacing:-.02em;color:var(--accent);white-space:nowrap}
 .h-kpi .t{margin-top:8px;font-size:15.5px;line-height:1.4;color:var(--ink-2)}
 .h-kpi .t b{color:var(--ink)}
-.h-figs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;margin-top:28px}
-.h-fig{margin:0;display:flex;flex-direction:column}
+.h-figs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1px;margin-top:24px;align-items:stretch;background:var(--line);border:1px solid var(--line)}
+.h-fig{margin:0;display:flex;flex-direction:column;background:var(--panel);padding:16px 20px 0;min-width:0}
+@supports (grid-template-rows:subgrid){
+  .h-figs{grid-template-rows:auto 1fr auto}
+  .h-fig{display:grid;grid-row:span 3;grid-template-rows:subgrid;row-gap:0}
+}
 .h-fig .fh{font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding-bottom:10px;border-bottom:2px solid var(--ink)}
-.h-fig figcaption{margin-top:10px;font-size:14.5px;line-height:1.45;color:var(--ink-2)}
+.h-fig figcaption{margin:16px -20px 0;padding:12px 20px 14px;border-top:1px solid var(--line-2);background:var(--soft);font-size:14.5px;line-height:1.45;color:var(--ink-2)}
 .h-fig figcaption b{color:var(--ink)}
 /* figure A: the two-stage screen, as page elements */
-.h-pipe{list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:0}
-.h-pipe li{position:relative;display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);background:var(--panel)}
+.h-pipe{flex:1;justify-content:center;list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:0}
+.h-pipe li{min-height:56px;position:relative;display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);background:var(--panel)}
 .h-pipe li + li{margin-top:14px}
 .h-pipe li + li::before{content:"";position:absolute;left:31px;top:-14px;height:13px;border-left:2px solid var(--ink-3)}
 .h-pipe li + li::after{content:"";position:absolute;left:27px;top:-6px;border-top:6px solid var(--ink-3);border-left:5px solid transparent;border-right:5px solid transparent}
@@ -82,11 +112,11 @@
 .h-pipe .d{background:var(--tile);border-color:var(--tile);color:var(--tile-ink)} .h-pipe .d small{color:var(--t-ink2)}
 .h-pipe .f{border-width:2px;border-color:var(--ink)}
 /* figure B: wall time bars, exact values from the Research article */
-.h-sp{margin-top:16px}
-.h-sp .tg{display:flex;align-items:baseline;gap:10px;margin:14px 0 6px;font:700 13px/1.2 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
-.h-sp .tg:first-child{margin-top:0}
+.h-sp{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;gap:14px;margin-top:16px}
+.h-sp .grp{display:flex;flex-direction:column;gap:2px}
+.h-sp .tg{display:flex;align-items:baseline;gap:10px;margin:0 0 6px;font:700 13px/1.2 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
 .h-sp .tg span{font-weight:400;color:var(--ink-3)}
-.h-sp .r{display:grid;grid-template-columns:76px minmax(0,1fr) 108px;gap:10px;align-items:center;padding:4px 0}
+.h-sp .r{display:grid;grid-template-columns:76px minmax(0,1fr) 108px;gap:10px;align-items:center;padding:6px 0}
 .h-sp .r > b{font:700 14.5px/1.2 var(--sans)}
 .h-sp .tr{position:relative;height:14px;background:var(--soft)}
 .h-sp .tr i{position:absolute;left:0;top:0;bottom:0;min-width:3px;width:calc(var(--v) / 82 * 100%);background:#3c3c3c}
@@ -102,13 +132,19 @@
   .h-run > div{grid-template-columns:minmax(0,1fr)}
   .h-run .rh{border-right:0;border-bottom:1px solid var(--t-line);padding:10px 14px}
   .h-run pre{font-size:13.5px;padding:12px 14px}
-  .h-figs{grid-template-columns:minmax(0,1fr);gap:36px}
+  .h-figs{grid-template-columns:minmax(0,1fr)}
+  .h-hero .hg{grid-template-columns:minmax(0,1fr)}
+  .h-pub{max-width:520px}
 }
 @media (max-width:759px){
   .h-hero{padding:40px 0 40px}
   .h-sec{padding:44px 0}
-  .h-head{flex-wrap:wrap}
-  .h-head .more{margin-left:0;flex-basis:100%;width:fit-content;flex:0 0 auto}
+  .dest{margin-left:0}
+  .h-fig{padding:14px 14px 0}
+  .h-fig figcaption{margin:14px -14px 0;padding:12px 14px;min-height:0}
+  .h-pub .main{grid-template-columns:62px minmax(0,1fr);gap:14px;padding:14px}
+  .h-pub .pg{height:80px;background-size:36px 8px,46px 40px;background-position:7px 10px,7px 28px}
+  .h-pub .row{padding:10px 14px}
   .h-kpi{grid-template-columns:minmax(0,1fr)}
   .h-go a{padding:16px}
   .h-go .ib{width:44px;height:44px}
@@ -145,25 +181,38 @@
   <symbol id="i-rank" viewBox="0 0 24 24"><path d="M3 5h4M3 12h4M3 19h4"/><path d="M10 5h11M10 12h8M10 19h5"/></symbol>
   <symbol id="i-lib" viewBox="0 0 24 24"><path d="M3 4h4v16H3zM10 4h4v16h-4z"/><path d="M16.5 5.2l3.8-1 3.7 15.6-3.8 1z" transform="translate(-1.5 0)"/></symbol>
   <symbol id="i-cut" viewBox="0 0 24 24"><path d="M3 4h18l-7 8v8l-4-2v-6z"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v6H4V6h6"/></symbol>
+  <symbol id="i-data" viewBox="0 0 24 24"><path d="M4 4h16v5H4zM4 9h16v5H4zM4 14h16v6H4z"/><path d="M7 6.5h3M7 11.5h3M7 17h3"/></symbol>
   <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 11h14v10H5z"/><path d="M8 11V6h8v5"/><path d="M12 15v2"/></symbol>
 </svg>
 
 <main id="main">
 <section class="h-hero on-dark">
   <div class="wrap">
-    <p class="status">v0.1.0 &middot; open source &middot; MIT</p>
-    <h1>Rank the library. <em>Skip</em> structure generation.</h1>
-    <p class="sub">The released Boltz-2 affinity trunk and heads score every ligand, structure-generation-free.</p>
-    <div class="btns">
-      <a class="btn pri big" href="docs/index.html">Get started</a>
-      <a class="btn big" href="webgpu/web/screen.html">Try it in the browser</a>
+    <div class="hg">
+      <div>
+      <p class="status">v0.1.0 &middot; open source &middot; MIT</p>
+      <h1>Rank the library. <em>Skip</em> structure generation.</h1>
+      <p class="sub">The released Boltz-2 affinity trunk and heads score every ligand, structure-generation-free.</p>
+      <div class="btns">
+        <a class="btn pri big" href="docs/index.html">Get started</a>
+        <a class="btn big" href="webgpu/web/screen.html">Try it in the browser</a>
+      </div>
+      </div>
+      <div class="h-pub" aria-label="Preprint and data">
+        <a class="main" href="https://doi.org/10.26434/chemrxiv.15012606/v1">
+          <span class="pg" aria-hidden="true"></span>
+          <span><span class="kk">Preprint &middot; ChemRxiv</span><b>Boltz-GenFree: structure-generation-free ranking for first-stage affinity screening</b><span class="go">doi:10.26434/chemrxiv.15012606&nbsp;&nearr;</span></span>
+        </a>
+        <a class="row" href="https://doi.org/10.5281/zenodo.23949585"><svg class="ic" aria-hidden="true"><use href="#i-data"/></svg>Data and analysis &middot; Zenodo<span class="ar">&nearr;</span></a>
+      </div>
     </div>
   </div>
 </section>
 
 <section class="h-sec" aria-labelledby="go">
   <div class="wrap">
-    <div class="h-head"><span class="num">01</span><h2 id="go">Where to go</h2></div>
+    <div class="h-head"><h2 id="go">Where to go</h2></div>
     <nav class="h-go" aria-label="Site sections">
       <a href="docs/index.html"><span class="ib"><svg class="ic"><use href="#i-docs"/></svg></span><b>Docs</b><span class="t">Install, configure, run a screen.</span><span class="ar" aria-hidden="true">&rarr;</span></a>
       <a href="research.html"><span class="ib"><svg class="ic"><use href="#i-research"/></svg></span><b>Research</b><span class="t">How it works, and the results.</span><span class="ar" aria-hidden="true">&rarr;</span></a>
@@ -174,7 +223,7 @@
 
 <section class="h-sec" aria-labelledby="run">
   <div class="wrap">
-    <div class="h-head"><span class="num">02</span><h2 id="run">Install and run</h2><a class="more" href="docs/index.html">Full guide</a></div>
+    <div class="h-head"><h2 id="run">Install and run</h2><a class="dest" href="docs/index.html"><span class="di"><svg class="ic" aria-hidden="true"><use href="#i-docs"/></svg></span><b>Docs</b><span class="what">Full guide</span></a></div>
     <div class="h-run">
       <div>
         <div class="rh"><i>1</i>Get the code<svg class="ic"><use href="#i-get"/></svg></div>
@@ -197,7 +246,7 @@
 
 <section class="h-sec" aria-labelledby="res">
   <div class="wrap">
-    <div class="h-head"><span class="num">03</span><h2 id="res">Results</h2><a class="more" href="research.html">Read the article</a></div>
+    <div class="h-head"><h2 id="res">Results</h2><a class="dest" href="research.html"><span class="di"><svg class="ic" aria-hidden="true"><use href="#i-research"/></svg></span><b>Research</b><span class="what">Read the article</span></a></div>
     <div class="h-kpi">
       <div><div class="k">GenFree alone</div><div class="n">90%</div><div class="t">of Boltz-2&rsquo;s mean average precision on eight libraries. <b>Boltzina: 67%.</b></div></div>
       <div><div class="k">Two-stage screen</div><div class="n">0.0839</div><div class="t">mean AP when Boltz-2 re-ranks the top 10%. <b>Boltz-2 alone: 0.0840.</b></div></div>
@@ -220,14 +269,18 @@
       <figure class="h-fig" aria-label="Wall time of three workflows on 2,048 compounds, as multiples of the GenFree time">
         <div class="fh">Wall time, 2,048 compounds, one GPU</div>
         <div class="h-sp">
+          <div class="grp">
           <div class="tg">GSK3B <span>21 positives</span></div>
           <div class="r gf"><b>GenFree</b><div class="tr"><i style="--v:1.0"></i></div><span class="v">10.6 min <em>1&times;</em></span></div>
           <div class="r bz"><b>Boltzina</b><div class="tr"><i style="--v:11.7"></i></div><span class="v">2.1 h <em>12&times;</em></span></div>
           <div class="r b2"><b>Boltz-2</b><div class="tr"><i style="--v:58.1"></i></div><span class="v">10.3 h <em>58&times;</em></span></div>
+          </div>
+          <div class="grp">
           <div class="tg">NS5 <span>16 positives</span></div>
           <div class="r gf"><b>GenFree</b><div class="tr"><i style="--v:1.0"></i></div><span class="v">6.1 min <em>1&times;</em></span></div>
           <div class="r bz"><b>Boltzina</b><div class="tr"><i style="--v:35.9"></i></div><span class="v">3.7 h <em>36&times;</em> *</span></div>
           <div class="r b2"><b>Boltz-2</b><div class="tr"><i style="--v:81.7"></i></div><span class="v">8.4 h <em>82&times;</em></span></div>
+          </div>
         </div>
         <figcaption><b>GenFree is 12 and 36 times faster than Boltzina, 58 and 82 times faster than the timed Boltz-2 run.</b> Per-target preparation is outside every bar. * Boltzina returned 2,030 of the 2,048 NS5 scores.</figcaption>
       </figure>
