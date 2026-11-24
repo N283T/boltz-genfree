@@ -25,8 +25,11 @@ uv sync --frozen --extra cuda      # --extra cuda12 for CUDA 12 PyTorch builds
 source .venv/bin/activate
 ```
 
-The Boltz-2 affinity checkpoint is downloaded on first use; weights are not
-redistributed.
+The Boltz-2 affinity checkpoint is downloaded on first use; the checkpoint itself is not
+redistributed. The one exception is the browser tool, which loads a 35 MB float32 conversion of
+the checkpoint's affinity heads (the checkpoint's own values) from the release
+[`webgpu-weights-1`](https://github.com/N283T/boltz-genfree/releases/tag/webgpu-weights-1)
+and reads the trunk weights from LocalFold's public bundle on Hugging Face.
 
 ## Usage
 
