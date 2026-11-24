@@ -60,6 +60,12 @@ A re-run with the same inputs resumes where it stopped. Ligand sources, options,
 limits, the optional reference bootstrap and fine-tuned heads are described in
 [docs/usage.md](docs/usage.md) and [docs/finetuning.md](docs/finetuning.md).
 
+## Website
+
+The project page, the Docs, the article and the browser tool are published at
+[n283t.github.io/boltz-genfree](https://n283t.github.io/boltz-genfree/). The site is assembled from `docs/site/` and
+the Markdown in this repository by `docs/site/assemble.sh` (preview: `docs/site/assemble.sh && python3 -m http.server -d _site`).
+
 ## WebGPU (experimental)
 
 `webgpu/` runs the full structure-free chain on WebGPU, in Node and in a browser:

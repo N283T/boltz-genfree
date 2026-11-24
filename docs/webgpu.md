@@ -137,6 +137,16 @@ slice, flip, take, scale, concat, add).
 - The affinity pack (35 MB) is still read from this server (`/packs/genfree-affinity.json`); the "own float32 pack" option on the
   page, and `node src/cli.js`, still use the float32 pack.
 
+### Publishing the tool on the project site
+
+`docs/site/assemble.sh` copies `webgpu/src/` and `webgpu/web/screen.html` into the site (`webgpu/web/screen.html` is the
+page behind the navigation's "WebGPU" item) and the affinity pack into `webgpu/packs/`. The pack is not in the repository: the
+Pages workflow downloads it from the release `webgpu-weights-1` (assets `genfree-affinity.json` and `genfree-affinity.bin`,
+written by `tools/convert_weights.py`) before assembling. Without that release the site is still published, but the tool
+cannot start. The trunk weights are never hosted here; the page reads LocalFold's `boltz2-int5` bundle from Hugging Face.
+To preview locally with a pack in `webgpu/packs/`: `docs/site/assemble.sh && python3 -m http.server -d _site 8000`, then open
+`http://127.0.0.1:8000/webgpu/web/screen.html`.
+
 ### Browser page
 
 `tools/serve.js` serves `webgpu/` with HTTP Range support. The page opens the trunk pack with

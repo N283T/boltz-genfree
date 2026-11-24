@@ -55,7 +55,7 @@ The default screen uses the released pretrained weights and needs no labels.
 Affinity heads fine-tuned elsewhere can be imported with
 `boltz-genfree adapter import-heads` and checked with `adapter inspect`, then used
 through `options.affinity_adapter`. There is no `boltz-genfree finetune` command;
-see [docs/finetuning.md](docs/finetuning.md) for the current boundary.
+see [finetuning.md](finetuning.md) for the current boundary.
 
 ## Scope and legacy names
 
