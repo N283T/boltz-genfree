@@ -3,7 +3,7 @@
 Structure-generation-free Boltz-2 affinity screening.
 
 Boltz-GenFree (GenFree) runs the released Boltz-2 affinity trunk and heads directly
-from processed receptor and ligand inputs. It builds no structure for any candidate and
+from processed receptor and ligand inputs. It runs no structure generation for any candidate and
 writes compact scores for large, resumable virtual screens. It is intended as a cheap
 first stage: rank the whole library with GenFree, then spend the full Boltz-2 pipeline
 only on the top of the ranking.

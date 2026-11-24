@@ -1,6 +1,6 @@
 # WebGPU Boltz-GenFree: design and reuse boundary
 
-GenFree scores a protein-ligand pair without generating a structure: the Boltz-2
+GenFree scores a protein-ligand pair without structure generation: the Boltz-2
 trunk runs, then the **affinity module** (two ensemble members) runs on the trunk
 output with a coordinate-free distogram. This directory ports the whole chain to
 WebGPU: featuriser, Boltz-2 trunk and affinity module, all owned here.
