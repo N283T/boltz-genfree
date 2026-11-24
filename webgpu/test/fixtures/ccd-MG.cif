@@ -1,0 +1,12 @@
+data_MG
+#
+_chem_comp.id                                    MG
+#
+loop_
+_chem_comp_atom.comp_id
+_chem_comp_atom.atom_id
+_chem_comp_atom.type_symbol
+_chem_comp_atom.charge
+_chem_comp_atom.pdbx_model_Cartn_x_ideal
+MG MG MG 2 ?
+#

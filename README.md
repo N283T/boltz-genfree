@@ -60,6 +60,16 @@ A re-run with the same inputs resumes where it stopped. Ligand sources, options,
 limits, the optional reference bootstrap and fine-tuned heads are described in
 [docs/usage.md](docs/usage.md) and [docs/finetuning.md](docs/finetuning.md).
 
+## WebGPU (experimental)
+
+`webgpu/` runs the full structure-free chain on WebGPU, in Node and in a browser:
+featurisation, the Boltz-2 trunk (embedder, MSA module, pairformer) and the affinity module,
+all implemented in this repository, from a protein sequence (+ optional A3M) and a ligand
+SMILES (the [LocalFold](https://github.com/sokrypton/localfold) WebGPU port was used as a
+reference only). With exact PyTorch features it agrees with GenFree to |value diff| <= 3e-6; with its
+own featuriser to within GenFree's seed-to-seed spread. `node src/cli.js screen screen.yaml` reads the same config as `boltz-genfree screen` and writes `scores.csv`. See [docs/webgpu.md](docs/webgpu.md)
+for setup, tolerances, timings and limits.
+
 ## License
 
 [MIT License](LICENSE). Derived from [Boltz](https://github.com/jwohlwend/boltz) and

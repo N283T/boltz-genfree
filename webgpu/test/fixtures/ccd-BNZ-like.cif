@@ -1,0 +1,31 @@
+data_PHN
+#
+_chem_comp.id                                    PHN
+_chem_comp.type                                  NON-POLYMER
+#
+loop_
+_chem_comp_atom.comp_id
+_chem_comp_atom.atom_id
+_chem_comp_atom.type_symbol
+_chem_comp_atom.charge
+_chem_comp_atom.model_Cartn_x
+_chem_comp_atom.model_Cartn_y
+_chem_comp_atom.model_Cartn_z
+_chem_comp_atom.pdbx_model_Cartn_x_ideal
+_chem_comp_atom.pdbx_model_Cartn_y_ideal
+_chem_comp_atom.pdbx_model_Cartn_z_ideal
+PHN "O1'" O 0 10 10 10 ? ? ?
+PHN C1 C 0 11 10 10 ? ? ?
+PHN C2 C 0 12 10 10 ? ? ?
+PHN N3 N 1 13 10 10 ? ? ?
+#
+loop_
+_chem_comp_bond.comp_id
+_chem_comp_bond.atom_id_1
+_chem_comp_bond.atom_id_2
+_chem_comp_bond.value_order
+_chem_comp_bond.pdbx_aromatic_flag
+PHN "O1'" C1 SING N
+PHN C1 C2 DOUB Y
+PHN C2 N3 TRIP N
+#

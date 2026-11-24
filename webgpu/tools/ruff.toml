@@ -1,0 +1,5 @@
+# Oracle tooling: standalone scripts, printed output is the interface.
+extend = "../../pyproject.toml"
+
+[lint]
+extend-ignore = ["ANN", "ARG", "EM", "TC", "D", "T201", "CPY001", "INP001", "PLR0917", "TRY003", "S101", "E501", "E741", "PLR0915", "PLR0912", "PLC0415", "C901", "S311", "S301", "S112", "S110", "SIM105", "PLR2004", "PERF203", "PERF401"]
