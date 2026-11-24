@@ -49,6 +49,22 @@ P(binder)    0.334760        (0.328219)
 timings      featurise 5 ms, trunk 5212 ms (embed 29, msa 345, pairformer 4815), affinity 881 ms, total 6098 ms
 ```
 
+### Screening a library (same config as `boltz-genfree screen`)
+
+```bash
+cd webgpu
+node src/cli.js screen ../examples/screen.yaml --prepare-only    # validate the inputs
+node src/cli.js screen ../examples/screen.yaml                    # writes scores.csv, screen_status.json
+```
+
+The config is the GenFree `screen.yaml`: `target.sequence`, `target.msa` (an A3M path), `ligands.csv|tsv|smiles|ccd`
+(`id_column`, `smiles_column`, `delimiter`), `output_dir`, `chunk_size` and `options.{seed, affinity_recycling_steps,
+ligand_reference_conformer, allow_extended_full_input}`. `scores.csv` has GenFree's columns. A re-run resumes from
+`.webgpu-records.jsonl`; a changed target, MSA, ligand list or option is rejected. The trunk runs once per ligand
+(about 2 s each for a 70-residue target on an Apple M4). Not supported yet, and rejected or noted explicitly: `target.crop`
+(reference-complex cropping; use `--receptor-indices` on the single-pair CLI), `msa: auto` (scored without an MSA, with a
+note), `ligands.sdf`, `affinity_adapter` / `affinity_checkpoint`, `affinity_conditioner_mode: folded`.
+
 ### Browser page
 
 `tools/serve.js` serves `webgpu/` with HTTP Range support. The page opens the trunk pack with

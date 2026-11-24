@@ -6,6 +6,11 @@
 //
 // Affinity module only, from a stored trunk output:
 //   node src/cli.js --trunk oracle-dumps/ckpt-dump.json [--cpu]
+if (process.argv[2] === "screen") {
+  const { runScreenCli } = await import("./screen.js");
+  await runScreenCli(process.argv.slice(3));
+  process.exit(0);
+}
 import { parseArgs } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -52,6 +57,8 @@ function parseIndexList(text) {
 const usage = `usage:
   node src/cli.js --sequence <protein> (--smiles <SMILES> | --ligand-ccd <CODE>) [--receptor-indices 0-99,120] [--ligand-conformer skip|etkdg|rdkit_2d] [--a3m file] [--trunk-pack manifest.json|URL]
                   [--recycles 0..5] [--pack affinity.json] [--ligand-atoms ligand.json] [--allow-extended] [--json]
+  node src/cli.js screen screen.yaml [--prepare-only] [--trunk-pack manifest.json|URL] [--pack affinity.json]
+                  (same config and scores.csv as boltz-genfree screen; see docs/webgpu.md)
   node src/cli.js --trunk <trunk dump manifest> [--cpu]       (affinity module on a stored trunk output)`;
 if (!STRUCTURE_FREE_MODES.includes(values.mode)) {
   console.error(`unknown mode ${values.mode}; expected one of ${STRUCTURE_FREE_MODES.join(", ")}`);

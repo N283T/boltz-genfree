@@ -67,7 +67,7 @@ featurisation, the Boltz-2 trunk (embedder, MSA module, pairformer) and the affi
 all implemented in this repository, from a protein sequence (+ optional A3M) and a ligand
 SMILES (the [LocalFold](https://github.com/sokrypton/localfold) WebGPU port was used as a
 reference only). With exact PyTorch features it agrees with GenFree to |value diff| <= 3e-6; with its
-own featuriser to within GenFree's seed-to-seed spread. See [docs/webgpu.md](docs/webgpu.md)
+own featuriser to within GenFree's seed-to-seed spread. `node src/cli.js screen screen.yaml` reads the same config as `boltz-genfree screen` and writes `scores.csv`. See [docs/webgpu.md](docs/webgpu.md)
 for setup, tolerances, timings and limits.
 
 ## License
