@@ -109,6 +109,34 @@ that on trimmed copies of two of them (`test/fixtures/crop/`, expectations produ
 gemmi: the amino-acid table is the 20 standard residues plus common modified ones, so a reference with an exotic modified
 residue can differ. The Node `screen` command does not read `target.crop` yet.
 
+### Trunk weights from LocalFold's int5 bundle (default on the screening page)
+
+`web/screen.html` loads the trunk weights from LocalFold's public bundle on Hugging Face
+(`sokrypton/localfold`, `boltz2-int5`, a fixed revision; 24 shards, 382 MB) instead of our 805 MB float32 pack, so nothing has to
+be hosted here (the weights are fetched from their publisher by URL; LocalFold's code is Beer-Ware licensed and its
+README documents that it redistributes no weights). `src/trunk/localfold-weights.js` (`LocalFoldWeights`, same interface as
+`OwnWeights`) decodes the int5 codes (groups of 32, float16 scale and zero point) and rebuilds every tensor of our trunk pack
+from them with the recipes in `src/trunk/localfold-map.json`, written by `tools/map_localfold_weights.py`; the bundle is the
+same Boltz-2 trunk as `boltz2_aff.ckpt` (the float32 tensors are bit-identical). The Haiku-style layout differs from PyTorch's
+(layer-stacked, (in, out), head axes factored, fused projections); the recipes are a small op list (reshape, transpose,
+slice, flip, take, scale, concat, add).
+
+- All 3725 tensors of our pack are derived; relative L2 error against the float32 pack: median 0.037, worst 0.083
+  (`res_type_encoding`). Two things are not in the bundle and are zero-filled: `input_embedder/atom_enc_proj_z/0/bias`
+  (a constant per-head logit offset, which softmax ignores: the value moves by 3e-7 with the true bias) and the pad-token
+  column (index 0) of `res_type_encoding`, `msa_profile_encoding` and `msa_module/msa_proj`, which no real token uses.
+- End to end (117 residues, no MSA, phenol, seed 0): 1.2843 with int5 against 1.2781 with float32. With a synthetic 30-row MSA the
+  difference was 0.047 (about what 4% Gaussian noise on the float32 weights causes), so int5 adds noise of GenFree's own
+  seed-to-seed size on MSA inputs. Not measured on a library.
+- Browser (Apple Metal, built-in browser): 382 MB downloaded in about 10 s on the first run, kept in the Cache API
+  (`localfold-int5`, keyed by the stable resolve URL; later visits read it from disk with no network), then about 10 s
+  per ligand at 117 residues (6 s with the float32 pack). Per-tensor Range requests against Hugging Face were
+  measured at 100-300 ms each regardless of concurrency, so for a cross-origin URL the loader fetches whole shards
+  (`wholeShards`, default for cross-origin URLs; `prefetch`; `onProgress({loadedBytes, totalBytes, file, shardsDone,
+  shardsTotal, fromCache})`). Same-origin URLs and Node keep per-tensor byte ranges.
+- The affinity pack (35 MB) is still read from this server (`/packs/genfree-affinity.json`); the "own float32 pack" option on the
+  page, and `node src/cli.js`, still use the float32 pack.
+
 ### Browser page
 
 `tools/serve.js` serves `webgpu/` with HTTP Range support. The page opens the trunk pack with

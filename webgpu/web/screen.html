@@ -5,135 +5,256 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Boltz-GenFree screen (WebGPU)</title>
 <style>
-  :root { --bg: #fff; --fg: #1b1b1b; --muted: #666; --line: #d6d6d6; --panel: #f6f6f6; --accent: #2457c5; --bad: #b3261e; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #121212; --fg: #ececec; --muted: #9a9a9a; --line: #3a3a3a; --panel: #1c1c1c; --accent: #7fa6ff; --bad: #ff8a80; } }
-  * { box-sizing: border-box; }
-  body { font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; }
-  header { border-bottom: 1px solid var(--line); }
-  .bar { max-width: 72rem; margin: 0 auto; padding: .6rem 1rem; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
-  .bar h1 { font-size: 1.1rem; margin: 0 auto 0 0; }
-  #status { font-size: 13px; color: var(--muted); }
-  #status.warn { color: var(--bad); }
-  #bar { height: 3px; background: var(--panel); margin-top: .5rem; }
-  #bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
-  main { max-width: 72rem; margin: 0 auto; padding: 1rem 1rem 4rem; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
-  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
-  h2 { font-size: 1rem; margin: 0 0 .4rem; display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; }
-  .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
-  .warn { color: var(--bad); }
-  input, textarea, select, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: .35rem .5rem; }
-  input[type=text], input[type=number], textarea, select { width: 100%; }
-  input[type=range] { width: 9rem; padding: 0; vertical-align: middle; }
-  textarea { font-family: ui-monospace, Menlo, monospace; font-size: 13px; resize: vertical; min-height: 9rem; }
-  button { cursor: pointer; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: .35rem 1.2rem; }
-  button:disabled { opacity: .5; cursor: default; }
-  .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-top: .45rem; }
-  .row label { font-weight: 600; display: inline-flex; gap: .4rem; align-items: center; }
-  .settings { margin-top: 1.2rem; padding: .6rem 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); gap: 1.4rem; }
-  .settings input[type=number] { width: 6rem; }
-  .settings select, .row select { width: auto; }
-  details { margin-top: .9rem; border: 1px solid var(--line); border-radius: 4px; padding: .3rem .7rem; background: var(--panel); }
-  details details { background: transparent; border: 0; padding: 0; margin-top: .5rem; }
-  summary { cursor: pointer; font-weight: 600; }
-  .cropgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .5rem 1rem; margin-top: .4rem; }
-  .cropgrid label { display: block; font-weight: 600; margin-bottom: .15rem; }
-  #strip { display: flex; flex-wrap: wrap; gap: 1px; max-height: 11rem; overflow: auto; margin-top: .6rem; font: 11px/1.5 ui-monospace, Menlo, monospace; }
-  #strip span { width: 1.15em; text-align: center; background: var(--bg); border-radius: 2px; cursor: pointer; user-select: none; }
-  #strip span.on { background: var(--accent); color: #fff; }
-  .hidden { display: none !important; }
-  h2.results { margin-top: 1.6rem; }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th, td { border-bottom: 1px solid var(--line); padding: .3rem .5rem; text-align: left; vertical-align: top; }
-  th { background: var(--panel); }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  td.smiles { font-family: ui-monospace, Menlo, monospace; max-width: 24rem; overflow-wrap: anywhere; }
-  td.err { color: var(--bad); }
-  code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+/* Layout and visual design follow a static mock made for this page; the script below wires it up. */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f8; --surface: #ffffff; --surface-2: #f0f2f4;
+  --text: #16191d; --muted: #5d6670; --faint: #8a939c;
+  --border: #dde1e5; --border-strong: #c3c9cf;
+  --accent: #2357c6; --accent-hover: #1b47a6; --accent-soft: #e6edfb; --on-accent: #ffffff;
+  --warn: #a3470f; --warn-soft: #fcf0e6; --ok: #1f7a4a;
+  --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  --shadow: 0 1px 2px rgb(16 24 40 / .05);
+  --r-sm: 4px; --r-md: 6px; --r-lg: 10px;
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px; --s-7: 48px;
+  --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px;
+  --ctl-h: 36px;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --surface: #171a20; --surface-2: #1e222a;
+    --text: #e6e9ed; --muted: #a0a8b2; --faint: #79828c;
+    --border: #2a2f38; --border-strong: #3a414c;
+    --accent: #6d9bff; --accent-hover: #8cb0ff; --accent-soft: #1d2a45; --on-accent: #0b1020;
+    --warn: #f0a46b; --warn-soft: #33231a; --ok: #5cc98d;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: var(--fs-md)/1.5 var(--font-ui); -webkit-font-smoothing: antialiased; }
+.page { max-width: 1160px; margin: 0 auto; padding: 0 var(--s-5) var(--s-7); }
+.hidden { display: none !important; }
+
+.titlebar { display: flex; align-items: baseline; gap: var(--s-3); padding: var(--s-4) 0; border-bottom: 1px solid var(--border); margin-bottom: var(--s-5); }
+.titlebar h1 { margin: 0; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -.01em; }
+.titlebar p { margin: 0; font-size: var(--fs-sm); color: var(--faint); }
+
+.step { margin-top: var(--s-6); }
+.step:first-of-type { margin-top: 0; }
+.step-h { display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-3); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.step-h b { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border-strong); font-size: 11px; letter-spacing: 0; }
+
+.inputs { display: grid; grid-template-columns: 3fr 2fr; gap: var(--s-4); }
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-4); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: var(--s-3); }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; }
+.panel-head label { font-weight: 600; font-size: var(--fs-md); }
+.info { font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
+.info.warn { color: var(--warn); }
+textarea, input[type=text], input[type=number], select {
+  font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  min-height: var(--ctl-h); padding: 0 var(--s-3); transition: border-color .12s;
+}
+textarea { font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.55; padding: var(--s-3); resize: vertical; min-height: 220px; width: 100%; background: var(--surface-2); border-color: var(--border); word-break: break-all; }
+textarea:hover, input:hover, select:hover { border-color: var(--faint); }
+:focus-visible { outline: none; box-shadow: var(--focus); }
+textarea:focus-visible, input:focus-visible, select:focus-visible { border-color: var(--accent); }
+.subrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); font-size: var(--fs-sm); color: var(--muted); }
+.hint { font-size: var(--fs-xs); color: var(--faint); }
+.hint code { font-family: var(--font-mono); }
+
+button, .filebtn { font: inherit; font-size: var(--fs-sm); min-height: var(--ctl-h); padding: 0 var(--s-4); border-radius: var(--r-md); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; display: inline-flex; align-items: center; gap: var(--s-2); }
+button:hover, .filebtn:hover { background: var(--surface-2); }
+button:disabled { opacity: .45; cursor: not-allowed; background: var(--surface); }
+.filebtn { position: relative; }
+.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.filebtn:focus-within { box-shadow: var(--focus); }
+.btn-text { border-color: transparent; background: none; color: var(--accent); padding: 0 var(--s-2); }
+.btn-text:hover { background: var(--accent-soft); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-size: var(--fs-md); font-weight: 600; min-height: 44px; padding: 0 var(--s-6); }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.settings { display: flex; flex-wrap: wrap; gap: var(--s-3) var(--s-6); align-items: center; padding: var(--s-3) 0; font-size: var(--fs-sm); }
+.field { display: flex; align-items: center; gap: var(--s-2); color: var(--muted); }
+.field select, .field input[type=number] { font-size: var(--fs-sm); }
+input[type=number] { width: 88px; font-variant-numeric: tabular-nums; }
+input[type=range] { accent-color: var(--accent); width: 120px; min-height: var(--ctl-h); }
+output { font-family: var(--font-mono); color: var(--text); min-width: 1ch; }
+
+details.disc { border-top: 1px solid var(--border); }
+details.disc:last-of-type { border-bottom: 1px solid var(--border); }
+details.disc > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: var(--s-2); min-height: 40px; font-size: var(--fs-sm); font-weight: 500; border-radius: var(--r-sm); }
+details.disc > summary::-webkit-details-marker { display: none; }
+details.disc > summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); margin: 0 var(--s-2) 0 2px; transition: transform .15s; }
+details[open].disc > summary::before { transform: rotate(45deg); }
+details.disc > summary:hover { color: var(--accent); }
+.sum-status { margin-left: auto; font-size: var(--fs-xs); font-weight: 400; color: var(--faint); }
+.sum-status.warn { color: var(--warn); font-weight: 500; }
+.sum-status.warn::before { content: "\25B2  "; font-size: 9px; }
+.disc-body { padding: var(--s-1) 0 var(--s-4) 22px; display: grid; gap: var(--s-3); }
+.msg { font-size: var(--fs-sm); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--surface-2); color: var(--muted); border-left: 3px solid var(--border-strong); }
+.msg.warn { background: var(--warn-soft); color: var(--warn); border-left-color: var(--warn); }
+.row { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; }
+.strip { display: flex; flex-wrap: wrap; gap: 2px; max-height: 132px; overflow: auto; padding: var(--s-2); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); font: 11px/1 var(--font-mono); }
+.strip span { width: 16px; height: 18px; display: grid; place-items: center; border-radius: 2px; color: var(--faint); cursor: pointer; user-select: none; }
+.strip span:hover { background: var(--border); color: var(--text); }
+.strip span.on { background: var(--accent); color: var(--on-accent); }
+.strip span.on:hover { background: var(--accent-hover); }
+details.nested > summary { font-size: var(--fs-xs); color: var(--muted); cursor: pointer; min-height: 28px; display: inline-flex; align-items: center; }
+details.nested .row { margin-top: var(--s-2); }
+#crop { flex: 1; min-width: 220px; font-family: var(--font-mono); font-size: var(--fs-sm); }
+.adv { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); }
+.adv label { display: grid; gap: var(--s-1); font-size: var(--fs-xs); color: var(--muted); }
+.adv input, .adv select { font-size: var(--fs-sm); }
+.adv input[type=text] { font-family: var(--font-mono); width: 100%; }
+
+.runbar { margin-top: var(--s-5); display: grid; grid-template-columns: auto auto 1fr; gap: var(--s-3); align-items: center; }
+#status { font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#status.err { color: var(--warn); }
+#bar { grid-column: 1 / -1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+#bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+.res-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-bottom: var(--s-3); }
+.res-head h2 { margin: 0 auto 0 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.01em; }
+.res-head .meta { font-size: var(--fs-sm); color: var(--faint); font-weight: 400; margin-left: var(--s-2); }
+.table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); max-height: 520px; overflow: auto; box-shadow: var(--shadow); }
+table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-sm); }
+thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); letter-spacing: .03em; padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
+thead th.num { text-align: right; }
+thead th.sorted { color: var(--accent); }
+thead th.sorted::after { content: " \2193"; }
+thead th.sorted.asc::after { content: " \2191"; }
+td { padding: 0 var(--s-3); height: 40px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--surface-2); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
+td.rank { width: 1%; color: var(--faint); }
+td.id { font-weight: 500; color: var(--text); }
+td.val { color: var(--text); font-size: var(--fs-sm); }
+td.smiles { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); max-width: 0; width: 34%; overflow: hidden; text-overflow: ellipsis; }
+td.prob { width: 180px; }
+.p { display: flex; align-items: center; gap: var(--s-2); font: var(--fs-sm) var(--font-mono); font-variant-numeric: tabular-nums; }
+.p::before { content: ""; order: 2; flex: 1; height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--accent) calc(var(--p) * 100%), var(--border) 0); min-width: 60px; }
+.p.hi { color: var(--accent); font-weight: 600; }
+tr.top td.rank { color: var(--accent); font-weight: 600; }
+tr.pending td { color: var(--faint); }
+tr.pending .p::before { background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px); }
+td.err { color: var(--warn); white-space: normal; font-size: var(--fs-xs); }
+td.err::before { content: "\25B2  "; font-size: 9px; }
+.empty { padding: var(--s-7) var(--s-4); text-align: center; color: var(--faint); font-size: var(--fs-sm); }
+
+@media (max-width: 760px) {
+  .page { padding: 0 var(--s-4) var(--s-6); }
+  .inputs, .adv { grid-template-columns: 1fr; }
+  textarea { min-height: 160px; }
+  .settings { gap: var(--s-3) var(--s-4); }
+  .runbar { grid-template-columns: 1fr auto; }
+  .runbar .btn-primary { width: 100%; }
+  #status { grid-column: 1 / -1; white-space: normal; }
+  td.smiles { display: none; } thead th.c-smiles { display: none; }
+}
 </style>
 </head>
 <body>
-<header>
-  <div class="bar"><h1>Boltz-GenFree screen <span class="hint">on WebGPU, in this page</span></h1></div>
-</header>
+<div class="page">
+  <header class="titlebar"><h1>Boltz-GenFree screen</h1><p>runs in this page, on WebGPU</p></header>
 
-<main>
-<div class="cols">
-  <section>
-    <h2><label for="seq">Sequence</label> <span class="hint" id="seqInfo"></span></h2>
-    <textarea id="seq" spellcheck="false">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
-    <div class="row">
-      <label for="a3mFile">MSA <span class="hint">(optional A3M file; none = single sequence)</span></label>
-      <input type="file" id="a3mFile" accept=".a3m,.fasta,.fa,.txt">
-      <button id="a3mClear" class="hidden">Remove</button>
-      <span class="hint" id="a3mInfo"></span>
-    </div>
-  </section>
-
-  <section>
-    <h2><label for="ligands">Ligands</label> <span class="hint" id="ligInfo"></span></h2>
-    <textarea id="ligands" spellcheck="false">id,smiles
+  <section class="step">
+    <h2 class="step-h"><b>1</b> Inputs</h2>
+    <div class="inputs">
+      <div class="panel">
+        <div class="panel-head"><label for="seq">Sequence</label><span id="seqInfo" class="info"></span></div>
+        <textarea id="seq" spellcheck="false">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
+        <div class="subrow">
+          <span>MSA (optional)</span>
+          <label class="filebtn">Choose A3M file<input id="a3mFile" type="file" accept=".a3m,.fasta,.fa,.txt"></label>
+          <button id="a3mClear" class="btn-text hidden" type="button">Remove</button>
+          <span id="a3mInfo" class="info">none: single sequence</span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><label for="ligands">Ligands</label><span id="ligInfo" class="info"></span></div>
+        <textarea id="ligands" spellcheck="false">id,smiles
 glycine,NCC(=O)O
 phenol,Oc1ccccc1
 acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
-    <div class="row"><input type="file" id="ligFile" accept=".csv,.tsv,.txt,.smi"><span class="hint">one SMILES per line, <code>id,SMILES</code>, or a CSV/TSV with a <code>smiles</code> column</span></div>
+        <div class="subrow">
+          <label class="filebtn">Choose file<input id="ligFile" type="file" accept=".csv,.tsv,.txt,.smi"></label>
+          <span class="hint">One SMILES per line, <code>id,SMILES</code>, or a CSV/TSV with a <code>smiles</code> column</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="step">
+    <h2 class="step-h"><b>2</b> Settings</h2>
+    <div class="settings">
+      <label class="field">Recycling <input id="recycles" type="range" min="0" max="5" step="1" value="0"><output id="recyclesOut" for="recycles">0</output></label>
+      <label class="field">Seed <input id="seed" type="number" value="0" step="1"></label>
+      <label class="field">Ligand conformer
+        <select id="conformer"><option value="skip">skip (GenFree default)</option><option value="etkdg">etkdg</option><option value="rdkit_2d">rdkit_2d</option></select></label>
+    </div>
+
+    <details class="disc" id="cropBox">
+      <summary>Receptor crop <span id="cropSummary" class="sum-status"></span></summary>
+      <div class="disc-body">
+        <div id="fit" class="msg"></div>
+        <div class="subrow">
+          <label class="filebtn">Reference complex<input id="refFile" type="file" accept=".pdb,.ent,.cif,.mmcif"></label>
+          <span id="refInfo" class="info">PDB or mmCIF: keeps the residues nearest to its ligand</span>
+        </div>
+        <div id="cropSelects" class="row hidden">
+          <label class="field" id="chainBox">Chain <select id="refChain"></select></label>
+          <label class="field" id="ligandBox">Ligand <select id="refLigand"></select></label>
+        </div>
+        <div id="cropInfo" class="info"></div>
+        <div id="strip" class="strip" aria-label="Residue selection"></div>
+        <details class="nested">
+          <summary>Edit as text</summary>
+          <div class="row">
+            <input id="crop" type="text" placeholder="keep all residues, or e.g. 0-99,120" aria-label="Residues to keep, 0-based">
+            <button id="cropReset" type="button" disabled>Use the reference's choice</button>
+            <button id="cropClear" type="button">Keep all</button>
+          </div>
+        </details>
+      </div>
+    </details>
+    <details class="disc">
+      <summary>Advanced <span class="sum-status">weights</span></summary>
+      <div class="disc-body adv">
+        <label>Trunk weights
+          <select id="weightsSource"><option value="localfold">LocalFold int5, Hugging Face (about 380 MB, cached)</option><option value="own">own float32 pack, this server (about 805 MB)</option></select></label>
+        <label>Trunk manifest URL <input id="weights" type="text" value="https://huggingface.co/sokrypton/localfold/resolve/651a25ba8a57c6d18caacf50ab7180b255eb5a82/boltz2-int5/manifest.json"></label>
+        <label>Affinity pack (manifest URL) <input id="affinity" type="text" value="/packs/genfree-affinity.json"></label>
+      </div>
+    </details>
+
+    <div class="runbar">
+      <button id="run" class="btn-primary" type="button">Run</button>
+      <button id="stop" type="button" disabled>Stop</button>
+      <span id="status" role="status">idle</span>
+      <div id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div></div></div>
+    </div>
+  </section>
+
+  <section class="step">
+    <h2 class="step-h"><b>3</b> Results</h2>
+    <div class="res-head">
+      <h2>Results<span class="meta" id="resMeta"></span></h2>
+      <label class="field">Sort
+        <select id="sort"><option value="p-desc">P(binder), high first</option><option value="value-desc">value, high first</option><option value="value-asc">value, low first</option><option value="input">input order</option></select></label>
+      <button id="download" type="button" disabled>Download scores.csv</button>
+    </div>
+    <div class="table-wrap">
+      <table id="results" class="hidden">
+        <thead><tr><th class="num">#</th><th>id</th><th class="c-smiles">SMILES</th><th class="num" id="thValue">value</th><th id="thProb">P(binder)</th><th class="num">tokens</th><th class="num">ms</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="empty">Run to see results.</div>
+    </div>
   </section>
 </div>
-
-<div class="row settings">
-  <label for="recycles">Recycling <input type="range" id="recycles" min="0" max="5" step="1" value="0"><output id="recyclesOut">0</output></label>
-  <label for="seed">Seed <input type="number" id="seed" value="0" step="1"></label>
-  <label for="conformer">Ligand conformer
-    <select id="conformer"><option value="skip">skip (GenFree default)</option><option value="etkdg">etkdg</option><option value="rdkit_2d">rdkit_2d</option></select>
-  </label>
-</div>
-
-<details id="cropBox">
-  <summary>Receptor crop <span class="hint" id="cropSummary"></span></summary>
-  <p id="fit" style="margin:.5rem 0"></p>
-  <p class="hint" id="cropHelp" style="margin:.4rem 0">To crop: load a reference complex (PDB or mmCIF). The residues nearest to its ligand are kept, for the whole library. Click residues to add or remove them.</p>
-  <div class="row"><input type="file" id="refFile" accept=".pdb,.ent,.cif,.mmcif"><span class="hint" id="refInfo"></span></div>
-  <div class="cropgrid hidden" id="cropSelects">
-    <div id="chainBox"><label for="refChain">Reference chain</label><select id="refChain"></select></div>
-    <div id="ligandBox"><label for="refLigand">Reference ligand</label><select id="refLigand"></select></div>
-  </div>
-  <div class="hint" id="cropInfo" style="margin-top:.4rem"></div>
-  <div id="strip" aria-label="receptor residues"></div>
-  <details>
-    <summary>Edit as text</summary>
-    <label for="crop" class="hint" style="display:block;margin:.3rem 0">Residues to keep, 0-based (e.g. 0-99,120); empty = the whole sequence</label>
-    <input type="text" id="crop" placeholder="keep all residues">
-    <div class="row"><button id="cropReset" disabled>Use the reference's choice</button><button id="cropClear">Keep all residues</button></div>
-  </details>
-</details>
-
-<details>
-  <summary>Advanced</summary>
-  <div class="cropgrid">
-    <div><label for="weights">Trunk pack (manifest URL)</label><input type="text" id="weights" value="/packs/boltz2-trunk-own/boltz2-trunk-own.json"></div>
-    <div><label for="affinity">Affinity pack (manifest URL)</label><input type="text" id="affinity" value="/packs/genfree-affinity.json"></div>
-  </div>
-</details>
-
-<div class="row" style="margin-top:1.2rem">
-  <button class="primary" id="run">Run</button>
-  <button id="stop" disabled>Stop</button>
-  <span id="status" aria-live="polite">idle</span>
-</div>
-<div id="bar"><div></div></div>
-
-<h2 class="results">Results
-  <span class="row" style="margin:0">
-    <select id="sort"><option value="p-desc">P(binder), high first</option><option value="value-desc">value, high first</option><option value="value-asc">value, low first</option><option value="input">input order</option></select>
-    <button id="download" disabled>Download scores.csv</button>
-  </span>
-</h2>
-<table id="results">
-  <thead><tr><th class="num">#</th><th>id</th><th>SMILES</th><th class="num">value</th><th class="num">P(binder)</th><th class="num">tokens</th><th class="num">ms</th></tr></thead>
-  <tbody></tbody>
-</table>
-</main>
 
 <script type="module">
 import { deviceFromAdapter } from "../src/device.js";
@@ -141,14 +262,19 @@ import { createOwnChain } from "../src/trunk/own/chain.js";
 import { parseLigandText, scoreRow, scoresCsv } from "../src/screen-core.js";
 import { describeReference, loadReferenceCrop, parseStructure, proteinAtomCounts, selectReceptorTokens } from "../src/reference-crop.js";
 import { ligandGraph } from "../src/trunk/own/ligand.js";
+import { LocalFoldWeights } from "../src/trunk/localfold-weights.js";
 
 const $ = (id) => document.getElementById(id);
-const status = (text, bad = false) => { $("status").textContent = text; $("status").className = bad ? "warn" : ""; };
-const progress = (fraction) => { $("bar").firstElementChild.style.width = `${Math.round(100 * fraction)}%`; };
+const status = (text, bad = false) => { $("status").textContent = text; $("status").className = bad ? "err" : ""; };
+const progress = (fraction) => { $("bar").firstElementChild.style.width = `${Math.round(100 * fraction)}%`; $("bar").setAttribute("aria-valuenow", Math.round(100 * fraction)); };
 const LIMITS = { receptorTokens: 200, ligandTokens: 128, totalTokens: 256, totalAtoms: 2048 };   // GenFree's affinity limits
 const MAX_RECEPTOR = LIMITS.receptorTokens;
-let a3mText = "";
+const WEIGHT_URLS = {
+  localfold: "https://huggingface.co/sokrypton/localfold/resolve/651a25ba8a57c6d18caacf50ab7180b255eb5a82/boltz2-int5/manifest.json",
+  own: "/packs/boltz2-trunk-own/boltz2-trunk-own.json",
+};
 
+let a3mText = "";
 let chain = null, chainKey = "", device = null;
 let rows = [];          // {index, lig, result?, error?, ms}
 let stopRequested = false;
@@ -184,12 +310,12 @@ function updateSeqInfo() {
   const cropped = parseIndices($("crop").value, true);
   const used = cropped ? cropped.length : n;
   $("seqInfo").textContent = `${n} residues${cropped ? `, keeping ${used}` : ""}${used > MAX_RECEPTOR ? " - crop to 200 or fewer" : ""}`;
-  $("seqInfo").className = used > MAX_RECEPTOR ? "hint warn" : "hint";
+  $("seqInfo").className = used > MAX_RECEPTOR ? "info warn" : "info";
   scheduleFitCheck();
 }
 function updateLigInfo() {
-  try { $("ligInfo").textContent = `${parseLigandText($("ligands").value).length} ligands`; $("ligInfo").className = "hint"; }
-  catch (e) { $("ligInfo").textContent = String(e.message); $("ligInfo").className = "hint warn"; }
+  try { $("ligInfo").textContent = `${parseLigandText($("ligands").value).length} ligands`; $("ligInfo").className = "info"; }
+  catch (e) { $("ligInfo").textContent = String(e.message); $("ligInfo").className = "info warn"; }
 }
 $("seq").addEventListener("input", () => { updateSeqInfo(); onInputsChanged(); });
 $("ligands").addEventListener("input", () => { updateLigInfo(); onInputsChanged(); scheduleFitCheck(); });
@@ -199,10 +325,10 @@ $("a3mFile").addEventListener("change", async () => {
   const file = $("a3mFile").files[0];
   if (!file) return;
   a3mText = await file.text();
-  $("a3mInfo").textContent = `${file.name}, ${(file.size / 1024).toFixed(0)} KB`;
+  $("a3mInfo").textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB`;
   $("a3mClear").classList.remove("hidden");
 });
-$("a3mClear").addEventListener("click", () => { a3mText = ""; $("a3mFile").value = ""; $("a3mInfo").textContent = ""; $("a3mClear").classList.add("hidden"); });
+$("a3mClear").addEventListener("click", () => { a3mText = ""; $("a3mFile").value = ""; $("a3mInfo").textContent = "none: single sequence"; $("a3mClear").classList.add("hidden"); });
 $("ligFile").addEventListener("change", async () => {
   const file = $("ligFile").files[0];
   if (!file) return;
@@ -256,15 +382,15 @@ let fitTimer = null;
 function scheduleFitCheck() { clearTimeout(fitTimer); fitTimer = setTimeout(fitCheck, 250); }
 function fitCheck() {
   const seq = sequenceText();
-  const box = $("fit");
-  const setFit = (html, cls) => { box.textContent = html; box.className = cls; };
-  if (!seq) { setFit("Enter a sequence to check the size limits.", "hint"); return; }
+  const setFit = (text, warn) => { $("fit").textContent = text; $("fit").className = warn ? "msg warn" : "msg"; };
+  const setSummary = (text, warn) => { $("cropSummary").textContent = text; $("cropSummary").className = warn ? "sum-status warn" : "sum-status"; };
+  if (!seq) { setFit("Enter a sequence to check the size limits.", false); setSummary("", false); return; }
   let ligands;
-  try { ligands = parseLigandText($("ligands").value); } catch (e) { setFit(`Ligand list: ${e.message}`, "warn"); return; }
-  if (ligands.length === 0) { setFit("Enter ligands to check the size limits.", "hint"); return; }
+  try { ligands = parseLigandText($("ligands").value); } catch (e) { setFit(`Ligand list: ${e.message}`, true); setSummary("check the ligand list", true); return; }
+  if (ligands.length === 0) { setFit("Enter ligands to check the size limits.", false); setSummary("", false); return; }
   const keep = parseIndices($("crop").value, true);
   const used = keep ?? Array.from(seq, (_, i) => i);
-  if (used.some((i) => i >= seq.length)) { setFit("The residue list points past the end of the sequence.", "warn"); return; }
+  if (used.some((i) => i >= seq.length)) { setFit("The residue list points past the end of the sequence.", true); setSummary("check the residue list", true); return; }
   const receptor = used.length;
   const receptorAtoms = used.reduce((sum, i) => sum + proteinAtomCounts(seq[i])[0], 0);
   const problems = [], unreadable = [];
@@ -273,28 +399,30 @@ function fitCheck() {
     const t = ligandTokens(l.value);
     if (typeof t === "string") { unreadable.push(`${l.id} (${t})`); continue; }
     largest = Math.max(largest, t);
-    if (t > LIMITS.ligandTokens) problems.push({ id: l.id, why: `${t} heavy atoms; the limit is ${LIMITS.ligandTokens} and no crop can help` });
-    else if (receptor + t > LIMITS.totalTokens || receptorAtoms + t > LIMITS.totalAtoms) problems.push({ id: l.id, why: `${receptor} receptor residues + ${t} ligand atoms = ${receptor + t} tokens; the limit is ${LIMITS.totalTokens}` });
+    if (t > LIMITS.ligandTokens) problems.push({ id: l.id, hopeless: true, why: `${t} heavy atoms; the limit is ${LIMITS.ligandTokens} and no crop can help` });
+    else if (receptor + t > LIMITS.totalTokens || receptorAtoms + t > LIMITS.totalAtoms) problems.push({ id: l.id, hopeless: false, why: `${receptor} receptor residues + ${t} ligand atoms = ${receptor + t} tokens; the limit is ${LIMITS.totalTokens}` });
   }
   const list = (items) => items.slice(0, 5).map((p) => `${p.id}: ${p.why}`).join("; ") + (items.length > 5 ? `; and ${items.length - 5} more` : "");
-  if (receptor > LIMITS.receptorTokens) {
-    setFit(`Too long: ${receptor} receptor residues, the limit is ${LIMITS.receptorTokens}. Crop the receptor below.`, "warn");
+  const tooLong = receptor > LIMITS.receptorTokens;
+  if (tooLong) {
+    setFit(`Too long: ${receptor} receptor residues, the limit is ${LIMITS.receptorTokens}. Crop the receptor below.`, true);
   } else if (unreadable.length) {
-    setFit(`Cannot read ${unreadable.length} ligand(s): ${unreadable.slice(0, 3).join("; ")}`, "warn");
+    setFit(`Cannot read ${unreadable.length} ligand(s): ${unreadable.slice(0, 3).join("; ")}`, true);
   } else if (problems.length) {
-    const croppable = problems.every((p) => !p.why.includes("no crop can help"));
-    setFit(`${problems.length} of ${ligands.length} ligands do not fit. ${list(problems)}.${croppable ? " A crop that keeps fewer residues would make room." : ""}`, "warn");
+    const croppable = problems.some((p) => !p.hopeless);
+    setFit(`${problems.length} of ${ligands.length} ligands do not fit. ${list(problems)}.${croppable ? " A crop that keeps fewer residues would make room." : ""}`, true);
   } else {
     setFit(keep
       ? `Fits with the current crop: ${receptor} receptor residues + the largest ligand (${largest} atoms) = ${receptor + largest} tokens, limit ${LIMITS.totalTokens}.`
-      : `Fits: ${receptor} receptor residues + the largest ligand (${largest} atoms) = ${receptor + largest} tokens, limit ${LIMITS.totalTokens}. No crop is needed; you can leave this section as it is.`, "hint");
+      : `Fits: ${receptor} receptor residues + the largest ligand (${largest} atoms) = ${receptor + largest} tokens, limit ${LIMITS.totalTokens}. No crop is needed; you can leave this section as it is.`, false);
   }
-  const state = unreadable.length ? "check the ligand list" : (receptor > LIMITS.receptorTokens || problems.length ? "does not fit" : (keep ? `keeping ${receptor} of ${seq.length}` : "not needed"));
-  $("cropSummary").textContent = `· ${state}`;
-  $("cropSummary").className = problems.length || receptor > LIMITS.receptorTokens || unreadable.length ? "hint warn" : "hint";
-  if (!unreadable.length && (receptor > LIMITS.receptorTokens || problems.some((p) => !p.why.includes("no crop can help"))) && !$("cropBox").open) $("cropBox").open = true;
+  if (unreadable.length) setSummary("check the ligand list", true);
+  else if (tooLong || problems.length) setSummary("does not fit", true);
+  else setSummary(keep ? `keeping ${receptor} of ${seq.length}` : "not needed", false);
+  if (!unreadable.length && (tooLong || problems.some((p) => !p.hopeless)) && !$("cropBox").open) $("cropBox").open = true;
 }
-function cropInfo(text, bad = false) { $("cropInfo").textContent = text; $("cropInfo").className = bad ? "hint warn" : "hint"; }
+
+function cropInfo(text, bad = false) { $("cropInfo").textContent = text; $("cropInfo").className = bad ? "info warn" : "info"; }
 
 function applyReferenceCrop() {
   manual = false;
@@ -326,11 +454,11 @@ $("refFile").addEventListener("change", async () => {
     if (refInfo.ligands.length === 0) throw new Error("no ligand (non-polymer residue) found in the reference");
   } catch (e) {
     refStructure = null; refInfo = null;
-    $("refInfo").textContent = String(e?.message ?? e); $("refInfo").className = "hint warn";
+    $("refInfo").textContent = String(e?.message ?? e); $("refInfo").className = "info warn";
     $("cropSelects").classList.add("hidden"); $("cropReset").disabled = true;
     return;
   }
-  $("refInfo").textContent = `${file.name}: ${refInfo.chains.length} protein chain(s), ${refInfo.ligands.length} ligand residue(s)`; $("refInfo").className = "hint";
+  $("refInfo").textContent = `${file.name} · ${refInfo.chains.length} protein chain(s), ${refInfo.ligands.length} ligand residue(s)`; $("refInfo").className = "info";
   const seq = sequenceText();
   $("refChain").replaceChildren(...refInfo.chains.map((c) => {
     const o = document.createElement("option");
@@ -365,15 +493,36 @@ function render() {
   if (sort === "value-desc") order.sort((a, b) => val(b) - val(a));
   else if (sort === "value-asc") order.sort((a, b) => (a.result ? val(a) : Infinity) - (b.result ? val(b) : Infinity));
   else if (sort === "p-desc") order.sort((a, b) => (b.result?.probability ?? -1) - (a.result?.probability ?? -1));
+  $("thProb").className = sort === "p-desc" ? "sorted" : "";
+  $("thValue").className = sort.startsWith("value") ? `num sorted${sort === "value-asc" ? " asc" : ""}` : "num";
+  $("results").classList.toggle("hidden", rows.length === 0);
+  $("empty").classList.toggle("hidden", rows.length !== 0);
+  const finished = rows.filter((r) => r.result || r.error).length;
+  $("resMeta").textContent = rows.length ? `${finished} of ${rows.length} done` : "";
   const body = $("results").tBodies[0];
-  body.replaceChildren(...order.map((r) => {
+  body.replaceChildren(...order.map((r, position) => {
     const tr = document.createElement("tr");
     const cell = (text, cls = "") => { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.append(td); return td; };
-    cell(r.index + 1, "num"); cell(r.lig.id); cell(r.lig.value, "smiles");
+    cell(r.error ? "–" : position + 1, "num rank"); cell(r.lig.id, "id"); cell(r.lig.value, "smiles").title = r.lig.value;
     if (r.result) {
-      cell(r.result.value.toFixed(4), "num"); cell(r.result.probability.toFixed(4), "num"); cell(r.result.tokens, "num"); cell(Math.round(r.ms), "num");
+      const p = r.result.probability;
+      if (p > 0.75) tr.className = "top";
+      cell(r.result.value.toFixed(4), "num val");
+      const td = cell("", "prob");
+      const span = document.createElement("span");
+      span.className = p > 0.75 ? "p hi" : "p"; span.style.setProperty("--p", String(Math.min(1, Math.max(0, p)))); span.textContent = p.toFixed(3);
+      td.append(span);
+      cell(r.result.tokens, "num"); cell(Math.round(r.ms), "num");
+    } else if (r.error) {
+      const td = cell(r.error, "err"); td.colSpan = 4;
     } else {
-      const td = cell(r.error ?? "pending", r.error ? "err" : ""); td.colSpan = 4;
+      tr.className = "pending";
+      cell("–", "num");
+      const td = cell("", "prob");
+      const span = document.createElement("span");
+      span.className = "p"; span.style.setProperty("--p", "0"); span.textContent = "pending";
+      td.append(span);
+      cell("–", "num"); cell("–", "num");
     }
     return tr;
   }));
@@ -393,15 +542,23 @@ $("download").addEventListener("click", () => {
 
 $("stop").addEventListener("click", () => { stopRequested = true; $("stop").disabled = true; status("stopping after the current ligand..."); });
 
+// ---- running ------------------------------------------------------------------------------------------------------------------
+$("weightsSource").addEventListener("change", () => { $("weights").value = WEIGHT_URLS[$("weightsSource").value]; });
+
 async function ensureChain() {
-  const trunkPack = new URL($("weights").value, location.href).href;
+  const source = $("weightsSource").value;
+  const trunkUrl = new URL($("weights").value, location.href).href;
   const affinityPack = new URL($("affinity").value, location.href).href;
-  const key = `${trunkPack}|${affinityPack}`;
+  const key = `${source}|${trunkUrl}|${affinityPack}`;
   if (chain && chainKey === key) return chain;
   if (chain) { await chain.destroy(); chain = null; }
   if (!navigator.gpu) throw new Error("this browser has no WebGPU");
   if (!device) device = await deviceFromAdapter(await navigator.gpu.requestAdapter());
   status("opening weights...");
+  const mb = (n) => (n / 1e6).toFixed(0);
+  const onProgress = (p) => { status(`downloading weights ${mb(p.loadedBytes)} of ${mb(p.totalBytes)} MB${p.fromCache ? " (cached)" : ""}`); if (p.totalBytes) progress(p.loadedBytes / p.totalBytes); };
+  const trunkPack = source === "localfold" ? await LocalFoldWeights.fromUrl(trunkUrl, { lazy: true, onProgress }) : trunkUrl;
+  progress(0);
   chain = await createOwnChain({ trunkPack, affinityPack, device, onStatus: (s) => status(s) });
   chainKey = key;
   return chain;
@@ -431,7 +588,7 @@ $("run").addEventListener("click", async () => {
       const t0 = performance.now();
       try {
         r.result = await c.score({ sequence, a3m, smiles: r.lig.value, receptorIndices, ligandConformer: conformer }, {
-          ...options, onStage: (name, ms) => status(`ligand ${done + 1} of ${rows.length}: ${r.lig.id} - ${name} ${Math.round(ms)} ms`),
+          ...options, onStage: (name, ms) => status(`ligand ${done + 1} of ${rows.length}: ${r.lig.id} · ${name} ${Math.round(ms)} ms`),
         });
       } catch (e) {
         r.error = String(e?.message ?? e);
@@ -456,6 +613,7 @@ $("run").addEventListener("click", async () => {
 updateSeqInfo();
 updateLigInfo();
 renderStrip();
+render();
 fitCheck();
 </script>
 </body>

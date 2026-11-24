@@ -40,6 +40,7 @@ Every stage of the chain is implemented in this repository; nothing is imported 
 | Trunk (embedder, recycling, MSA module, pairformer) | `src/trunk/own/{embedder,msa-module,pairformer,run}.js` (+ `*-wgsl.js`) |
 | Chain | `src/trunk/own/chain.js` (`createOwnChain`) |
 | Weights | PyTorch-named float32 pack (`tools/convert_boltz_trunk.py`), `src/trunk/own-weights.js`, lazy Range reads in the browser |
+| Weights, int5 option | LocalFold's public `boltz2-int5` bundle read by `src/trunk/localfold-weights.js` through recipes (`src/trunk/localfold-map.json`); the screening page's default |
 | Affinity module, distogram modes, pooling, heads, ensemble | `src/gpu/`, `src/distogram.js`, `src/reference.js` |
 | Device creation | `src/device.js`: a plain device with the adapter's maximum limits, no optional features |
 
