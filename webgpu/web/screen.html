@@ -3,258 +3,249 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Boltz-GenFree screen (WebGPU)</title>
+<title>WebGPU &middot; Boltz-GenFree</title>
+<meta name="description" content="Rank ligands with Boltz-GenFree on your own GPU, inside the browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Red+Hat+Mono:wght@400..700&display=swap">
+<link rel="stylesheet" href="../../site.css">
 <style>
-/* Layout and visual design follow a static mock made for this page; the script below wires it up. */
-:root {
-  color-scheme: light dark;
-  --bg: #f6f7f8; --surface: #ffffff; --surface-2: #f0f2f4;
-  --text: #16191d; --muted: #5d6670; --faint: #8a939c;
-  --border: #dde1e5; --border-strong: #c3c9cf;
-  --accent: #2357c6; --accent-hover: #1b47a6; --accent-soft: #e6edfb; --on-accent: #ffffff;
-  --warn: #a3470f; --warn-soft: #fcf0e6; --ok: #1f7a4a;
-  --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
-  --shadow: 0 1px 2px rgb(16 24 40 / .05);
-  --r-sm: 4px; --r-md: 6px; --r-lg: 10px;
-  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 24px; --s-6: 32px; --s-7: 48px;
-  --fs-xs: 12px; --fs-sm: 13px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px;
-  --ctl-h: 36px;
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115; --surface: #171a20; --surface-2: #1e222a;
-    --text: #e6e9ed; --muted: #a0a8b2; --faint: #79828c;
-    --border: #2a2f38; --border-strong: #3a414c;
-    --accent: #6d9bff; --accent-hover: #8cb0ff; --accent-soft: #1d2a45; --on-accent: #0b1020;
-    --warn: #f0a46b; --warn-soft: #33231a; --ok: #5cc98d;
-    --shadow: none;
-  }
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: var(--fs-md)/1.5 var(--font-ui); -webkit-font-smoothing: antialiased; }
-.page { max-width: 1160px; margin: 0 auto; padding: 0 var(--s-5) var(--s-7); }
-.hidden { display: none !important; }
-
-.titlebar { display: flex; align-items: baseline; gap: var(--s-3); padding: var(--s-4) 0; border-bottom: 1px solid var(--border); margin-bottom: var(--s-5); }
-.titlebar h1 { margin: 0; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -.01em; }
-.titlebar p { margin: 0; font-size: var(--fs-sm); color: var(--faint); }
-
-.step { margin-top: var(--s-6); }
-.step:first-of-type { margin-top: 0; }
-.step-h { display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-3); font-size: var(--fs-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
-.step-h b { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border-strong); font-size: 11px; letter-spacing: 0; }
-
-.inputs { display: grid; grid-template-columns: 3fr 2fr; gap: var(--s-4); }
-.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s-4); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: var(--s-3); }
-.panel-head { display: flex; justify-content: space-between; align-items: baseline; }
-.panel-head label { font-weight: 600; font-size: var(--fs-md); }
-.info { font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
-.info.warn { color: var(--warn); }
-textarea, input[type=text], input[type=number], select {
-  font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md);
-  min-height: var(--ctl-h); padding: 0 var(--s-3); transition: border-color .12s;
-}
-textarea { font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.55; padding: var(--s-3); resize: vertical; min-height: 220px; width: 100%; background: var(--surface-2); border-color: var(--border); word-break: break-all; }
-textarea:hover, input:hover, select:hover { border-color: var(--faint); }
-:focus-visible { outline: none; box-shadow: var(--focus); }
-textarea:focus-visible, input:focus-visible, select:focus-visible { border-color: var(--accent); }
-.subrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); font-size: var(--fs-sm); color: var(--muted); }
-.hint { font-size: var(--fs-xs); color: var(--faint); }
-.hint code { font-family: var(--font-mono); }
-
-button, .filebtn { font: inherit; font-size: var(--fs-sm); min-height: var(--ctl-h); padding: 0 var(--s-4); border-radius: var(--r-md); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; display: inline-flex; align-items: center; gap: var(--s-2); }
-button:hover, .filebtn:hover { background: var(--surface-2); }
-button:disabled { opacity: .45; cursor: not-allowed; background: var(--surface); }
-.filebtn { position: relative; }
-.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-.filebtn:focus-within { box-shadow: var(--focus); }
-.btn-text { border-color: transparent; background: none; color: var(--accent); padding: 0 var(--s-2); }
-.btn-text:hover { background: var(--accent-soft); }
-.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-size: var(--fs-md); font-weight: 600; min-height: 44px; padding: 0 var(--s-6); }
-.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-
-.settings { display: flex; flex-wrap: wrap; gap: var(--s-3) var(--s-6); align-items: center; padding: var(--s-3) 0; font-size: var(--fs-sm); }
-.field { display: flex; align-items: center; gap: var(--s-2); color: var(--muted); }
-.field select, .field input[type=number] { font-size: var(--fs-sm); }
-input[type=number] { width: 88px; font-variant-numeric: tabular-nums; }
-input[type=range] { accent-color: var(--accent); width: 120px; min-height: var(--ctl-h); }
-output { font-family: var(--font-mono); color: var(--text); min-width: 1ch; }
-
-details.disc { border-top: 1px solid var(--border); }
-details.disc:last-of-type { border-bottom: 1px solid var(--border); }
-details.disc > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: var(--s-2); min-height: 40px; font-size: var(--fs-sm); font-weight: 500; border-radius: var(--r-sm); }
-details.disc > summary::-webkit-details-marker { display: none; }
-details.disc > summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); margin: 0 var(--s-2) 0 2px; transition: transform .15s; }
-details[open].disc > summary::before { transform: rotate(45deg); }
-details.disc > summary:hover { color: var(--accent); }
-.sum-status { margin-left: auto; font-size: var(--fs-xs); font-weight: 400; color: var(--faint); }
-.sum-status.warn { color: var(--warn); font-weight: 500; }
-.sum-status.warn::before { content: "\25B2  "; font-size: 9px; }
-.disc-body { padding: var(--s-1) 0 var(--s-4) 22px; display: grid; gap: var(--s-3); }
-.msg { font-size: var(--fs-sm); padding: var(--s-2) var(--s-3); border-radius: var(--r-md); background: var(--surface-2); color: var(--muted); border-left: 3px solid var(--border-strong); }
-.msg.warn { background: var(--warn-soft); color: var(--warn); border-left-color: var(--warn); }
-.row { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; }
-.strip { display: flex; flex-wrap: wrap; gap: 2px; max-height: 132px; overflow: auto; padding: var(--s-2); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-md); font: 11px/1 var(--font-mono); }
-.strip span { width: 16px; height: 18px; display: grid; place-items: center; border-radius: 2px; color: var(--faint); cursor: pointer; user-select: none; }
-.strip span:hover { background: var(--border); color: var(--text); }
-.strip span.on { background: var(--accent); color: var(--on-accent); }
-.strip span.on:hover { background: var(--accent-hover); }
-details.nested > summary { font-size: var(--fs-xs); color: var(--muted); cursor: pointer; min-height: 28px; display: inline-flex; align-items: center; }
-details.nested .row { margin-top: var(--s-2); }
-#crop { flex: 1; min-width: 220px; font-family: var(--font-mono); font-size: var(--fs-sm); }
-.adv { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); }
-.adv label { display: grid; gap: var(--s-1); font-size: var(--fs-xs); color: var(--muted); }
-.adv input, .adv select { font-size: var(--fs-sm); }
-.adv input[type=text] { font-family: var(--font-mono); width: 100%; }
-
-.runbar { margin-top: var(--s-5); display: grid; grid-template-columns: auto auto 1fr; gap: var(--s-3); align-items: center; }
-#status { font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#status.err { color: var(--warn); }
-#bar { grid-column: 1 / -1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
-#bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
-
-.res-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); margin-bottom: var(--s-3); }
-.res-head h2 { margin: 0 auto 0 0; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.01em; }
-.res-head .meta { font-size: var(--fs-sm); color: var(--faint); font-weight: 400; margin-left: var(--s-2); }
-.table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); max-height: 520px; overflow: auto; box-shadow: var(--shadow); }
-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-sm); }
-thead th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); letter-spacing: .03em; padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--border-strong); white-space: nowrap; }
-thead th.num { text-align: right; }
-thead th.sorted { color: var(--accent); }
-thead th.sorted::after { content: " \2193"; }
-thead th.sorted.asc::after { content: " \2191"; }
-td { padding: 0 var(--s-3); height: 40px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
-tbody tr:last-child td { border-bottom: 0; }
-tbody tr:hover td { background: var(--surface-2); }
-td.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
-td.rank { width: 1%; color: var(--faint); }
-td.id { font-weight: 500; color: var(--text); }
-td.val { color: var(--text); font-size: var(--fs-sm); }
-td.smiles { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); max-width: 0; width: 34%; overflow: hidden; text-overflow: ellipsis; }
-td.prob { width: 180px; }
-.p { display: flex; align-items: center; gap: var(--s-2); font: var(--fs-sm) var(--font-mono); font-variant-numeric: tabular-nums; }
-.p::before { content: ""; order: 2; flex: 1; height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--accent) calc(var(--p) * 100%), var(--border) 0); min-width: 60px; }
-.p.hi { color: var(--accent); font-weight: 600; }
-tr.top td.rank { color: var(--accent); font-weight: 600; }
-tr.pending td { color: var(--faint); }
-tr.pending .p::before { background: repeating-linear-gradient(90deg, var(--border) 0 4px, transparent 4px 8px); }
-td.err { color: var(--warn); white-space: normal; font-size: var(--fs-xs); }
-td.err::before { content: "\25B2  "; font-size: 9px; }
-.empty { padding: var(--s-7) var(--s-4); text-align: center; color: var(--faint); font-size: var(--fs-sm); }
-
-@media (max-width: 760px) {
-  .page { padding: 0 var(--s-4) var(--s-6); }
-  .inputs, .adv { grid-template-columns: 1fr; }
-  textarea { min-height: 160px; }
-  .settings { gap: var(--s-3) var(--s-4); }
-  .runbar { grid-template-columns: 1fr auto; }
-  .runbar .btn-primary { width: 100%; }
-  #status { grid-column: 1 / -1; white-space: normal; }
-  td.smiles { display: none; } thead th.c-smiles { display: none; }
-}
+  /* disabled states the shared sheet does not cover; square, no new shapes */
+  .btn:disabled, .tbtn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn:disabled:hover, .tbtn:disabled:hover { border-color: var(--line); color: var(--ink); }
+  .cli { margin-top: 22px; }
 </style>
 </head>
 <body>
-<div class="page">
-  <header class="titlebar"><h1>Boltz-GenFree screen</h1><p>runs in this page, on WebGPU</p></header>
+<a class="skip" href="#main">Skip to the tool</a>
 
-  <section class="step">
-    <h2 class="step-h"><b>1</b> Inputs</h2>
-    <div class="inputs">
-      <div class="panel">
-        <div class="panel-head"><label for="seq">Sequence</label><span id="seqInfo" class="info"></span></div>
-        <textarea id="seq" spellcheck="false">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
-        <div class="subrow">
-          <span>MSA (optional)</span>
-          <label class="filebtn">Choose A3M file<input id="a3mFile" type="file" accept=".a3m,.fasta,.fa,.txt"></label>
-          <button id="a3mClear" class="btn-text hidden" type="button">Remove</button>
-          <span id="a3mInfo" class="info">none: single sequence</span>
-        </div>
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="../../index.html"><img src="../../logo-on-dark.svg" alt="Boltz-GenFree home"></a>
+    <nav class="site-nav" aria-label="Site">
+      <ol>
+        <li><a href="../../index.html"><span class="nn">01</span>Home</a></li>
+        <li><a href="../../docs/index.html"><span class="nn">02</span>Docs</a></li>
+        <li><a href="../../research.html"><span class="nn">03</span>Research</a></li>
+        <li><a class="wgpu" href="screen.html" aria-current="page"><span class="nn">04</span>WebGPU</a></li>
+        <li class="gh-li"><a class="gh" href="https://github.com/N283T/boltz-genfree">GitHub</a></li>
+      </ol>
+    </nav>
+  </div>
+</header>
+
+<section class="pagehead tool-head">
+  <div class="wrap">
+    <div class="row">
+      <div>
+        <p class="crumb"><b>04</b> &middot; WebGPU tool</p>
+        <h1>Screen in the <em>browser</em></h1>
+        <p>Rank ligands against one receptor on your own GPU. Nothing is uploaded.</p>
       </div>
-      <div class="panel">
-        <div class="panel-head"><label for="ligands">Ligands</label><span id="ligInfo" class="info"></span></div>
-        <textarea id="ligands" spellcheck="false">id,smiles
+      <a class="doclink" href="../../docs/index.html">Larger libraries: command line</a>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="reqs" aria-label="Requirements">
+      <div><i></i><span><b>WebGPU browser</b>Recent Chrome or Edge; other browsers not verified</span></div>
+      <div><i></i><span><b>About 380 MB first load</b>Trunk weights from Hugging Face, cached in the browser</span></div>
+      <div><i></i><span><b>Nothing uploaded</b>Sequences and ligands stay on your machine</span></div>
+      <div><i class="o"></i><span><b>Receptor up to 200 residues</b>Longer ones: crop with a reference complex</span></div>
+    </div>
+  </div>
+</section>
+
+<main id="main" class="tool">
+  <div class="wrap">
+
+    <!-- ============ STEP 1: inputs ============ -->
+    <section class="tstep" aria-labelledby="s1">
+      <div class="shead"><span class="num">1</span><h2 id="s1">Inputs</h2><span class="hint">Type, paste, or choose a file</span></div>
+      <div class="grid inputs">
+        <div class="ipanel">
+          <div class="ph"><label class="fl" for="seq">Sequence</label><span class="info" id="seqInfo"></span></div>
+          <textarea class="ta" id="seq" spellcheck="false" placeholder="Paste a protein sequence (one letter per residue, no header)">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
+          <div class="pf">
+            <span class="opt">Optional</span>
+            <span class="fl">MSA, A3M file</span>
+            <input type="file" id="a3mFile" accept=".a3m,.fasta,.fa,.txt" aria-label="MSA, A3M file">
+            <button type="button" class="tbtn txt" id="a3mClear" hidden>Remove</button>
+            <span class="info" id="a3mInfo">none: single sequence</span>
+          </div>
+        </div>
+        <div class="ipanel">
+          <div class="ph"><label class="fl" for="ligands">Ligands</label><span class="info" id="ligInfo"></span></div>
+          <textarea class="ta" id="ligands" spellcheck="false" placeholder="One SMILES per line, or id,SMILES">id,smiles
 glycine,NCC(=O)O
 phenol,Oc1ccccc1
 acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
-        <div class="subrow">
-          <label class="filebtn">Choose file<input id="ligFile" type="file" accept=".csv,.tsv,.txt,.smi"></label>
-          <span class="hint">One SMILES per line, <code>id,SMILES</code>, or a CSV/TSV with a <code>smiles</code> column</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="step">
-    <h2 class="step-h"><b>2</b> Settings</h2>
-    <div class="settings">
-      <label class="field">Recycling <input id="recycles" type="range" min="0" max="5" step="1" value="0"><output id="recyclesOut" for="recycles">0</output></label>
-      <label class="field">Seed <input id="seed" type="number" value="0" step="1"></label>
-      <label class="field">Ligand conformer
-        <select id="conformer"><option value="skip">skip (GenFree default)</option><option value="etkdg">etkdg</option><option value="rdkit_2d">rdkit_2d</option></select></label>
-    </div>
-
-    <details class="disc" id="cropBox">
-      <summary>Receptor crop <span id="cropSummary" class="sum-status"></span></summary>
-      <div class="disc-body">
-        <div id="fit" class="msg"></div>
-        <div class="subrow">
-          <label class="filebtn">Reference complex<input id="refFile" type="file" accept=".pdb,.ent,.cif,.mmcif"></label>
-          <span id="refInfo" class="info">PDB or mmCIF: keeps the residues nearest to its ligand</span>
-        </div>
-        <div id="cropSelects" class="row hidden">
-          <label class="field" id="chainBox">Chain <select id="refChain"></select></label>
-          <label class="field" id="ligandBox">Ligand <select id="refLigand"></select></label>
-        </div>
-        <div id="cropInfo" class="info"></div>
-        <div id="strip" class="strip" aria-label="Residue selection"></div>
-        <details class="nested">
-          <summary>Edit as text</summary>
-          <div class="row">
-            <input id="crop" type="text" placeholder="keep all residues, or e.g. 0-99,120" aria-label="Residues to keep, 0-based">
-            <button id="cropReset" type="button" disabled>Use the reference's choice</button>
-            <button id="cropClear" type="button">Keep all</button>
+          <div class="pf">
+            <input type="file" id="ligFile" accept=".csv,.tsv,.txt,.smi" aria-label="Ligand file">
+            <span class="fmt">One SMILES per line, <code>id,SMILES</code>, or a CSV/TSV with a <code>smiles</code> column (the id column is optional).</span>
           </div>
-        </details>
+        </div>
       </div>
-    </details>
-    <details class="disc">
-      <summary>Advanced <span class="sum-status">weights</span></summary>
-      <div class="disc-body adv">
-        <label>Trunk weights
-          <select id="weightsSource"><option value="localfold">LocalFold int5, Hugging Face (about 380 MB, cached)</option><option value="own">own float32 pack, this server (about 805 MB)</option></select></label>
-        <label>Trunk manifest URL <input id="weights" type="text" value="https://huggingface.co/sokrypton/localfold/resolve/651a25ba8a57c6d18caacf50ab7180b255eb5a82/boltz2-int5/manifest.json"></label>
-        <label>Affinity pack (manifest URL) <input id="affinity" type="text" value="/packs/genfree-affinity.json"></label>
+    </section>
+
+    <!-- ============ STEP 2: settings ============ -->
+    <section class="tstep" aria-labelledby="s2">
+      <div class="shead"><span class="num">2</span><h2 id="s2">Settings</h2><span class="hint">The defaults are GenFree's</span></div>
+      <div class="settings">
+        <div>
+          <label class="fl" for="recycles">Recycling</label>
+          <div class="rng"><input type="range" id="recycles" min="0" max="5" step="1" value="0"><output id="recyclesOut" for="recycles">0</output></div>
+          <div class="ticks" aria-hidden="true"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span></div>
+        </div>
+        <div>
+          <label class="fl" for="seed">Seed</label>
+          <input class="inp mono" type="number" id="seed" value="0" step="1">
+        </div>
+        <div>
+          <label class="fl" for="conformer">Ligand conformer</label>
+          <select class="sel" id="conformer">
+            <option value="skip">skip (GenFree default)</option>
+            <option value="etkdg">etkdg</option>
+            <option value="rdkit_2d">rdkit_2d</option>
+          </select>
+        </div>
       </div>
-    </details>
 
-    <div class="runbar">
-      <button id="run" class="btn-primary" type="button">Run</button>
-      <button id="stop" type="button" disabled>Stop</button>
-      <span id="status" role="status">idle</span>
-      <div id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div></div></div>
-    </div>
-  </section>
+      <details class="fold" id="cropBox">
+        <summary>Receptor crop <span class="sm" id="cropSummary"></span></summary>
+        <div class="fb">
+          <p class="fit" id="fit"></p>
+          <div class="croprow">
+            <div class="refb">
+              <label class="fl" for="refFile">Reference complex</label>
+              <input type="file" id="refFile" accept=".pdb,.ent,.cif,.mmcif">
+              <span class="info" id="refInfo">PDB or mmCIF: keeps the residues nearest to its ligand</span>
+            </div>
+            <div id="cropSelects" hidden>
+              <div id="chainBox"><label class="fl" for="refChain">Chain</label><select class="sel" id="refChain"></select></div>
+              <div id="ligandBox"><label class="fl" for="refLigand">Ligand</label><select class="sel" id="refLigand"></select></div>
+            </div>
+          </div>
+          <p class="info cropinfo" id="cropInfo"></p>
+          <div class="strip" id="strip" role="group" aria-label="Residue selection, click to toggle"></div>
+          <div class="stripkey"><span><i class="on"></i>kept</span><span><i></i>cropped</span><span>every 10th residue underlined; click a cell to toggle it</span></div>
+          <details class="sub-fold">
+            <summary>Edit as text</summary>
+            <div class="edrow">
+              <input class="inp mono" type="text" id="crop" placeholder="keep all residues, or e.g. 0-99,120" aria-label="Residues to keep, 0-based">
+              <button type="button" class="tbtn" id="cropReset" disabled>Use the reference's choice</button>
+              <button type="button" class="tbtn" id="cropClear">Keep all</button>
+            </div>
+          </details>
+        </div>
+      </details>
 
-  <section class="step">
-    <h2 class="step-h"><b>3</b> Results</h2>
-    <div class="res-head">
-      <h2>Results<span class="meta" id="resMeta"></span></h2>
-      <label class="field">Sort
-        <select id="sort"><option value="p-desc">P(binder), high first</option><option value="value-desc">value, high first</option><option value="value-asc">value, low first</option><option value="input">input order</option></select></label>
-      <button id="download" type="button" disabled>Download scores.csv</button>
+      <details class="fold">
+        <summary>Advanced <span class="sm" id="advSummary">LocalFold int5 &middot; default</span></summary>
+        <div class="fb adv">
+          <div>
+            <label class="fl" for="weightsSource">Trunk weights</label>
+            <select class="sel" id="weightsSource">
+              <option value="localfold">LocalFold int5, Hugging Face (about 380 MB, cached)</option>
+              <option value="own">own float32 pack, this server (about 805 MB)</option>
+            </select>
+          </div>
+          <div>
+            <label class="fl" for="weights">Trunk manifest URL</label>
+            <input class="inp mono" type="text" id="weights" value="https://huggingface.co/sokrypton/localfold/resolve/651a25ba8a57c6d18caacf50ab7180b255eb5a82/boltz2-int5/manifest.json">
+          </div>
+          <div>
+            <label class="fl" for="affinity">Affinity pack (manifest URL)</label>
+            <input class="inp mono" type="text" id="affinity" value="../packs/genfree-affinity.json">
+          </div>
+        </div>
+      </details>
+
+      <div class="runbar on-dark">
+        <div class="rb">
+          <button type="button" class="btn pri" id="run">Run</button>
+          <button type="button" class="btn stop" id="stop" disabled>Stop</button>
+          <span id="status" role="status">idle</span>
+        </div>
+        <div id="bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div></div></div>
+      </div>
+    </section>
+
+    <!-- ============ STEP 3: results ============ -->
+    <section class="tstep" aria-labelledby="s3">
+      <div class="shead"><span class="num">3</span><h2 id="s3">Results</h2></div>
+      <div class="reshead">
+        <h3>Ranking</h3>
+        <span id="resMeta" hidden></span>
+        <div class="tools">
+          <label class="fl" for="sort">Sort</label>
+          <select class="sel" id="sort">
+            <option value="p-desc">P(binder), high first</option>
+            <option value="value-desc">value, high first</option>
+            <option value="value-asc">value, low first</option>
+            <option value="input">input order</option>
+          </select>
+          <button type="button" class="btn" id="download" disabled>Download scores.csv</button>
+        </div>
+      </div>
+      <div class="res" hidden>
+        <table id="results">
+          <thead>
+            <tr>
+              <th>#</th><th>ID</th><th>SMILES</th>
+              <th class="n" id="thValue" aria-sort="none">Value</th>
+              <th id="thProb" aria-sort="none">P(binder)</th>
+              <th class="n">Tokens</th><th class="n">ms</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="empty" role="status">
+        <p>Run to see results.</p>
+        <small>Rows appear here as each ligand is scored.</small>
+      </div>
+      <p class="info cli">Larger libraries: <code>boltz-genfree screen screen.yaml</code> (Python) or <code>node webgpu/src/cli.js screen screen.yaml</code> (Node WebGPU). Details in the <a href="../../docs/index.html">docs</a>.</p>
+    </section>
+    <div class="tool-end"></div>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="rule"></div>
+  <div class="wrap">
+    <div class="cols">
+      <div class="fbrand">
+        <img src="../../logo-on-light.svg" alt="Boltz-GenFree">
+        <p>Structure-generation-free ranking for first-stage affinity screening.</p>
+      </div>
+      <div>
+        <h3>Site</h3>
+        <ul>
+          <li><a href="../../index.html">Home</a></li>
+          <li><a href="../../docs/index.html">Docs</a></li>
+          <li><a href="../../research.html">Research</a></li>
+          <li><a href="screen.html" aria-current="page">WebGPU</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/N283T/boltz-genfree">Source code</a></li>
+          <li><a href="https://github.com/N283T/boltz-genfree/releases">Releases</a></li>
+          <li><a href="https://github.com/N283T/boltz-genfree/issues">Issues</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Cite</h3>
+        <ul>
+          <li><a href="https://doi.org/10.26434/chemrxiv.15012606/v1">Preprint</a></li>
+          <li><a href="https://doi.org/10.5281/zenodo.23949585">Data on Zenodo</a></li>
+        </ul>
+      </div>
     </div>
-    <div class="table-wrap">
-      <table id="results" class="hidden">
-        <thead><tr><th class="num">#</th><th>id</th><th class="c-smiles">SMILES</th><th class="num" id="thValue">value</th><th id="thProb">P(binder)</th><th class="num">tokens</th><th class="num">ms</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <div class="empty" id="empty">Run to see results.</div>
-    </div>
-  </section>
-</div>
+  </div>
+  <div class="legal"><span>MIT License &middot; Boltz-2 weights under their own terms</span><span>Not affiliated with the Boltz authors</span></div>
+</footer>
 
 <script type="module">
 import { deviceFromAdapter } from "../src/device.js";
@@ -271,7 +262,7 @@ const LIMITS = { receptorTokens: 200, ligandTokens: 128, totalTokens: 256, total
 const MAX_RECEPTOR = LIMITS.receptorTokens;
 const WEIGHT_URLS = {
   localfold: "https://huggingface.co/sokrypton/localfold/resolve/651a25ba8a57c6d18caacf50ab7180b255eb5a82/boltz2-int5/manifest.json",
-  own: "/packs/boltz2-trunk-own/boltz2-trunk-own.json",
+  own: "../packs/boltz2-trunk-own/boltz2-trunk-own.json",
 };
 
 let a3mText = "";
@@ -310,12 +301,12 @@ function updateSeqInfo() {
   const cropped = parseIndices($("crop").value, true);
   const used = cropped ? cropped.length : n;
   $("seqInfo").textContent = `${n} residues${cropped ? `, keeping ${used}` : ""}${used > MAX_RECEPTOR ? " - crop to 200 or fewer" : ""}`;
-  $("seqInfo").className = used > MAX_RECEPTOR ? "info warn" : "info";
+  $("seqInfo").className = used > MAX_RECEPTOR ? "info bad" : "info ok";
   scheduleFitCheck();
 }
 function updateLigInfo() {
-  try { $("ligInfo").textContent = `${parseLigandText($("ligands").value).length} ligands`; $("ligInfo").className = "info"; }
-  catch (e) { $("ligInfo").textContent = String(e.message); $("ligInfo").className = "info warn"; }
+  try { $("ligInfo").textContent = `${parseLigandText($("ligands").value).length} ligands`; $("ligInfo").className = "info ok"; }
+  catch (e) { $("ligInfo").textContent = String(e.message); $("ligInfo").className = "info bad"; }
 }
 $("seq").addEventListener("input", () => { updateSeqInfo(); onInputsChanged(); });
 $("ligands").addEventListener("input", () => { updateLigInfo(); onInputsChanged(); scheduleFitCheck(); });
@@ -326,9 +317,9 @@ $("a3mFile").addEventListener("change", async () => {
   if (!file) return;
   a3mText = await file.text();
   $("a3mInfo").textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB`;
-  $("a3mClear").classList.remove("hidden");
+  $("a3mClear").hidden = false;
 });
-$("a3mClear").addEventListener("click", () => { a3mText = ""; $("a3mFile").value = ""; $("a3mInfo").textContent = "none: single sequence"; $("a3mClear").classList.add("hidden"); });
+$("a3mClear").addEventListener("click", () => { a3mText = ""; $("a3mFile").value = ""; $("a3mInfo").textContent = "none: single sequence"; $("a3mClear").hidden = true; });
 $("ligFile").addEventListener("change", async () => {
   const file = $("ligFile").files[0];
   if (!file) return;
@@ -343,7 +334,7 @@ function renderStrip() {
   const strip = $("strip");
   if (strip.dataset.seq !== seq) {
     strip.dataset.seq = seq;
-    strip.replaceChildren(...Array.from(seq, (letter, i) => { const span = document.createElement("span"); span.textContent = letter; span.title = `residue ${i}`; span.dataset.i = i; return span; }));
+    strip.replaceChildren(...Array.from(seq, (letter, i) => { const span = document.createElement("span"); span.textContent = letter; span.title = `${letter}${i + 1} (index ${i})`; span.dataset.i = i; if ((i + 1) % 10 === 0) span.className = "k"; return span; }));
   }
   for (const span of strip.children) span.classList.toggle("on", keep.has(Number(span.dataset.i)));
 }
@@ -382,8 +373,8 @@ let fitTimer = null;
 function scheduleFitCheck() { clearTimeout(fitTimer); fitTimer = setTimeout(fitCheck, 250); }
 function fitCheck() {
   const seq = sequenceText();
-  const setFit = (text, warn) => { $("fit").textContent = text; $("fit").className = warn ? "msg warn" : "msg"; };
-  const setSummary = (text, warn) => { $("cropSummary").textContent = text; $("cropSummary").className = warn ? "sum-status warn" : "sum-status"; };
+  const setFit = (text, warn) => { $("fit").textContent = text; $("fit").className = warn ? "fit warn" : "fit"; };
+  const setSummary = (text, warn) => { $("cropSummary").textContent = text; $("cropSummary").className = warn ? "sm warn" : "sm"; };
   if (!seq) { setFit("Enter a sequence to check the size limits.", false); setSummary("", false); return; }
   let ligands;
   try { ligands = parseLigandText($("ligands").value); } catch (e) { setFit(`Ligand list: ${e.message}`, true); setSummary("check the ligand list", true); return; }
@@ -422,7 +413,7 @@ function fitCheck() {
   if (!unreadable.length && (tooLong || problems.some((p) => !p.hopeless)) && !$("cropBox").open) $("cropBox").open = true;
 }
 
-function cropInfo(text, bad = false) { $("cropInfo").textContent = text; $("cropInfo").className = bad ? "info warn" : "info"; }
+function cropInfo(text, bad = false) { $("cropInfo").textContent = text; $("cropInfo").className = bad ? "info cropinfo bad" : "info cropinfo"; }
 
 function applyReferenceCrop() {
   manual = false;
@@ -454,8 +445,8 @@ $("refFile").addEventListener("change", async () => {
     if (refInfo.ligands.length === 0) throw new Error("no ligand (non-polymer residue) found in the reference");
   } catch (e) {
     refStructure = null; refInfo = null;
-    $("refInfo").textContent = String(e?.message ?? e); $("refInfo").className = "info warn";
-    $("cropSelects").classList.add("hidden"); $("cropReset").disabled = true;
+    $("refInfo").textContent = String(e?.message ?? e); $("refInfo").className = "info bad";
+    $("cropSelects").hidden = true; $("cropReset").disabled = true;
     return;
   }
   $("refInfo").textContent = `${file.name} · ${refInfo.chains.length} protein chain(s), ${refInfo.ligands.length} ligand residue(s)`; $("refInfo").className = "info";
@@ -476,9 +467,9 @@ $("refFile").addEventListener("change", async () => {
   }));
   $("refLigand").value = String(refInfo.ligands.reduce((best, l, i) => (l.atoms > refInfo.ligands[best].atoms ? i : best), 0));
   // the two choices are only shown when there is something to choose
-  $("chainBox").classList.toggle("hidden", refInfo.chains.length === 1);
-  $("ligandBox").classList.toggle("hidden", refInfo.ligands.length === 1);
-  $("cropSelects").classList.toggle("hidden", refInfo.chains.length === 1 && refInfo.ligands.length === 1);
+  $("chainBox").hidden = refInfo.chains.length === 1;
+  $("ligandBox").hidden = refInfo.ligands.length === 1;
+  $("cropSelects").hidden = refInfo.chains.length === 1 && refInfo.ligands.length === 1;
   $("cropReset").disabled = false;
   applyReferenceCrop();
 });
@@ -486,6 +477,7 @@ for (const id of ["refChain", "refLigand"]) $(id).addEventListener("change", app
 $("cropReset").addEventListener("click", applyReferenceCrop);
 
 // ---- results ------------------------------------------------------------------------------------------------------------------
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 function render() {
   const order = [...rows];
   const sort = $("sort").value;
@@ -493,40 +485,44 @@ function render() {
   if (sort === "value-desc") order.sort((a, b) => val(b) - val(a));
   else if (sort === "value-asc") order.sort((a, b) => (a.result ? val(a) : Infinity) - (b.result ? val(b) : Infinity));
   else if (sort === "p-desc") order.sort((a, b) => (b.result?.probability ?? -1) - (a.result?.probability ?? -1));
-  $("thProb").className = sort === "p-desc" ? "sorted" : "";
-  $("thValue").className = sort.startsWith("value") ? `num sorted${sort === "value-asc" ? " asc" : ""}` : "num";
-  $("results").classList.toggle("hidden", rows.length === 0);
-  $("empty").classList.toggle("hidden", rows.length !== 0);
+  $("thProb").setAttribute("aria-sort", sort === "p-desc" ? "descending" : "none");
+  $("thValue").setAttribute("aria-sort", sort === "value-desc" ? "descending" : sort === "value-asc" ? "ascending" : "none");
+  $("results").parentElement.hidden = rows.length === 0;
+  $("empty").hidden = rows.length !== 0;
   const finished = rows.filter((r) => r.result || r.error).length;
   $("resMeta").textContent = rows.length ? `${finished} of ${rows.length} done` : "";
+  $("resMeta").hidden = rows.length === 0;
   const body = $("results").tBodies[0];
   body.replaceChildren(...order.map((r, position) => {
     const tr = document.createElement("tr");
-    const cell = (text, cls = "") => { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.append(td); return td; };
-    cell(r.error ? "–" : position + 1, "num rank"); cell(r.lig.id, "id"); cell(r.lig.value, "smiles").title = r.lig.value;
+    const cell = (cls, content) => { const td = el("td", cls, typeof content === "object" ? undefined : content); if (typeof content === "object") td.append(content); tr.append(td); return td; };
+    const smiles = el("span", "", r.lig.value); smiles.title = r.lig.value;
+    const head = (rank) => { cell("rk", rank); cell("id", r.lig.id); cell("d", smiles); };
     if (r.result) {
       const p = r.result.probability;
       if (p > 0.75) tr.className = "top";
-      cell(r.result.value.toFixed(4), "num val");
-      const td = cell("", "prob");
-      const span = document.createElement("span");
-      span.className = p > 0.75 ? "p hi" : "p"; span.style.setProperty("--p", String(Math.min(1, Math.max(0, p)))); span.textContent = p.toFixed(3);
-      td.append(span);
-      cell(r.result.tokens, "num"); cell(Math.round(r.ms), "num");
+      head(position + 1);
+      cell("n v", r.result.value.toFixed(4));
+      const pb = el("div", "pb"); const bar = el("span"); bar.style.setProperty("--p", String(Math.min(1, Math.max(0, p))));
+      pb.append(bar, p.toFixed(3));
+      cell("pr", pb);
+      cell("n", r.result.tokens); cell("n", Math.round(r.ms));
     } else if (r.error) {
-      const td = cell(r.error, "err"); td.colSpan = 4;
+      tr.className = "error";
+      head("–");
+      const td = cell("msg", ""); td.colSpan = 4; td.append(el("b", "", "Failed"), r.error);
     } else {
       tr.className = "pending";
-      cell("–", "num");
-      const td = cell("", "prob");
-      const span = document.createElement("span");
-      span.className = "p"; span.style.setProperty("--p", "0"); span.textContent = "pending";
-      td.append(span);
-      cell("–", "num"); cell("–", "num");
+      head("–");
+      const td = cell("n", el("span", "wait", r.running ? "Scoring" : "Queued")); td.colSpan = 2;
+      cell("n", "–"); cell("n", "–");
     }
     return tr;
   }));
 }
+// clicking a sortable header sorts by it (the Sort menu stays the keyboard route)
+$("thProb").addEventListener("click", () => { $("sort").value = "p-desc"; render(); });
+$("thValue").addEventListener("click", () => { $("sort").value = $("sort").value === "value-desc" ? "value-asc" : "value-desc"; render(); });
 $("sort").addEventListener("change", render);
 
 $("download").addEventListener("click", () => {
@@ -543,7 +539,10 @@ $("download").addEventListener("click", () => {
 $("stop").addEventListener("click", () => { stopRequested = true; $("stop").disabled = true; status("stopping after the current ligand..."); });
 
 // ---- running ------------------------------------------------------------------------------------------------------------------
-$("weightsSource").addEventListener("change", () => { $("weights").value = WEIGHT_URLS[$("weightsSource").value]; });
+$("weightsSource").addEventListener("change", () => {
+  $("weights").value = WEIGHT_URLS[$("weightsSource").value];
+  $("advSummary").textContent = $("weightsSource").value === "localfold" ? "LocalFold int5 \u00b7 default" : "own float32 pack";
+});
 
 async function ensureChain() {
   const source = $("weightsSource").value;
@@ -585,6 +584,7 @@ $("run").addEventListener("click", async () => {
     for (const r of rows) {
       if (stopRequested) break;
       status(`ligand ${done + 1} of ${rows.length}: ${r.lig.id}`);
+      r.running = true; render();
       const t0 = performance.now();
       try {
         r.result = await c.score({ sequence, a3m, smiles: r.lig.value, receptorIndices, ligandConformer: conformer }, {
@@ -593,6 +593,7 @@ $("run").addEventListener("click", async () => {
       } catch (e) {
         r.error = String(e?.message ?? e);
       }
+      r.running = false;
       r.ms = performance.now() - t0;
       done += 1;
       progress(done / rows.length);
