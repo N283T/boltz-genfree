@@ -57,13 +57,14 @@ node src/cli.js screen ../examples/screen.yaml --prepare-only    # validate the 
 node src/cli.js screen ../examples/screen.yaml                    # writes scores.csv, screen_status.json
 ```
 
-The config is the GenFree `screen.yaml`: `target.sequence`, `target.msa` (an A3M path), `ligands.csv|tsv|smiles|ccd`
+The config is the GenFree `screen.yaml`: `target.sequence`, `target.msa` (an A3M path, or `empty`), `ligands.csv|tsv|smiles|ccd`
 (`id_column`, `smiles_column`, `delimiter`), `output_dir`, `chunk_size` and `options.{seed, affinity_recycling_steps,
 ligand_reference_conformer, allow_extended_full_input}`. `scores.csv` has GenFree's columns. A re-run resumes from
 `.webgpu-records.jsonl`; a changed target, MSA, ligand list or option is rejected. The trunk runs once per ligand
-(about 2 s each for a 70-residue target on an Apple M4). Not supported yet, and rejected or noted explicitly: `target.crop`
-(reference-complex cropping; use `--receptor-indices` on the single-pair CLI), `msa: auto` (scored without an MSA, with a
-note), `ligands.sdf`, `affinity_adapter` / `affinity_checkpoint`, `affinity_conditioner_mode: folded`.
+(about 2 s each for a 70-residue target and 6 s for 117 residues on an Apple M4). On `examples/screen.yaml` with `msa: empty`, values agree with
+GenFree (float32, `accelerator: mps`) to 0.004 (glycine) and 0.0004 (phenol). GenFree's default `accelerator: gpu` runs bf16 on a Mac and differs more. Not supported yet, and rejected or noted explicitly: `target.crop`
+(reference-complex cropping; use `--receptor-indices` on the single-pair CLI), `msa: auto`, which is also the default when `msa` is omitted (scored without an MSA, with a
+note; write `msa: empty` to say so explicitly), `ligands.sdf`, `affinity_adapter` / `affinity_checkpoint`, `affinity_conditioner_mode: folded`.
 
 ### Browser page
 

@@ -56,4 +56,8 @@ test("loadScreenConfig: options, msa and unsupported features", () => {
   assert.throws(() => loadScreenConfig(write("target:\n  sequence: MKT\n  crop:\n    reference: x.cif\nligands:\n  smiles: [CC]\n")), /crop/);
   const auto = loadScreenConfig(write("target:\n  sequence: MKT\n  msa: auto\nligands:\n  smiles: [CC]\n"));
   assert.equal(auto.a3m, null); assert.match(auto.notes[0], /MSA server/);
+  const omitted = loadScreenConfig(write("target:\n  sequence: MKT\nligands:\n  smiles: [CC]\n"));
+  assert.match(omitted.notes[0], /MSA server/);
+  const empty = loadScreenConfig(write("target:\n  sequence: MKT\n  msa: empty\nligands:\n  smiles: [CC]\n"));
+  assert.equal(empty.a3m, null); assert.deepEqual(empty.notes, []);
 });

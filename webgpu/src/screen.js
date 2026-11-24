@@ -82,8 +82,10 @@ export function loadScreenConfig(configPath) {
   if (options.affinity_checkpoint || options.affinity_adapter) throw new Error("options.affinity_checkpoint / affinity_adapter are not supported (the pack is fixed; pass --pack)");
   const notes = [];
   let a3m = null;
-  if (target.msa && target.msa !== "auto") a3m = readFileSync(resolve(baseDir, String(target.msa)), "utf8");
-  else if (target.msa === "auto") notes.push("target.msa: auto needs the MSA server, which the WebGPU screen does not call; scored without an MSA");
+  const msa = target.msa ?? "auto";   // GenFree's default when the key is absent
+  if (msa === "empty") a3m = null;
+  else if (msa !== "auto") a3m = readFileSync(resolve(baseDir, String(msa)), "utf8");
+  else notes.push("target.msa: auto needs the MSA server, which the WebGPU screen does not call; scored without an MSA (use msa: empty to say so explicitly, or give an A3M path)");
   return {
     baseDir, notes, a3m,
     sequence: String(target.sequence).replace(/\s+/g, ""),
@@ -176,8 +178,8 @@ export async function runScreenCli(argv) {
       }
       const index = cfg.ligands.indexOf(lig);
       const row = {
-        record_id: lig.id, ligand_id: lig.id, ligand_kind: lig.kind, ligand_value: lig.value,
-        ligand_tokens: result.ligandTokens, chunk: Math.floor(index / cfg.chunkSize),
+        record_id: `${String(index + 1).padStart(6, "0")}_${lig.id}`, ligand_id: lig.id, ligand_kind: lig.kind, ligand_value: lig.value,
+        ligand_tokens: result.ligandTokens, chunk: `chunk_${String(Math.floor(index / cfg.chunkSize)).padStart(5, "0")}`,
         crop_budget: "complete_input", receptor_tokens: result.receptorTokens,
         affinity_pred_value: result.value, affinity_probability_binary: result.probability,
       };
