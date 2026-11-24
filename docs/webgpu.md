@@ -81,14 +81,20 @@ note; write `msa: empty` to say so explicitly), `ligands.sdf`, `affinity_adapter
 cd webgpu && node tools/serve.js && open http://127.0.0.1:4180/web/screen.html
 ```
 
-Sequence and ligands sit side by side (ligands: one SMILES per line, `id,SMILES`, or a CSV/TSV with a `smiles` column; MSA: none,
-pasted or opened as an A3M file). Below them, one row of settings: recycling (slider, 0-5), seed and ligand conformer mode.
-The receptor-crop section opens by itself once the sequence is over 200 residues; weights URLs are under Advanced. Run, Stop
-and Download are in the top bar. Results appear per
-ligand in a table sorted by P(binder) (also by value or input order); Stop ends after the current ligand; Download writes `scores.csv` with GenFree's columns plus
-`error`. A ligand that fails (for example over the size limit) is listed with its error and the run continues. Verified in
-the built-in browser (Apple Metal): three ligands on a 117-residue receptor in 24 s. Not in this page yet: MSA server, resume, a weights source other than the pack URL. `src/screen-core.js` holds the Node-free parts shared with
-the `screen` command.
+Sequence and ligands sit side by side (ligands: one SMILES per line, `id,SMILES`, or a CSV/TSV with a `smiles` column).
+The MSA is an optional A3M file (none = single sequence). Below them, one row of settings: recycling (slider, 0-5), seed and
+ligand conformer mode. Then the receptor-crop section, Advanced (weights URLs), and Run / Stop with the progress. Results
+appear per ligand in a table sorted by P(binder) (also by value or input order); Download scores.csv sits beside it and writes
+GenFree's columns plus `error`. A ligand that fails (for example over the size limit) is listed with its error and the run
+continues. Verified in the built-in browser (Apple Metal): three ligands on a 117-residue receptor in 24-27 s. Not in this
+page yet: MSA server, resume, a weights source other than the pack URL. `src/screen-core.js` holds the Node-free parts shared
+with the `screen` command.
+
+Size check: the crop section always says whether the receptor as it stands (cropped or not) plus every ligand fits GenFree's
+limits (receptor <= 200, ligand <= 128, receptor + ligand <= 256 tokens, atoms <= 2048). When everything fits it says that no
+crop is needed and the section can be left alone; when the receptor is too long it opens by itself; when a ligand is too large,
+or receptor + ligand is over 256, it names the ligands, and says whether a smaller crop would help (a ligand over 128 atoms
+cannot be helped by cropping).
 
 Receptor crop (GenFree's `target.crop`, `budget: library_fixed`): load a reference complex (PDB or mmCIF); the page picks
 the protein chain whose sequence matches the receptor exactly (mmCIF: declared polymer sequence via `label_seq_id`; PDB:

@@ -9,12 +9,12 @@
   @media (prefers-color-scheme: dark) { :root { --bg: #121212; --fg: #ececec; --muted: #9a9a9a; --line: #3a3a3a; --panel: #1c1c1c; --accent: #7fa6ff; --bad: #ff8a80; } }
   * { box-sizing: border-box; }
   body { font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; }
-  header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); }
+  header { border-bottom: 1px solid var(--line); }
   .bar { max-width: 72rem; margin: 0 auto; padding: .6rem 1rem; display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
   .bar h1 { font-size: 1.1rem; margin: 0 auto 0 0; }
-  #status { max-width: 72rem; margin: 0 auto; padding: 0 1rem .4rem; min-height: 1.6em; font-size: 13px; color: var(--muted); }
+  #status { font-size: 13px; color: var(--muted); }
   #status.warn { color: var(--bad); }
-  #bar { height: 3px; background: var(--panel); }
+  #bar { height: 3px; background: var(--panel); margin-top: .5rem; }
   #bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
   main { max-width: 72rem; margin: 0 auto; padding: 1rem 1rem 4rem; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
@@ -55,14 +55,7 @@
 </head>
 <body>
 <header>
-  <div class="bar">
-    <h1>Boltz-GenFree screen <span class="hint">on WebGPU, in this page</span></h1>
-    <button class="primary" id="run">Run</button>
-    <button id="stop" disabled>Stop</button>
-    <button id="download" disabled>Download scores.csv</button>
-  </div>
-  <div id="status" aria-live="polite">idle</div>
-  <div id="bar"><div></div></div>
+  <div class="bar"><h1>Boltz-GenFree screen <span class="hint">on WebGPU, in this page</span></h1></div>
 </header>
 
 <main>
@@ -71,13 +64,11 @@
     <h2><label for="seq">Sequence</label> <span class="hint" id="seqInfo"></span></h2>
     <textarea id="seq" spellcheck="false">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
     <div class="row">
-      <label for="msaMode">MSA
-        <select id="msaMode"><option value="none">none (single sequence)</option><option value="paste">paste A3M</option><option value="file">open A3M file</option></select>
-      </label>
-      <input type="file" id="a3mFile" accept=".a3m,.fasta,.fa,.txt" class="hidden">
+      <label for="a3mFile">MSA <span class="hint">(optional A3M file; none = single sequence)</span></label>
+      <input type="file" id="a3mFile" accept=".a3m,.fasta,.fa,.txt">
+      <button id="a3mClear" class="hidden">Remove</button>
       <span class="hint" id="a3mInfo"></span>
     </div>
-    <textarea id="a3m" class="hidden" rows="4" spellcheck="false" style="min-height:5rem;margin-top:.45rem" placeholder=">query&#10;SEQUENCE&#10;>hit&#10;..."></textarea>
   </section>
 
   <section>
@@ -100,7 +91,8 @@ acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
 
 <details id="cropBox">
   <summary>Receptor crop <span class="hint" id="cropSummary"></span></summary>
-  <p class="hint" style="margin:.4rem 0">A receptor longer than 200 residues must be cropped. Load a reference complex (PDB or mmCIF): the residues nearest to its ligand are kept, for the whole library. Click residues to add or remove them.</p>
+  <p id="fit" style="margin:.5rem 0"></p>
+  <p class="hint" id="cropHelp" style="margin:.4rem 0">To crop: load a reference complex (PDB or mmCIF). The residues nearest to its ligand are kept, for the whole library. Click residues to add or remove them.</p>
   <div class="row"><input type="file" id="refFile" accept=".pdb,.ent,.cif,.mmcif"><span class="hint" id="refInfo"></span></div>
   <div class="cropgrid hidden" id="cropSelects">
     <div id="chainBox"><label for="refChain">Reference chain</label><select id="refChain"></select></div>
@@ -124,8 +116,18 @@ acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
   </div>
 </details>
 
+<div class="row" style="margin-top:1.2rem">
+  <button class="primary" id="run">Run</button>
+  <button id="stop" disabled>Stop</button>
+  <span id="status" aria-live="polite">idle</span>
+</div>
+<div id="bar"><div></div></div>
+
 <h2 class="results">Results
-  <select id="sort" style="width:auto"><option value="p-desc">P(binder), high first</option><option value="value-desc">value, high first</option><option value="value-asc">value, low first</option><option value="input">input order</option></select>
+  <span class="row" style="margin:0">
+    <select id="sort"><option value="p-desc">P(binder), high first</option><option value="value-desc">value, high first</option><option value="value-asc">value, low first</option><option value="input">input order</option></select>
+    <button id="download" disabled>Download scores.csv</button>
+  </span>
 </h2>
 <table id="results">
   <thead><tr><th class="num">#</th><th>id</th><th>SMILES</th><th class="num">value</th><th class="num">P(binder)</th><th class="num">tokens</th><th class="num">ms</th></tr></thead>
@@ -137,13 +139,15 @@ acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
 import { deviceFromAdapter } from "../src/device.js";
 import { createOwnChain } from "../src/trunk/own/chain.js";
 import { parseLigandText, scoreRow, scoresCsv } from "../src/screen-core.js";
-import { describeReference, loadReferenceCrop, parseStructure, selectReceptorTokens } from "../src/reference-crop.js";
+import { describeReference, loadReferenceCrop, parseStructure, proteinAtomCounts, selectReceptorTokens } from "../src/reference-crop.js";
 import { ligandGraph } from "../src/trunk/own/ligand.js";
 
 const $ = (id) => document.getElementById(id);
 const status = (text, bad = false) => { $("status").textContent = text; $("status").className = bad ? "warn" : ""; };
 const progress = (fraction) => { $("bar").firstElementChild.style.width = `${Math.round(100 * fraction)}%`; };
-const MAX_RECEPTOR = 200;
+const LIMITS = { receptorTokens: 200, ligandTokens: 128, totalTokens: 256, totalAtoms: 2048 };   // GenFree's affinity limits
+const MAX_RECEPTOR = LIMITS.receptorTokens;
+let a3mText = "";
 
 let chain = null, chainKey = "", device = null;
 let rows = [];          // {index, lig, result?, error?, ms}
@@ -181,34 +185,29 @@ function updateSeqInfo() {
   const used = cropped ? cropped.length : n;
   $("seqInfo").textContent = `${n} residues${cropped ? `, keeping ${used}` : ""}${used > MAX_RECEPTOR ? " - crop to 200 or fewer" : ""}`;
   $("seqInfo").className = used > MAX_RECEPTOR ? "hint warn" : "hint";
-  $("cropSummary").textContent = cropped ? `· keeping ${used} of ${n}` : (n > MAX_RECEPTOR ? "· required" : "· optional");
-  if (n > MAX_RECEPTOR && !$("cropBox").open && !cropped) $("cropBox").open = true;
+  scheduleFitCheck();
 }
 function updateLigInfo() {
   try { $("ligInfo").textContent = `${parseLigandText($("ligands").value).length} ligands`; $("ligInfo").className = "hint"; }
   catch (e) { $("ligInfo").textContent = String(e.message); $("ligInfo").className = "hint warn"; }
 }
 $("seq").addEventListener("input", () => { updateSeqInfo(); onInputsChanged(); });
-$("ligands").addEventListener("input", () => { updateLigInfo(); onInputsChanged(); });
+$("ligands").addEventListener("input", () => { updateLigInfo(); onInputsChanged(); scheduleFitCheck(); });
 $("recycles").addEventListener("input", () => { $("recyclesOut").textContent = $("recycles").value; });
 
-$("msaMode").addEventListener("change", () => {
-  const mode = $("msaMode").value;
-  $("a3m").classList.toggle("hidden", mode !== "paste");
-  $("a3mFile").classList.toggle("hidden", mode !== "file");
-  if (mode === "none") { $("a3m").value = ""; $("a3mInfo").textContent = ""; }
-});
 $("a3mFile").addEventListener("change", async () => {
   const file = $("a3mFile").files[0];
   if (!file) return;
-  $("a3m").value = await file.text();
+  a3mText = await file.text();
   $("a3mInfo").textContent = `${file.name}, ${(file.size / 1024).toFixed(0)} KB`;
+  $("a3mClear").classList.remove("hidden");
 });
+$("a3mClear").addEventListener("click", () => { a3mText = ""; $("a3mFile").value = ""; $("a3mInfo").textContent = ""; $("a3mClear").classList.add("hidden"); });
 $("ligFile").addEventListener("change", async () => {
   const file = $("ligFile").files[0];
   if (!file) return;
   $("ligands").value = await file.text();
-  updateLigInfo(); onInputsChanged();
+  updateLigInfo(); onInputsChanged(); scheduleFitCheck();
 });
 
 // ---- receptor crop from a reference complex (GenFree's rule, src/reference-crop.js) -----------------------------------------
@@ -235,11 +234,65 @@ $("strip").addEventListener("click", (event) => {
 $("crop").addEventListener("input", () => { manual = true; updateSeqInfo(); renderStrip(); });
 $("cropClear").addEventListener("click", () => { manual = true; $("crop").value = ""; $("cropInfo").textContent = ""; updateSeqInfo(); renderStrip(); });
 
+const tokenCache = new Map();   // SMILES -> heavy-atom count (the ligand's token count), or an error message
+function ligandTokens(smiles) {
+  if (!tokenCache.has(smiles)) {
+    try { tokenCache.set(smiles, ligandGraph(smiles).atoms.length); } catch (e) { tokenCache.set(smiles, String(e?.message ?? e)); }
+  }
+  return tokenCache.get(smiles);
+}
 /** Room reserved for the ligand: the largest ligand in the list (GenFree's library_fixed rule). */
 function ligandTokenCount() {
   const ligands = parseLigandText($("ligands").value);
   if (ligands.length === 0) throw new Error("enter the ligand list first: the crop reserves room for the largest ligand");
-  return Math.max(...ligands.map((l) => ligandGraph(l.value).atoms.length));
+  const counts = ligands.map((l) => ligandTokens(l.value));
+  const bad = counts.findIndex((c) => typeof c === "string");
+  if (bad >= 0) throw new Error(`ligand ${ligands[bad].id}: ${counts[bad]}`);
+  return Math.max(...counts);
+}
+
+/** Does the receptor as it stands (cropped or whole) plus each ligand fit GenFree's limits? Says so, and what to do if not. */
+let fitTimer = null;
+function scheduleFitCheck() { clearTimeout(fitTimer); fitTimer = setTimeout(fitCheck, 250); }
+function fitCheck() {
+  const seq = sequenceText();
+  const box = $("fit");
+  const setFit = (html, cls) => { box.textContent = html; box.className = cls; };
+  if (!seq) { setFit("Enter a sequence to check the size limits.", "hint"); return; }
+  let ligands;
+  try { ligands = parseLigandText($("ligands").value); } catch (e) { setFit(`Ligand list: ${e.message}`, "warn"); return; }
+  if (ligands.length === 0) { setFit("Enter ligands to check the size limits.", "hint"); return; }
+  const keep = parseIndices($("crop").value, true);
+  const used = keep ?? Array.from(seq, (_, i) => i);
+  if (used.some((i) => i >= seq.length)) { setFit("The residue list points past the end of the sequence.", "warn"); return; }
+  const receptor = used.length;
+  const receptorAtoms = used.reduce((sum, i) => sum + proteinAtomCounts(seq[i])[0], 0);
+  const problems = [], unreadable = [];
+  let largest = 0;
+  for (const l of ligands) {
+    const t = ligandTokens(l.value);
+    if (typeof t === "string") { unreadable.push(`${l.id} (${t})`); continue; }
+    largest = Math.max(largest, t);
+    if (t > LIMITS.ligandTokens) problems.push({ id: l.id, why: `${t} heavy atoms; the limit is ${LIMITS.ligandTokens} and no crop can help` });
+    else if (receptor + t > LIMITS.totalTokens || receptorAtoms + t > LIMITS.totalAtoms) problems.push({ id: l.id, why: `${receptor} receptor residues + ${t} ligand atoms = ${receptor + t} tokens; the limit is ${LIMITS.totalTokens}` });
+  }
+  const list = (items) => items.slice(0, 5).map((p) => `${p.id}: ${p.why}`).join("; ") + (items.length > 5 ? `; and ${items.length - 5} more` : "");
+  if (receptor > LIMITS.receptorTokens) {
+    setFit(`Too long: ${receptor} receptor residues, the limit is ${LIMITS.receptorTokens}. Crop the receptor below.`, "warn");
+  } else if (unreadable.length) {
+    setFit(`Cannot read ${unreadable.length} ligand(s): ${unreadable.slice(0, 3).join("; ")}`, "warn");
+  } else if (problems.length) {
+    const croppable = problems.every((p) => !p.why.includes("no crop can help"));
+    setFit(`${problems.length} of ${ligands.length} ligands do not fit. ${list(problems)}.${croppable ? " A crop that keeps fewer residues would make room." : ""}`, "warn");
+  } else {
+    setFit(keep
+      ? `Fits with the current crop: ${receptor} receptor residues + the largest ligand (${largest} atoms) = ${receptor + largest} tokens, limit ${LIMITS.totalTokens}.`
+      : `Fits: ${receptor} receptor residues + the largest ligand (${largest} atoms) = ${receptor + largest} tokens, limit ${LIMITS.totalTokens}. No crop is needed; you can leave this section as it is.`, "hint");
+  }
+  const state = unreadable.length ? "check the ligand list" : (receptor > LIMITS.receptorTokens || problems.length ? "does not fit" : (keep ? `keeping ${receptor} of ${seq.length}` : "not needed"));
+  $("cropSummary").textContent = `· ${state}`;
+  $("cropSummary").className = problems.length || receptor > LIMITS.receptorTokens || unreadable.length ? "hint warn" : "hint";
+  if (!unreadable.length && (receptor > LIMITS.receptorTokens || problems.some((p) => !p.why.includes("no crop can help"))) && !$("cropBox").open) $("cropBox").open = true;
 }
 function cropInfo(text, bad = false) { $("cropInfo").textContent = text; $("cropInfo").className = bad ? "hint warn" : "hint"; }
 
@@ -364,7 +417,7 @@ $("run").addEventListener("click", async () => {
     if (ligands.length === 0) throw new Error("enter at least one ligand");
     const receptorIndices = parseIndices($("crop").value);
     if ((receptorIndices?.length ?? sequence.length) > MAX_RECEPTOR) throw new Error(`the receptor has more than ${MAX_RECEPTOR} residues: crop it first`);
-    const a3m = $("msaMode").value === "none" ? null : ($("a3m").value.trim() || null);
+    const a3m = a3mText.trim() || null;
     const options = { recycles: Number($("recycles").value), seed: Number($("seed").value) };
     const conformer = $("conformer").value;
     rows = ligands.map((lig, index) => ({ index, lig }));
@@ -403,6 +456,7 @@ $("run").addEventListener("click", async () => {
 updateSeqInfo();
 updateLigInfo();
 renderStrip();
+fitCheck();
 </script>
 </body>
 </html>
