@@ -85,9 +85,21 @@ Enter the sequence, an optional A3M (text or file), the ligands (one SMILES per 
 `smiles` column) and the settings (seed, recycling steps, conformer mode, residues to keep), then Run. Results appear per
 ligand in a sortable table; Stop ends after the current ligand; Download writes `scores.csv` with GenFree's columns plus
 `error`. A ligand that fails (for example over the size limit) is listed with its error and the run continues. Verified in
-the built-in browser (Apple Metal): three ligands on a 117-residue receptor in 24 s. Not in this page yet: reference-complex
-cropping UI, MSA server, resume, a weights source other than the pack URL. `src/screen-core.js` holds the Node-free
-parts shared with the `screen` command.
+the built-in browser (Apple Metal): three ligands on a 117-residue receptor in 24 s. Not in this page yet: MSA server, resume, a weights source other than the pack URL. `src/screen-core.js` holds the Node-free parts shared with
+the `screen` command.
+
+Receptor crop (GenFree's `target.crop`, `budget: library_fixed`): load a reference complex (PDB or mmCIF); the page picks
+the protein chain whose sequence matches the receptor exactly (mmCIF: declared polymer sequence via `label_seq_id`; PDB:
+observed residues, as gemmi does) and a reference ligand residue, ranks residues by their distance to that ligand, forms
+10-residue blocks and keeps the nearest ones within the budget (receptor <= 200, receptor + ligand <= 256 tokens, atoms <= 2048),
+reserving room for the largest ligand in the list (or the number you type). The chosen residues are shown as a strip and as
+a residue list; click residues or edit the list to change them (the choice is then used for every ligand), and "Use the
+reference's choice" restores the rule. `src/reference-crop.js` ports `src/boltz/reference_crop.py`: on the paper's five
+references (four PDB, one mmCIF; 219-580 residues) the proximity order and the selected residues are identical to GenFree's
+Python for ligand sizes 5, 33, 95, 128 and the screen's own `library_ligand_tokens`; `test/reference-crop.test.js` checks
+that on trimmed copies of two of them (`test/fixtures/crop/`, expectations produced by GenFree's Python). Differences from
+gemmi: the amino-acid table is the 20 standard residues plus common modified ones, so a reference with an exotic modified
+residue can differ. The Node `screen` command does not read `target.crop` yet.
 
 ### Browser page
 

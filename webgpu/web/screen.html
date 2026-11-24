@@ -35,6 +35,9 @@
   details { margin-top: 1rem; border: 1px solid var(--line); border-radius: 4px; padding: .3rem .7rem; background: var(--panel); }
   summary { cursor: pointer; font-weight: 600; }
   .warn { color: var(--bad); }
+  #strip { display: flex; flex-wrap: wrap; gap: 1px; max-height: 11rem; overflow: auto; margin-top: .5rem; font: 11px/1.5 ui-monospace, Menlo, monospace; }
+  #strip span { width: 1.15em; text-align: center; background: var(--panel); border-radius: 2px; cursor: pointer; user-select: none; }
+  #strip span.on { background: var(--accent); color: #fff; }
   code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
 </style>
 </head>
@@ -49,8 +52,19 @@
 <label for="a3m">MSA <span class="hint">(optional A3M text; the first record must be the query sequence. Empty = single sequence)</span></label>
 <textarea id="a3m" rows="3" spellcheck="false" placeholder=">query&#10;SEQUENCE&#10;>hit&#10;..."></textarea>
 <div class="row"><input type="file" id="a3mFile" accept=".a3m,.fasta,.fa,.txt"><span class="hint" id="a3mInfo"></span></div>
-<label for="crop">Receptor residues to keep <span class="hint">(0-based, e.g. 0-99,120; empty = whole sequence, must be 200 residues or fewer)</span></label>
+
+<h2>Receptor crop</h2>
+<p class="lede" style="margin-bottom:.4rem">A receptor longer than 200 residues must be cropped. Load a reference complex (PDB or mmCIF): the residues nearest to its ligand are chosen with GenFree's rule, for the whole library. Click residues below to add or remove them.</p>
+<div class="row"><input type="file" id="refFile" accept=".pdb,.ent,.cif,.mmcif"><span class="hint" id="refInfo"></span></div>
+<div class="grid">
+  <div><label for="refChain">Reference protein chain</label><select id="refChain" disabled></select></div>
+  <div><label for="refLigand">Reference ligand</label><select id="refLigand" disabled></select></div>
+  <div><label for="reserve">Ligand tokens reserved <span class="hint">(empty = largest in the list)</span></label><input type="number" id="reserve" min="1" max="128" step="1" placeholder="auto"></div>
+</div>
+<label for="crop">Residues to keep <span class="hint">(0-based, e.g. 0-99,120; editable; empty = the whole sequence)</span></label>
 <input type="text" id="crop" placeholder="keep all residues">
+<div class="row"><button id="cropReset" disabled>Use the reference's choice</button><button id="cropClear">Keep all residues</button><span class="hint" id="cropInfo"></span></div>
+<div id="strip" aria-label="receptor residues"></div>
 
 <h2>Ligands</h2>
 <label for="ligands">Ligand list <span class="hint">(one per line: <code>SMILES</code>, or <code>id,SMILES</code>, or a CSV/TSV with a <code>smiles</code> column and an optional <code>id</code> column)</span></label>
@@ -96,6 +110,8 @@ acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
 import { deviceFromAdapter } from "../src/device.js";
 import { createOwnChain } from "../src/trunk/own/chain.js";
 import { parseLigandText, scoreRow, scoresCsv } from "../src/screen-core.js";
+import { describeReference, loadReferenceCrop, parseStructure, selectReceptorTokens } from "../src/reference-crop.js";
+import { ligandGraph } from "../src/trunk/own/ligand.js";
 
 const $ = (id) => document.getElementById(id);
 const status = (text, bad = false) => { $("status").textContent = text; $("status").className = bad ? "warn" : ""; };
@@ -105,7 +121,7 @@ let chain = null, chainKey = "", device = null;
 let rows = [];          // {index, lig, result?, error?, ms}
 let stopRequested = false;
 
-$("seq").addEventListener("input", updateSeqInfo);
+$("seq").addEventListener("input", () => { updateSeqInfo(); onInputsChanged(); });
 function updateSeqInfo() {
   const n = $("seq").value.replace(/\s+/g, "").length;
   const cropped = parseIndices($("crop").value, true);
@@ -113,7 +129,7 @@ function updateSeqInfo() {
   $("seqInfo").textContent = `${n} residues${cropped ? `, keeping ${used}` : ""}${used > 200 ? " - too long, crop to 200 or fewer" : ""}`;
   $("seqInfo").className = used > 200 ? "hint warn" : "hint";
 }
-$("crop").addEventListener("input", updateSeqInfo);
+$("crop").addEventListener("input", () => { manual = true; updateSeqInfo(); renderStrip(); });
 
 function parseIndices(text, lenient = false) {
   if (!text.trim()) return undefined;
@@ -133,6 +149,7 @@ async function loadInto(fileInput, textarea, info) {
   info.textContent = `${file.name} (${file.size.toLocaleString()} bytes)`;
   updateSeqInfo();
   updateLigInfo();
+  onInputsChanged();
 }
 $("a3mFile").addEventListener("change", () => loadInto($("a3mFile"), $("a3m"), $("a3mInfo")));
 $("ligFile").addEventListener("change", () => loadInto($("ligFile"), $("ligands"), $("ligInfo")));
@@ -140,7 +157,7 @@ function updateLigInfo() {
   try { $("ligInfo").textContent = `${parseLigandText($("ligands").value).length} ligands`; $("ligInfo").className = "hint"; }
   catch (e) { $("ligInfo").textContent = String(e.message); $("ligInfo").className = "hint warn"; }
 }
-$("ligands").addEventListener("input", updateLigInfo);
+$("ligands").addEventListener("input", () => { updateLigInfo(); onInputsChanged(); });
 
 function render() {
   const order = [...rows];
@@ -236,8 +253,114 @@ $("run").addEventListener("click", async () => {
   }
 });
 
+
+// ---- receptor crop from a reference complex (GenFree's rule, src/reference-crop.js) -----------------------------------------
+let refStructure = null, refInfo = null;
+let manual = false;   // true once the residue list was edited by hand: the reference's choice is then not re-applied automatically
+
+const sequenceText = () => $("seq").value.replace(/\s+/g, "");
+function formatIndices(list) {
+  const parts = [];
+  for (let i = 0; i < list.length;) {
+    let j = i;
+    while (j + 1 < list.length && list[j + 1] === list[j] + 1) j += 1;
+    parts.push(j > i ? `${list[i]}-${list[j]}` : `${list[i]}`);
+    i = j + 1;
+  }
+  return parts.join(",");
+}
+function renderStrip() {
+  const seq = sequenceText();
+  const keep = new Set(parseIndices($("crop").value, true) ?? (seq ? Array.from(seq, (_, i) => i) : []));
+  const strip = $("strip");
+  if (strip.childElementCount !== seq.length || strip.dataset.seq !== seq) {
+    strip.dataset.seq = seq;
+    strip.replaceChildren(...Array.from(seq, (letter, i) => { const span = document.createElement("span"); span.textContent = letter; span.title = `residue ${i}`; span.dataset.i = i; return span; }));
+  }
+  for (const span of strip.children) span.classList.toggle("on", keep.has(Number(span.dataset.i)));
+}
+$("strip").addEventListener("click", (event) => {
+  const i = event.target.dataset?.i;
+  if (i === undefined) return;
+  const seq = sequenceText();
+  const keep = new Set(parseIndices($("crop").value, true) ?? Array.from(seq, (_, k) => k));
+  if (keep.has(Number(i))) keep.delete(Number(i)); else keep.add(Number(i));
+  manual = true;
+  $("crop").value = keep.size === seq.length ? "" : formatIndices([...keep].sort((a, b) => a - b));
+  updateSeqInfo(); renderStrip();
+});
+$("cropClear").addEventListener("click", () => { manual = true; $("crop").value = ""; $("cropInfo").textContent = ""; updateSeqInfo(); renderStrip(); });
+
+function ligandTokenCount() {
+  const given = $("reserve").value;
+  if (given) return Number(given);
+  const ligands = parseLigandText($("ligands").value);
+  if (ligands.length === 0) throw new Error("enter the ligand list first: the crop reserves room for the largest ligand");
+  return Math.max(...ligands.map((l) => ligandGraph(l.value).atoms.length));
+}
+function cropInfo(text, bad = false) { $("cropInfo").textContent = text; $("cropInfo").className = bad ? "hint warn" : "hint"; }
+
+function applyReferenceCrop() {
+  manual = false;
+  if (!refStructure) return;
+  const seq = sequenceText();
+  const lig = refInfo.ligands[Number($("refLigand").value)];
+  const chain = $("refChain").value;
+  if (!seq || !lig || !chain) return;
+  try {
+    const crop = loadReferenceCrop(refStructure, seq, { proteinChain: chain, ligand: { chain: lig.chain, residue: lig.residue, ccd: lig.ccd } });
+    const tokens = ligandTokenCount();
+    const keep = selectReceptorTokens(crop, seq, { ligandTokens: tokens });
+    $("crop").value = formatIndices(keep);
+    cropInfo(`${keep.length} of ${seq.length} residues, nearest to ${lig.ccd} ${lig.chain}${lig.residue}, reserving ${tokens} ligand tokens`);
+  } catch (e) {
+    cropInfo(String(e?.message ?? e), true);
+  }
+  updateSeqInfo(); renderStrip();
+}
+function onInputsChanged() { if (refStructure && !manual) applyReferenceCrop(); else renderStrip(); }
+
+$("refFile").addEventListener("change", async () => {
+  const file = $("refFile").files[0];
+  if (!file) return;
+  try {
+    refStructure = parseStructure(await file.text());
+    refInfo = describeReference(refStructure);
+    if (refInfo.chains.length === 0) throw new Error("no protein chain found in the reference");
+    if (refInfo.ligands.length === 0) throw new Error("no ligand (non-polymer residue) found in the reference");
+  } catch (e) {
+    refStructure = null; refInfo = null;
+    $("refInfo").textContent = String(e?.message ?? e); $("refInfo").className = "hint warn";
+    $("refChain").disabled = $("refLigand").disabled = $("cropReset").disabled = true;
+    return;
+  }
+  $("refInfo").textContent = `${file.name}: ${refInfo.chains.length} protein chain(s), ${refInfo.ligands.length} ligand residue(s)`; $("refInfo").className = "hint";
+  const seq = sequenceText();
+  $("refChain").replaceChildren(...refInfo.chains.map((c) => {
+    const o = document.createElement("option");
+    const matches = c.sequence === seq || c.observedSequence === seq;
+    o.value = c.name; o.textContent = `${c.name} (${c.declared} residues${c.observed !== c.declared ? `, ${c.observed} observed` : ""})${matches ? " - matches the sequence" : ""}`;
+    o.dataset.match = matches ? "1" : "";
+    return o;
+  }));
+  const hit = [...$("refChain").options].find((o) => o.dataset.match === "1");
+  if (hit) $("refChain").value = hit.value;
+  $("refLigand").replaceChildren(...refInfo.ligands.map((l, i) => {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = `${l.ccd} ${l.chain}${l.residue} (${l.atoms} heavy atoms)`;
+    return o;
+  }));
+  const biggest = refInfo.ligands.reduce((best, l, i) => (l.atoms > refInfo.ligands[best].atoms ? i : best), 0);
+  $("refLigand").value = String(biggest);
+  $("refChain").disabled = $("refLigand").disabled = $("cropReset").disabled = false;
+  applyReferenceCrop();
+});
+for (const id of ["refChain", "refLigand", "reserve"]) $(id).addEventListener("change", applyReferenceCrop);
+$("cropReset").addEventListener("click", applyReferenceCrop);
+
 updateSeqInfo();
 updateLigInfo();
+renderStrip();
 </script>
 </body>
 </html>
