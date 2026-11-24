@@ -4,12 +4,117 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Boltz-GenFree</title>
-<meta name="description" content="Boltz-GenFree ranks a ligand library with the released Boltz-2 affinity checkpoint, without generating a structure for every candidate.">
+<meta name="description" content="Boltz-GenFree ranks a ligand library with the released Boltz-2 affinity checkpoint, without structure generation for any candidate.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Red+Hat+Mono:wght@400..700&display=swap">
 <link rel="stylesheet" href="site.css">
-<style>a.kpi{display:block;color:inherit;text-decoration:none}a.kpi:hover .n{text-decoration:underline}a.kpi:focus-visible{outline-offset:-3px}</style>
+<style>
+/* ---------- Home only. Tokens come from site.css; every box is square. ---------- */
+.ic{display:block;width:28px;height:28px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:square;stroke-linejoin:miter}
+.ic .f{fill:currentColor;stroke:none}
+
+/* hero: short, one column */
+.h-hero{background:var(--tile);color:var(--tile-ink);padding:64px 0 60px;border-bottom:4px solid var(--accent)}
+.h-hero h1{margin-top:22px;font:800 clamp(38px,7.4vw,80px)/.98 var(--sans);letter-spacing:-.028em;max-width:13ch}
+.h-hero h1 em{font-style:normal;color:var(--hot)}
+.h-hero .sub{margin-top:20px;max-width:44ch;font:700 clamp(18px,2.3vw,23px)/1.3 var(--display);color:var(--t-ink2)}
+.h-hero .btns{margin-top:30px}
+
+/* section head: short label column + content */
+.h-sec{padding:64px 0;border-top:1px solid var(--line-2)}
+.h-sec:first-of-type{border-top:0}
+.h-head{display:flex;align-items:baseline;gap:14px;margin-bottom:24px}
+.h-head .num{flex:0 0 auto;font:700 14px/1 var(--mono);background:var(--tile);color:var(--tile-ink);padding:7px 8px}
+.h-head h2{font:800 clamp(24px,3.4vw,34px)/1.1 var(--sans);letter-spacing:-.014em}
+.h-head .more{margin-left:auto;font:600 13.5px/1.3 var(--mono);color:var(--ink);text-decoration:none;border-bottom:2px solid var(--line);white-space:nowrap}
+.h-head .more::after{content:" \2192"}
+.h-head .more:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* guide: three icon tiles */
+.h-go{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-top:3px solid var(--accent)}
+.h-go a{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 16px;align-items:center;padding:22px 20px;background:var(--panel);color:var(--ink);text-decoration:none}
+.h-go .ib{grid-row:1 / 3;display:flex;align-items:center;justify-content:center;width:52px;height:52px;background:var(--tile);color:var(--tile-ink)}
+.h-go b{font:800 22px/1.1 var(--sans)}
+.h-go span.t{grid-column:2;font-size:15.5px;line-height:1.35;color:var(--ink-2)}
+.h-go .ar{grid-row:1 / 3;grid-column:3;font:400 22px/1 var(--sans);color:var(--ink-3)}
+.h-go a:hover{background:var(--accent-tint)}
+.h-go a:hover .ib{background:var(--accent)}
+.h-go a:hover .ar{color:var(--accent)}
+.h-go a:focus-visible{outline-offset:-3px}
+
+/* install: three numbered command cells */
+.h-run{border:1px solid var(--tile);background:var(--tile);color:#f1f1ee}
+.h-run > div{display:grid;grid-template-columns:220px minmax(0,1fr);align-items:stretch;min-width:0}
+.h-run > div + div{border-top:1px solid var(--t-line)}
+.h-run .rh{display:flex;align-items:center;gap:10px;padding:14px 16px;border-right:1px solid var(--t-line);font:600 12.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--t-mute)}
+.h-run .rh i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:var(--hot);color:var(--tile);font-weight:700;letter-spacing:0}
+.h-run .rh .ic{width:20px;height:20px;margin-left:auto;color:var(--t-mute)}
+.h-run pre{margin:0;padding:14px 16px;font:500 14.5px/1.7 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;align-self:center}
+.h-run .p{color:var(--t-mute);user-select:none}
+.h-run .o{color:var(--hot)}
+.h-alt{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:16px;color:var(--ink-2)}
+.h-alt .ic{width:22px;height:22px;color:var(--accent)}
+.h-alt a{font-weight:700}
+
+/* research: numbers, then two figures */
+.h-kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
+.h-kpi > div{background:var(--panel);padding:18px 20px 20px}
+.h-kpi .k{font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.h-kpi .n{margin-top:10px;font:800 clamp(34px,4.6vw,50px)/1 var(--sans);letter-spacing:-.02em;color:var(--accent);white-space:nowrap}
+.h-kpi .t{margin-top:8px;font-size:15.5px;line-height:1.4;color:var(--ink-2)}
+.h-kpi .t b{color:var(--ink)}
+.h-figs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;margin-top:28px}
+.h-fig{margin:0;display:flex;flex-direction:column}
+.h-fig .fh{font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding-bottom:10px;border-bottom:2px solid var(--ink)}
+.h-fig figcaption{margin-top:10px;font-size:14.5px;line-height:1.45;color:var(--ink-2)}
+.h-fig figcaption b{color:var(--ink)}
+/* figure A: the two-stage screen, as page elements */
+.h-pipe{list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:0}
+.h-pipe li{position:relative;display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);background:var(--panel)}
+.h-pipe li + li{margin-top:14px}
+.h-pipe li + li::before{content:"";position:absolute;left:31px;top:-14px;height:13px;border-left:2px solid var(--ink-3)}
+.h-pipe li + li::after{content:"";position:absolute;left:27px;top:-6px;border-top:6px solid var(--ink-3);border-left:5px solid transparent;border-right:5px solid transparent}
+.h-pipe .ic{width:24px;height:24px;margin:0 auto}
+.h-pipe b{display:block;font:800 16px/1.2 var(--sans)}
+.h-pipe small{display:block;font-size:14px;line-height:1.3;color:var(--ink-2)}
+.h-pipe .g{background:var(--accent-tint);border-color:var(--accent)} .h-pipe .g b{color:var(--accent)}
+.h-pipe .d{background:var(--tile);border-color:var(--tile);color:var(--tile-ink)} .h-pipe .d small{color:var(--t-ink2)}
+.h-pipe .f{border-width:2px;border-color:var(--ink)}
+/* figure B: wall time bars, exact values from the Research article */
+.h-sp{margin-top:16px}
+.h-sp .tg{display:flex;align-items:baseline;gap:10px;margin:14px 0 6px;font:700 13px/1.2 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
+.h-sp .tg:first-child{margin-top:0}
+.h-sp .tg span{font-weight:400;color:var(--ink-3)}
+.h-sp .r{display:grid;grid-template-columns:76px minmax(0,1fr) 108px;gap:10px;align-items:center;padding:4px 0}
+.h-sp .r > b{font:700 14.5px/1.2 var(--sans)}
+.h-sp .tr{position:relative;height:14px;background:var(--soft)}
+.h-sp .tr i{position:absolute;left:0;top:0;bottom:0;min-width:3px;width:calc(var(--v) / 82 * 100%);background:#3c3c3c}
+.h-sp .r.gf .tr i{background:var(--accent)}
+.h-sp .r.bz .tr i{background:#858580}
+.h-sp .r.b2 .tr i{background:#3c3c3c}
+.h-sp .r.gf > b{color:var(--accent)}
+.h-sp .v{text-align:right;font:600 13px/1.2 var(--mono);color:var(--ink-2);white-space:nowrap}
+.h-sp .v em{font-style:normal;color:var(--ink);font-weight:700}
+
+@media (max-width:899px){
+  .h-go{grid-template-columns:minmax(0,1fr)}
+  .h-run > div{grid-template-columns:minmax(0,1fr)}
+  .h-run .rh{border-right:0;border-bottom:1px solid var(--t-line);padding:10px 14px}
+  .h-run pre{font-size:13.5px;padding:12px 14px}
+  .h-figs{grid-template-columns:minmax(0,1fr);gap:36px}
+}
+@media (max-width:759px){
+  .h-hero{padding:40px 0 40px}
+  .h-sec{padding:44px 0}
+  .h-head{flex-wrap:wrap}
+  .h-head .more{margin-left:0;flex-basis:100%;width:fit-content;flex:0 0 auto}
+  .h-kpi{grid-template-columns:minmax(0,1fr)}
+  .h-go a{padding:16px}
+  .h-go .ib{width:44px;height:44px}
+  .h-sp .r{grid-template-columns:70px minmax(0,1fr) 96px;gap:8px}
+}
+</style>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -30,111 +135,103 @@
   </div>
 </header>
 
+<!-- icon set: 24px grid, 2px square-capped stroke, no curves -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-docs" viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4"/><path d="M8 11h8M8 14h8M8 17h5"/></symbol>
+  <symbol id="i-research" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path class="f" d="M7 13h3v6H7zM12 8h3v11h-3zM17 11h3v8h-3z"/></symbol>
+  <symbol id="i-gpu" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/><path d="M9 9h6v6H9z"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  <symbol id="i-get" viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M7 9l5 5 5-5"/><path d="M4 15v5h16v-5"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></symbol>
+  <symbol id="i-rank" viewBox="0 0 24 24"><path d="M3 5h4M3 12h4M3 19h4"/><path d="M10 5h11M10 12h8M10 19h5"/></symbol>
+  <symbol id="i-lib" viewBox="0 0 24 24"><path d="M3 4h4v16H3zM10 4h4v16h-4z"/><path d="M16.5 5.2l3.8-1 3.7 15.6-3.8 1z" transform="translate(-1.5 0)"/></symbol>
+  <symbol id="i-cut" viewBox="0 0 24 24"><path d="M3 4h18l-7 8v8l-4-2v-6z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 11h14v10H5z"/><path d="M8 11V6h8v5"/><path d="M12 15v2"/></symbol>
+</svg>
+
 <main id="main">
-<section class="hero home-hero on-dark">
+<section class="h-hero on-dark">
   <div class="wrap">
-    <div class="grid-hero">
+    <p class="status">v0.1.0 &middot; open source &middot; MIT</p>
+    <h1>Rank the library. <em>Skip</em> structure generation.</h1>
+    <p class="sub">The released Boltz-2 affinity trunk and heads score every ligand, structure-generation-free.</p>
+    <div class="btns">
+      <a class="btn pri big" href="docs/index.html">Get started</a>
+      <a class="btn big" href="webgpu/web/screen.html">Try it in the browser</a>
+    </div>
+  </div>
+</section>
+
+<section class="h-sec" aria-labelledby="go">
+  <div class="wrap">
+    <div class="h-head"><span class="num">01</span><h2 id="go">Where to go</h2></div>
+    <nav class="h-go" aria-label="Site sections">
+      <a href="docs/index.html"><span class="ib"><svg class="ic"><use href="#i-docs"/></svg></span><b>Docs</b><span class="t">Install, configure, run a screen.</span><span class="ar" aria-hidden="true">&rarr;</span></a>
+      <a href="research.html"><span class="ib"><svg class="ic"><use href="#i-research"/></svg></span><b>Research</b><span class="t">How it works, and the results.</span><span class="ar" aria-hidden="true">&rarr;</span></a>
+      <a href="webgpu/web/screen.html"><span class="ib"><svg class="ic"><use href="#i-gpu"/></svg></span><b>WebGPU</b><span class="t">Run it in this browser.</span><span class="ar" aria-hidden="true">&rarr;</span></a>
+    </nav>
+  </div>
+</section>
+
+<section class="h-sec" aria-labelledby="run">
+  <div class="wrap">
+    <div class="h-head"><span class="num">02</span><h2 id="run">Install and run</h2><a class="more" href="docs/index.html">Full guide</a></div>
+    <div class="h-run">
       <div>
-        <p class="status">v0.1.0 &middot; open source &middot; MIT</p>
-        <h1>Rank the library. <em>Skip</em> the structures.</h1>
-        <p class="sub">Structure-generation-free Boltz-2 affinity screening. It runs the released Boltz-2 affinity trunk and heads directly from processed receptor and ligand inputs, and builds no structure for any candidate.</p>
-        <div class="btns">
-          <a class="btn pri big" href="docs/index.html">Get started</a>
-          <a class="btn big" href="webgpu/web/screen.html">Try it in the browser</a>
-        </div>
-      </div>
-      <div class="install" aria-label="Install and run">
-        <div class="lab"><span>Terminal</span><b>Python 3.10+</b></div>
+        <div class="rh"><i>1</i>Get the code<svg class="ic"><use href="#i-get"/></svg></div>
 <pre><span class="p">$ </span>git clone https://github.com/N283T/boltz-genfree.git
-<span class="p">$ </span>cd boltz-genfree
-<span class="p">$ </span>uv sync --frozen --extra cuda
-<span class="p">$ </span>boltz-genfree screen screen.yaml --prepare-only
-<span class="p">$ </span>boltz-genfree screen screen.yaml
-<span class="c"># scores are written to scores.csv</span></pre>
+<span class="p">$ </span>cd boltz-genfree</pre>
+      </div>
+      <div>
+        <div class="rh"><i>2</i>Install<svg class="ic"><use href="#i-box"/></svg></div>
+<pre><span class="p">$ </span>uv sync --frozen --extra cuda</pre>
+      </div>
+      <div>
+        <div class="rh"><i>3</i>Screen<svg class="ic"><use href="#i-rank"/></svg></div>
+<pre><span class="p">$ </span>boltz-genfree screen screen.yaml
+<span class="o">&rarr; scores.csv</span></pre>
       </div>
     </div>
-    <div class="kpis-wrap">
-      <div class="kpis">
-        <a class="kpi" href="research.html#results"><div class="k">Ranking quality</div><div class="n">90%</div><div class="t">of Boltz-2&rsquo;s mean average precision on eight libraries. Boltzina: 67%.</div></a>
-        <a class="kpi" href="research.html#twostage"><div class="k">Two-stage screen</div><div class="n">0.0839</div><div class="t">mean AP when Boltz-2 re-ranks the top 10%. <b>Boltz-2 alone: 0.0840.</b></div></a>
-        <a class="kpi" href="research.html#twostage"><div class="k">Estimated cost</div><div class="n">8.5&ndash;8.9&times;</div><div class="t">lower cost for that two-stage screen, estimated on two timed targets.</div></a>
-      </div>
-    </div>
+    <p class="h-alt"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg><span>No install: the <a href="webgpu/web/screen.html">browser tool</a> runs in the page on WebGPU. Nothing is uploaded.</span></p>
   </div>
 </section>
 
-<section class="sec">
+<section class="h-sec" aria-labelledby="res">
   <div class="wrap">
-    <div class="shead"><span class="num">01</span><div><h2>Three ways in</h2><p>Pick by what you want to do today.</p></div></div>
-    <div class="grid doors top-accent">
-      <a class="door" href="docs/index.html">
-        <span class="tag"><i>D</i>Docs</span>
-        <h3>Run a screen</h3>
-        <p>Install the package, write a config with one receptor and one ligand source, and run a screen. Scores land in scores.csv.</p>
-        <span class="go">Read the docs</span>
-      </a>
-      <a class="door" href="research.html">
-        <span class="tag"><i>R</i>Research</span>
-        <h3>Why it works</h3>
-        <p>How the Boltz-2 affinity prediction uses a structure, what GenFree replaces, and the results on eight libraries.</p>
-        <span class="go">Read the article</span>
-      </a>
-      <a class="door" href="webgpu/web/screen.html">
-        <span class="tag"><i>W</i>WebGPU</span>
-        <h3>No install at all</h3>
-        <p>Runs in the page on WebGPU. The sequence and ligand list are not uploaded. Receptor up to 200 residues; the first load downloads about 380 MB of weights from Hugging Face and caches them.</p>
-        <span class="go">Open the tool</span>
-      </a>
+    <div class="h-head"><span class="num">03</span><h2 id="res">Results</h2><a class="more" href="research.html">Read the article</a></div>
+    <div class="h-kpi">
+      <div><div class="k">GenFree alone</div><div class="n">90%</div><div class="t">of Boltz-2&rsquo;s mean average precision on eight libraries. <b>Boltzina: 67%.</b></div></div>
+      <div><div class="k">Two-stage screen</div><div class="n">0.0839</div><div class="t">mean AP when Boltz-2 re-ranks the top 10%. <b>Boltz-2 alone: 0.0840.</b></div></div>
+      <div><div class="k">Estimated cost</div><div class="n">8.5&ndash;8.9&times;</div><div class="t">lower cost for that two-stage screen, estimated on two timed targets.</div></div>
     </div>
-  </div>
-</section>
 
-<section class="sec">
-  <div class="wrap">
-    <div class="shead"><span class="num">02</span><div><h2>What changes</h2><p>The same affinity trunk and heads, fed without the generated structure.</p></div></div>
-    <div class="lanes" role="img" aria-label="Boltz-2 generates structures for each candidate and feeds the affinity module a crop and a distogram. GenFree uses the same affinity trunk and heads with no generated structure.">
-      <div class="lane">
-        <div class="ln"><b>Boltz-2</b><span class="tagbox">Per ligand</span></div>
-        <div class="step"><b>Co-fold</b><small>stage 1 complex gives the crop</small></div>
-        <div class="step s1"><b>Local poses</b><small>sampled on the crop; distogram</small></div>
-        <div class="step"><b>Affinity</b><small>released trunk and heads</small></div>
-        <div class="step"><b>Score</b><small>affinity prediction</small></div>
-      </div>
-      <div class="lane gf">
-        <div class="ln"><b>GenFree</b><span class="tagbox fast">No structure</span></div>
-        <div class="step"><b>Receptor</b><small>reference crop or full receptor</small></div>
-        <div class="step none"><b>Structure</b><small>not generated</small></div>
-        <div class="step gfs"><b>Affinity</b><small>same trunk and heads, unchanged</small></div>
-        <div class="step gfs"><b>Scores</b><small>scores.csv</small></div>
-      </div>
-    </div>
-  </div>
-</section>
+    <div class="h-figs">
+      <figure class="h-fig" aria-label="The two-stage screen: the library, a GenFree ranking of every compound, a shortlist of the top share, Boltz-2 on the shortlist only, the final ranking">
+        <div class="fh">The two-stage screen</div>
+        <ol class="h-pipe">
+          <li><svg class="ic" aria-hidden="true"><use href="#i-lib"/></svg><span><b>Library</b><small>about 50,000 compounds</small></span></li>
+          <li class="g"><svg class="ic" aria-hidden="true"><use href="#i-rank"/></svg><span><b>GenFree</b><small>every compound, structure-generation-free</small></span></li>
+          <li><svg class="ic" aria-hidden="true"><use href="#i-cut"/></svg><span><b>Shortlist</b><small>top 5, 10 or 20%</small></span></li>
+          <li class="d"><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg><span><b>Boltz-2</b><small>on the shortlist only</small></span></li>
+          <li class="f"><svg class="ic" aria-hidden="true"><use href="#i-research"/></svg><span><b>Final ranking</b></span></li>
+        </ol>
+        <figcaption>Boltz-2 re-orders the top share; everything below keeps its first-stage order.</figcaption>
+      </figure>
 
-<section class="sec">
-  <div class="wrap split">
-    <div class="prose">
-      <div class="shead"><span class="num">03</span><div><h2>Built for the first pass</h2></div></div>
-      <p class="lede">GenFree is a cheap first stage: rank the whole library, then spend the full Boltz-2 pipeline only on the top of the ranking.</p>
-      <p>It builds no structure for any candidate and writes compact scores for large, resumable screens. One run on a single RTX 5080 scored 49,980 compounds of one target in 18,290 s; that shows feasibility on that hardware and target, not general performance.</p>
+      <figure class="h-fig" aria-label="Wall time of three workflows on 2,048 compounds, as multiples of the GenFree time">
+        <div class="fh">Wall time, 2,048 compounds, one GPU</div>
+        <div class="h-sp">
+          <div class="tg">GSK3B <span>21 positives</span></div>
+          <div class="r gf"><b>GenFree</b><div class="tr"><i style="--v:1.0"></i></div><span class="v">10.6 min <em>1&times;</em></span></div>
+          <div class="r bz"><b>Boltzina</b><div class="tr"><i style="--v:11.7"></i></div><span class="v">2.1 h <em>12&times;</em></span></div>
+          <div class="r b2"><b>Boltz-2</b><div class="tr"><i style="--v:58.1"></i></div><span class="v">10.3 h <em>58&times;</em></span></div>
+          <div class="tg">NS5 <span>16 positives</span></div>
+          <div class="r gf"><b>GenFree</b><div class="tr"><i style="--v:1.0"></i></div><span class="v">6.1 min <em>1&times;</em></span></div>
+          <div class="r bz"><b>Boltzina</b><div class="tr"><i style="--v:35.9"></i></div><span class="v">3.7 h <em>36&times;</em> *</span></div>
+          <div class="r b2"><b>Boltz-2</b><div class="tr"><i style="--v:81.7"></i></div><span class="v">8.4 h <em>82&times;</em></span></div>
+        </div>
+        <figcaption><b>GenFree is 12 and 36 times faster than Boltzina, 58 and 82 times faster than the timed Boltz-2 run.</b> Per-target preparation is outside every bar. * Boltzina returned 2,030 of the 2,048 NS5 scores.</figcaption>
+      </figure>
     </div>
-    <dl class="grid facts">
-      <div><dt>Input</dt><dd>Receptor sequence (optional A3M MSA) and ligand SMILES from CSV, TSV, SDF, an inline list or CCD codes</dd></div>
-      <div><dt>Output</dt><dd>scores.csv with affinity_pred_value and affinity_probability_binary per ligand</dd></div>
-      <div><dt>Weights</dt><dd>Released Boltz-2 affinity checkpoint, downloaded on first use. The browser tool loads a 35 MB conversion of its affinity heads from this site and the trunk weights from Hugging Face</dd></div>
-      <div><dt>Runs on</dt><dd>CUDA (uv, <code>--extra cuda</code>), or WebGPU in the browser</dd></div>
-      <div><dt>License</dt><dd>MIT; version 0.1.0, not on PyPI</dd></div>
-    </dl>
-  </div>
-</section>
-
-<section class="band">
-  <div class="wrap">
-    <div>
-      <h2>Rank a few ligands right now, on your own GPU.</h2>
-      <p>Needs a browser with WebGPU. The sequence and ligands stay in the tab.</p>
-    </div>
-    <a class="btn pri big" href="webgpu/web/screen.html">Open the WebGPU tool</a>
   </div>
 </section>
 </main>
