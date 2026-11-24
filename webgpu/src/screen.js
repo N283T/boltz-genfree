@@ -63,7 +63,7 @@ export function readLigands(ligands, baseDir) {
 }
 
 const SCORE_COLUMNS = ["record_id", "ligand_id", "ligand_kind", "ligand_value", "ligand_tokens", "chunk", "crop_budget", "receptor_tokens", "affinity_pred_value", "affinity_probability_binary"];
-const IGNORED_OPTIONS = new Set(["devices", "num_workers", "affinity_batch_size", "no_kernels", "msa_server_url", "msa_server_username", "msa_server_password", "msa_pairing_strategy", "affinity_conditioner_mode"]);
+const IGNORED_OPTIONS = new Set(["devices", "num_workers", "affinity_batch_size", "no_kernels", "msa_server_url", "msa_server_username", "msa_server_password", "msa_pairing_strategy", "accelerator", "flash_attn", "preprocessing_threads", "affinity_mw_correction", "subsample_msa", "num_subsampled_msa"]);
 
 export function loadScreenConfig(configPath) {
   const baseDir = dirname(resolve(configPath));
@@ -74,13 +74,16 @@ export function loadScreenConfig(configPath) {
   if (target.crop) throw new Error("target.crop (reference-complex cropping) is not supported by the WebGPU screen yet; use target.sequence without crop, or the Python `boltz-genfree screen`");
   const options = config.options ?? {};
   for (const key of Object.keys(options)) {
-    if (!["seed", "affinity_recycling_steps", "ligand_reference_conformer", "allow_extended_full_input"].includes(key) && !IGNORED_OPTIONS.has(key)) {
+    if (!["seed", "affinity_recycling_steps", "ligand_reference_conformer", "allow_extended_full_input", "affinity_conditioner_mode"].includes(key) && !IGNORED_OPTIONS.has(key)) {
       throw new Error(`options.${key} is not supported by the WebGPU screen`);
     }
   }
-  if (options.affinity_conditioner_mode && options.affinity_conditioner_mode !== "original") throw new Error("options.affinity_conditioner_mode: only `original` is supported");
+  if (options.affinity_conditioner_mode && !["original", "folded"].includes(options.affinity_conditioner_mode)) throw new Error("options.affinity_conditioner_mode must be original or folded");
+  if (options.affinity_mw_correction === true) throw new Error("options.affinity_mw_correction: true is not supported by the WebGPU screen");
+  if (options.subsample_msa === false || (options.num_subsampled_msa ?? 1024) !== 1024) throw new Error("options.subsample_msa / num_subsampled_msa: only GenFree's defaults (true, 1024) are supported");
   if (options.affinity_checkpoint || options.affinity_adapter) throw new Error("options.affinity_checkpoint / affinity_adapter are not supported (the pack is fixed; pass --pack)");
   const notes = [];
+  if (options.affinity_conditioner_mode === "folded") notes.push("affinity_conditioner_mode: folded is computed as original (the same zero conditioning, evaluated without the folding shortcut)");
   let a3m = null;
   const msa = target.msa ?? "auto";   // GenFree's default when the key is absent
   if (msa === "empty") a3m = null;

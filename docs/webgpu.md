@@ -62,9 +62,16 @@ The config is the GenFree `screen.yaml`: `target.sequence`, `target.msa` (an A3M
 ligand_reference_conformer, allow_extended_full_input}`. `scores.csv` has GenFree's columns. A re-run resumes from
 `.webgpu-records.jsonl`; a changed target, MSA, ligand list or option is rejected. The trunk runs once per ligand
 (about 2 s each for a 70-residue target and 6 s for 117 residues on an Apple M4). On `examples/screen.yaml` with `msa: empty`, values agree with
-GenFree (float32, `accelerator: mps`) to 0.004 (glycine) and 0.0004 (phenol). GenFree's default `accelerator: gpu` runs bf16 on a Mac and differs more. Not supported yet, and rejected or noted explicitly: `target.crop`
+GenFree (float32, `accelerator: mps`) to 0.004 (glycine) and 0.0004 (phenol). GenFree's default `accelerator: gpu` runs bf16 on a Mac and differs more.
+
+Deep MSA check (CTDSP1, 180 residues, 14,343-row A3M subsampled to 1024 rows, first 8 ligands of the paper's library, config
+`balanced`/`minimal` of the full screen): GenFree on MPS float32 reproduces the stored CUDA scores to mean |d| 0.006, so the
+reference is sound. WebGPU differs from GenFree by mean |d| 0.05-0.17 (max 0.57). GenFree itself moves by 0.08-0.19 between
+seeds on the same input, because the 1024-row subsample and the protein `ref_pos` rotation are random and not reproducible
+in JS, so the WebGPU values lie within GenFree's own seed spread. Rank-level agreement on a larger library was not measured. Not supported yet, and rejected or noted explicitly: `target.crop`
 (reference-complex cropping; use `--receptor-indices` on the single-pair CLI), `msa: auto`, which is also the default when `msa` is omitted (scored without an MSA, with a
-note; write `msa: empty` to say so explicitly), `ligands.sdf`, `affinity_adapter` / `affinity_checkpoint`, `affinity_conditioner_mode: folded`.
+note; write `msa: empty` to say so explicitly), `ligands.sdf`, `affinity_adapter` / `affinity_checkpoint`, and `options` outside the list above (rejected with an error).
+`affinity_conditioner_mode: folded` is accepted and computed as `original`; `subsample_msa` / `num_subsampled_msa` must keep GenFree's defaults.
 
 ### Browser page
 
