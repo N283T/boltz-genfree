@@ -10,145 +10,77 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Red+Hat+Mono:wght@400..700&display=swap">
 <link rel="stylesheet" href="site.css">
 <style>
-/* ---------- Home only. Tokens come from site.css; every box is square. ---------- */
-.ic{display:block;width:28px;height:28px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:square;stroke-linejoin:miter}
-.ic .f{fill:currentColor;stroke:none}
+/* ---------- Home: one full-height hero. Tokens from site.css; every box is square. ---------- */
+.ic{display:block;width:20px;height:20px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:square;stroke-linejoin:miter}
 
-/* hero: short, one column */
-.h-hero{background:var(--tile);color:var(--tile-ink);padding:64px 0 60px;border-bottom:4px solid var(--accent)}
-.h-hero h1{margin-top:22px;font:800 clamp(38px,7.4vw,80px)/.98 var(--sans);letter-spacing:-.028em;max-width:13ch}
-.h-hero h1 em{font-style:normal;color:var(--hot)}
-.h-hero .sub{margin-top:20px;max-width:44ch;font:700 clamp(18px,2.3vw,23px)/1.3 var(--display);color:var(--t-ink2)}
-.h-hero .btns{margin-top:30px}
-.h-hero .hg{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,.85fr);gap:40px 56px;align-items:end}
-/* preprint card: a paper thumbnail + title, offset on a magenta block */
-.h-pub{display:flex;flex-direction:column;gap:1px;background:var(--t-line);border:1px solid var(--t-line);box-shadow:10px 10px 0 var(--accent);margin-right:10px}
-.h-pub a{display:block;background:var(--tile);color:var(--tile-ink);text-decoration:none}
-.h-pub a:hover{background:var(--t-cell)}
-.h-pub a:focus-visible{outline:3px solid var(--hot);outline-offset:-3px}
-.h-pub .main{display:grid;grid-template-columns:78px minmax(0,1fr);gap:18px;padding:18px}
-.h-pub .pg{position:relative;height:100px;background:#fafaf7;border:1px solid var(--t-line);
-  background-image:linear-gradient(var(--accent),var(--accent)),repeating-linear-gradient(#fafaf7 0 7px,#cfcfca 7px 9px);
-  background-size:46px 9px,58px 52px;background-position:9px 12px,9px 34px;background-repeat:no-repeat}
-.h-pub .pg::after{content:"";position:absolute;right:-1px;top:-1px;border-top:16px solid var(--tile);border-left:16px solid #e0e0db}
-.h-pub .kk{display:flex;align-items:center;gap:8px;font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--t-mute)}
-.h-pub .kk::before{content:"";width:8px;height:8px;background:var(--hot)}
-.h-pub b{display:block;margin-top:10px;font:800 18px/1.25 var(--sans)}
-.h-pub .go{display:block;margin-top:10px;overflow-wrap:anywhere;font:600 13px/1.3 var(--mono);color:var(--hot)}
-.h-pub .row{display:flex;align-items:center;gap:12px;padding:11px 18px;font:600 13px/1.3 var(--mono);color:var(--t-ink2)}
-.h-pub .row .ic{width:18px;height:18px;color:var(--t-mute)}
-.h-pub .row span.ar,.h-pub .go span.ar{margin-left:auto}
-.h-pub .row:hover{color:var(--tile-ink)}
+.hx{background:var(--tile);color:var(--tile-ink);border-bottom:4px solid var(--accent);
+  min-height:calc(100vh - var(--bar-h));min-height:calc(100svh - var(--bar-h));display:flex;flex-direction:column}
+.hx .wrap{flex:1;display:flex;flex-direction:column}
+.hx a{color:var(--hot)}
+.hx-main{flex:1;display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:40px 64px;align-items:center;padding:56px 0 48px}
+.hx h1{margin-top:22px;font:800 clamp(40px,6.6vw,84px)/.97 var(--sans);letter-spacing:-.03em;max-width:12ch}
+.hx h1 em{font-style:normal;color:var(--hot)}
+.hx .sub{margin-top:20px;max-width:36ch;font:700 clamp(18px,2vw,22px)/1.3 var(--display);color:var(--t-ink2)}
+.hx .btns{margin-top:30px}
 
-/* section head: short label column + content */
-.h-sec{padding:64px 0;border-top:1px solid var(--line-2)}
-.h-sec:first-of-type{border-top:0}
-.h-head{display:flex;align-items:center;flex-wrap:wrap;gap:12px 20px;margin-bottom:24px;min-height:44px}
-.h-head h2{font:800 clamp(24px,3.4vw,34px)/1.1 var(--sans);letter-spacing:-.014em}
-/* destination tag: the page this section leads to */
-.dest{margin-left:auto;display:inline-flex;align-items:stretch;border:1px solid var(--ink);background:var(--panel);color:var(--ink);text-decoration:none;white-space:nowrap}
-.dest .di{display:flex;align-items:center;justify-content:center;width:42px;background:var(--tile);color:var(--tile-ink)}
-.dest .di .ic{width:20px;height:20px}
-.dest b{display:flex;align-items:center;padding:0 12px;font:800 16px/1 var(--sans)}
-.dest span.what{display:flex;align-items:center;padding:0 12px;border-left:1px solid var(--line-2);font:600 12.5px/1 var(--mono);color:var(--ink-3)}
-.dest span.what::after{content:"\2192";margin-left:10px;font:400 17px/1 var(--sans);color:var(--ink-2)}
-.dest{height:42px}
-.dest:hover{border-color:var(--accent)}
-.dest:hover .di{background:var(--accent)}
-.dest:hover span.what,.dest:hover span.what::after{color:var(--accent)}
+/* the visual: a library of candidates becomes a ranking */
+.viz{box-shadow:12px 12px 0 var(--accent);margin:0 12px 12px 0;display:grid;grid-template-columns:minmax(0,1.15fr) 56px minmax(0,1fr);align-items:stretch;border:1px solid var(--t-line);background:var(--t-cell)}
+.viz .vh{grid-column:span 1;padding:10px 14px;border-bottom:1px solid var(--t-line);font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--t-mute)}
+.viz .vh.mid{border-left:1px solid var(--t-line);border-right:1px solid var(--t-line)}
+.viz .lib{display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:4px;padding:24px 20px;align-content:center}
+.viz .lib i{display:block;aspect-ratio:1;background:var(--t-line)}
+.viz .lib i.h{background:var(--hot)}
+.viz .go{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-left:1px solid var(--t-line);border-right:1px solid var(--t-line);background:var(--accent);color:#fff}
+.viz .go span{writing-mode:vertical-rl;transform:rotate(180deg);font:700 13px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase}
+.viz .go b{font:400 22px/1 var(--sans)}
+.viz ol{list-style:none;margin:0;padding:22px 20px;display:flex;flex-direction:column;justify-content:center;gap:11px}
+.viz li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:center}
+.viz .rk{font:600 11.5px/1 var(--mono);color:var(--t-mute);text-align:right}
+.viz .bb{display:block;height:16px;width:var(--w);background:var(--t-line)}
+.viz li.t .bb{background:var(--hot)}
+.viz li.t .rk{color:var(--tile-ink)}
+.viz .vf{grid-column:1 / -1;display:flex;align-items:center;gap:10px;padding:12px 20px;border-top:1px solid var(--t-line);font:500 12.5px/1.4 var(--mono);color:var(--t-ink2)}
+.viz .vf .p{color:var(--t-mute)}
+.viz .vf .o{margin-left:auto;color:var(--hot);white-space:nowrap}
 
-/* guide: three icon tiles */
-.h-go{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-top:3px solid var(--accent)}
-.h-go a{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:4px 16px;align-items:center;padding:22px 20px;background:var(--panel);color:var(--ink);text-decoration:none}
-.h-go .ib{grid-row:1 / 3;display:flex;align-items:center;justify-content:center;width:52px;height:52px;background:var(--tile);color:var(--tile-ink)}
-.h-go b{font:800 22px/1.1 var(--sans)}
-.h-go span.t{grid-column:2;font-size:15.5px;line-height:1.35;color:var(--ink-2)}
-.h-go .ar{grid-row:1 / 3;grid-column:3;font:400 22px/1 var(--sans);color:var(--ink-3)}
-.h-go a:hover{background:var(--accent-tint)}
-.h-go a:hover .ib{background:var(--accent)}
-.h-go a:hover .ar{color:var(--accent)}
-.h-go a:focus-visible{outline-offset:-3px}
-
-/* install: three numbered command cells */
-.h-run{border:1px solid var(--tile);background:var(--tile);color:#f1f1ee}
-.h-run > div{display:grid;grid-template-columns:220px minmax(0,1fr);align-items:stretch;min-width:0}
-.h-run > div + div{border-top:1px solid var(--t-line)}
-.h-run .rh{display:flex;align-items:center;gap:10px;padding:14px 16px;border-right:1px solid var(--t-line);font:600 12.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--t-mute)}
-.h-run .rh i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:var(--hot);color:var(--tile);font-weight:700;letter-spacing:0}
-.h-run .rh .ic{width:20px;height:20px;margin-left:auto;color:var(--t-mute)}
-.h-run pre{margin:0;padding:14px 16px;font:500 14.5px/1.7 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;align-self:center}
-.h-run .p{color:var(--t-mute);user-select:none}
-.h-run .o{color:var(--hot)}
-.h-alt{display:flex;align-items:center;gap:12px;margin-top:14px;font-size:16px;color:var(--ink-2)}
-.h-alt .ic{width:22px;height:22px;color:var(--accent)}
-.h-alt a{font-weight:700}
-
-/* research: numbers, then two figures */
-.h-kpi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}
-.h-kpi > div{background:var(--panel);padding:18px 20px 20px}
-.h-kpi .k{font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
-.h-kpi .n{margin-top:10px;font:800 clamp(34px,4.6vw,50px)/1 var(--sans);letter-spacing:-.02em;color:var(--accent);white-space:nowrap}
-.h-kpi .t{margin-top:8px;font-size:15.5px;line-height:1.4;color:var(--ink-2)}
-.h-kpi .t b{color:var(--ink)}
-.h-figs{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1px;margin-top:24px;align-items:stretch;background:var(--line);border:1px solid var(--line)}
-.h-fig{margin:0;display:flex;flex-direction:column;background:var(--panel);padding:16px 20px 0;min-width:0}
-@supports (grid-template-rows:subgrid){
-  .h-figs{grid-template-rows:auto 1fr auto}
-  .h-fig{display:grid;grid-row:span 3;grid-template-rows:subgrid;row-gap:0}
-}
-.h-fig .fh{font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding-bottom:10px;border-bottom:2px solid var(--ink)}
-.h-fig figcaption{margin:16px -20px 0;padding:12px 20px 14px;border-top:1px solid var(--line-2);background:var(--soft);font-size:14.5px;line-height:1.45;color:var(--ink-2)}
-.h-fig figcaption b{color:var(--ink)}
-/* figure A: the two-stage screen, as page elements */
-.h-pipe{flex:1;justify-content:center;list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:0}
-.h-pipe li{min-height:56px;position:relative;display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--line);background:var(--panel)}
-.h-pipe li + li{margin-top:14px}
-.h-pipe li + li::before{content:"";position:absolute;left:31px;top:-14px;height:13px;border-left:2px solid var(--ink-3)}
-.h-pipe li + li::after{content:"";position:absolute;left:27px;top:-6px;border-top:6px solid var(--ink-3);border-left:5px solid transparent;border-right:5px solid transparent}
-.h-pipe .ic{width:24px;height:24px;margin:0 auto}
-.h-pipe b{display:block;font:800 16px/1.2 var(--sans)}
-.h-pipe small{display:block;font-size:14px;line-height:1.3;color:var(--ink-2)}
-.h-pipe .g{background:var(--accent-tint);border-color:var(--accent)} .h-pipe .g b{color:var(--accent)}
-.h-pipe .d{background:var(--tile);border-color:var(--tile);color:var(--tile-ink)} .h-pipe .d small{color:var(--t-ink2)}
-.h-pipe .f{border-width:2px;border-color:var(--ink)}
-/* figure B: wall time bars, exact values from the Research article */
-.h-sp{flex:1;display:flex;flex-direction:column;justify-content:space-evenly;gap:14px;margin-top:16px}
-.h-sp .grp{display:flex;flex-direction:column;gap:2px}
-.h-sp .tg{display:flex;align-items:baseline;gap:10px;margin:0 0 6px;font:700 13px/1.2 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
-.h-sp .tg span{font-weight:400;color:var(--ink-3)}
-.h-sp .r{display:grid;grid-template-columns:76px minmax(0,1fr) 108px;gap:10px;align-items:center;padding:6px 0}
-.h-sp .r > b{font:700 14.5px/1.2 var(--sans)}
-.h-sp .tr{position:relative;height:14px;background:var(--soft)}
-.h-sp .tr i{position:absolute;left:0;top:0;bottom:0;min-width:3px;width:calc(var(--v) / 82 * 100%);background:#3c3c3c}
-.h-sp .r.gf .tr i{background:var(--accent)}
-.h-sp .r.bz .tr i{background:#858580}
-.h-sp .r.b2 .tr i{background:#3c3c3c}
-.h-sp .r.gf > b{color:var(--accent)}
-.h-sp .v{text-align:right;font:600 13px/1.2 var(--mono);color:var(--ink-2);white-space:nowrap}
-.h-sp .v em{font-style:normal;color:var(--ink);font-weight:700}
+/* bottom rail: preprint card and data link */
+.hx-rail{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px;background:var(--t-line);border:1px solid var(--t-line);margin-bottom:40px}
+.hx-rail a{display:flex;align-items:center;gap:16px;background:var(--tile);color:var(--tile-ink);text-decoration:none;padding:14px 18px}
+.hx-rail a:hover{background:var(--t-cell)}
+.hx-rail a:focus-visible{outline:3px solid var(--hot);outline-offset:-3px}
+.hx-rail .pg{flex:0 0 auto;position:relative;width:44px;height:56px;background:#fafaf7;
+  background-image:linear-gradient(var(--accent),var(--accent)),repeating-linear-gradient(#fafaf7 0 5px,#cfcfca 5px 6px);
+  background-size:26px 5px,32px 30px;background-position:6px 8px,6px 20px;background-repeat:no-repeat}
+.hx-rail .pg::after{content:"";position:absolute;right:0;top:0;border-top:10px solid var(--tile);border-left:10px solid #e0e0db}
+.hx-rail .kk{display:flex;align-items:center;gap:8px;font:600 11.5px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--t-mute)}
+.hx-rail .kk::before{content:"";width:8px;height:8px;background:var(--hot)}
+.hx-rail b{display:block;margin-top:5px;font:800 17px/1.25 var(--sans)}
+.hx-rail .ar{margin-left:auto;font:400 20px/1 var(--sans);color:var(--hot)}
+.hx-rail .data{font:600 13px/1.3 var(--mono);color:var(--t-ink2)}
+.hx-rail .data .ic{color:var(--t-mute)}
+.hx-rail .data:hover{color:var(--tile-ink)}
 
 @media (max-width:899px){
-  .h-go{grid-template-columns:minmax(0,1fr)}
-  .h-run > div{grid-template-columns:minmax(0,1fr)}
-  .h-run .rh{border-right:0;border-bottom:1px solid var(--t-line);padding:10px 14px}
-  .h-run pre{font-size:13.5px;padding:12px 14px}
-  .h-figs{grid-template-columns:minmax(0,1fr)}
-  .h-hero .hg{grid-template-columns:minmax(0,1fr)}
-  .h-pub{max-width:520px}
+  .hx-main{grid-template-columns:minmax(0,1fr);padding:40px 0 32px}
+  .viz{max-width:560px}
 }
 @media (max-width:759px){
-  .h-hero{padding:40px 0 40px}
-  .h-sec{padding:44px 0}
-  .dest{margin-left:0}
-  .h-fig{padding:14px 14px 0}
-  .h-fig figcaption{margin:14px -14px 0;padding:12px 14px;min-height:0}
-  .h-pub .main{grid-template-columns:62px minmax(0,1fr);gap:14px;padding:14px}
-  .h-pub .pg{height:80px;background-size:36px 8px,46px 40px;background-position:7px 10px,7px 28px}
-  .h-pub .row{padding:10px 14px}
-  .h-kpi{grid-template-columns:minmax(0,1fr)}
-  .h-go a{padding:16px}
-  .h-go .ib{width:44px;height:44px}
-  .h-sp .r{grid-template-columns:70px minmax(0,1fr) 96px;gap:8px}
+  .hx{min-height:0}
+  .hx-main{gap:32px}
+  .viz{grid-template-columns:minmax(0,1fr) 40px minmax(0,1fr)}
+  .viz .vh{padding:8px 10px;font-size:11px}
+  .viz .lib{grid-template-columns:repeat(9,minmax(0,1fr));padding:12px 10px}
+  .viz .lib i:nth-child(n+64){display:none}
+  .viz ol{padding:12px 10px;gap:7px}
+  .viz .bb{height:12px}
+  .viz .lib{gap:3px}
+  .viz{box-shadow:8px 8px 0 var(--accent);margin:0 8px 8px 0}
+  .viz li:nth-child(n+7){display:none}
+  .viz .vf{flex-wrap:wrap;gap:4px 10px;padding:9px 10px;font-size:12px}
+  .viz .vf .o{margin-left:0}
+  .hx-rail{grid-template-columns:minmax(0,1fr);margin-bottom:32px}
+  .hx-rail a{padding:12px 14px}
+  .hx-rail b{font-size:15.5px}
 }
 </style>
 </head>
@@ -171,119 +103,39 @@
   </div>
 </header>
 
-<!-- icon set: 24px grid, 2px square-capped stroke, no curves -->
+<!-- icon set: 24px grid, 2px square-capped stroke -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-  <symbol id="i-docs" viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z"/><path d="M15 3v4h4"/><path d="M8 11h8M8 14h8M8 17h5"/></symbol>
-  <symbol id="i-research" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path class="f" d="M7 13h3v6H7zM12 8h3v11h-3zM17 11h3v8h-3z"/></symbol>
-  <symbol id="i-gpu" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/><path d="M9 9h6v6H9z"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
-  <symbol id="i-get" viewBox="0 0 24 24"><path d="M12 3v11"/><path d="M7 9l5 5 5-5"/><path d="M4 15v5h16v-5"/></symbol>
-  <symbol id="i-box" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></symbol>
-  <symbol id="i-rank" viewBox="0 0 24 24"><path d="M3 5h4M3 12h4M3 19h4"/><path d="M10 5h11M10 12h8M10 19h5"/></symbol>
-  <symbol id="i-lib" viewBox="0 0 24 24"><path d="M3 4h4v16H3zM10 4h4v16h-4z"/><path d="M16.5 5.2l3.8-1 3.7 15.6-3.8 1z" transform="translate(-1.5 0)"/></symbol>
-  <symbol id="i-cut" viewBox="0 0 24 24"><path d="M3 4h18l-7 8v8l-4-2v-6z"/></symbol>
-  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v6H4V6h6"/></symbol>
   <symbol id="i-data" viewBox="0 0 24 24"><path d="M4 4h16v5H4zM4 9h16v5H4zM4 14h16v6H4z"/><path d="M7 6.5h3M7 11.5h3M7 17h3"/></symbol>
-  <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 11h14v10H5z"/><path d="M8 11V6h8v5"/><path d="M12 15v2"/></symbol>
 </svg>
 
 <main id="main">
-<section class="h-hero on-dark">
+<section class="hx on-dark">
   <div class="wrap">
-    <div class="hg">
+    <div class="hx-main">
       <div>
-      <p class="status">v0.1.0 &middot; open source &middot; MIT</p>
-      <h1>Rank the library. <em>Skip</em> structure generation.</h1>
-      <p class="sub">The released Boltz-2 affinity trunk and heads score every ligand, structure-generation-free.</p>
-      <div class="btns">
-        <a class="btn pri big" href="docs/index.html">Get started</a>
-        <a class="btn big" href="webgpu/web/screen.html">Try it in the browser</a>
-      </div>
-      </div>
-      <div class="h-pub" aria-label="Preprint and data">
-        <a class="main" href="https://doi.org/10.26434/chemrxiv.15012606/v1">
-          <span class="pg" aria-hidden="true"></span>
-          <span><span class="kk">Preprint &middot; ChemRxiv</span><b>Boltz-GenFree: structure-generation-free ranking for first-stage affinity screening</b><span class="go">doi:10.26434/chemrxiv.15012606&nbsp;&nearr;</span></span>
-        </a>
-        <a class="row" href="https://doi.org/10.5281/zenodo.23949585"><svg class="ic" aria-hidden="true"><use href="#i-data"/></svg>Data and analysis &middot; Zenodo<span class="ar">&nearr;</span></a>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="h-sec" aria-labelledby="go">
-  <div class="wrap">
-    <div class="h-head"><h2 id="go">Where to go</h2></div>
-    <nav class="h-go" aria-label="Site sections">
-      <a href="docs/index.html"><span class="ib"><svg class="ic"><use href="#i-docs"/></svg></span><b>Docs</b><span class="t">Install, configure, run a screen.</span><span class="ar" aria-hidden="true">&rarr;</span></a>
-      <a href="research.html"><span class="ib"><svg class="ic"><use href="#i-research"/></svg></span><b>Research</b><span class="t">How it works, and the results.</span><span class="ar" aria-hidden="true">&rarr;</span></a>
-      <a href="webgpu/web/screen.html"><span class="ib"><svg class="ic"><use href="#i-gpu"/></svg></span><b>WebGPU</b><span class="t">Run it in this browser.</span><span class="ar" aria-hidden="true">&rarr;</span></a>
-    </nav>
-  </div>
-</section>
-
-<section class="h-sec" aria-labelledby="run">
-  <div class="wrap">
-    <div class="h-head"><h2 id="run">Install and run</h2><a class="dest" href="docs/index.html"><span class="di"><svg class="ic" aria-hidden="true"><use href="#i-docs"/></svg></span><b>Docs</b><span class="what">Full guide</span></a></div>
-    <div class="h-run">
-      <div>
-        <div class="rh"><i>1</i>Get the code<svg class="ic"><use href="#i-get"/></svg></div>
-<pre><span class="p">$ </span>git clone https://github.com/N283T/boltz-genfree.git
-<span class="p">$ </span>cd boltz-genfree</pre>
-      </div>
-      <div>
-        <div class="rh"><i>2</i>Install<svg class="ic"><use href="#i-box"/></svg></div>
-<pre><span class="p">$ </span>uv sync --frozen --extra cuda</pre>
-      </div>
-      <div>
-        <div class="rh"><i>3</i>Screen<svg class="ic"><use href="#i-rank"/></svg></div>
-<pre><span class="p">$ </span>boltz-genfree screen screen.yaml
-<span class="o">&rarr; scores.csv</span></pre>
-      </div>
-    </div>
-    <p class="h-alt"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg><span>No install: the <a href="webgpu/web/screen.html">browser tool</a> runs in the page on WebGPU. Nothing is uploaded.</span></p>
-  </div>
-</section>
-
-<section class="h-sec" aria-labelledby="res">
-  <div class="wrap">
-    <div class="h-head"><h2 id="res">Results</h2><a class="dest" href="research.html"><span class="di"><svg class="ic" aria-hidden="true"><use href="#i-research"/></svg></span><b>Research</b><span class="what">Read the article</span></a></div>
-    <div class="h-kpi">
-      <div><div class="k">GenFree alone</div><div class="n">90%</div><div class="t">of Boltz-2&rsquo;s mean average precision on eight libraries. <b>Boltzina: 67%.</b></div></div>
-      <div><div class="k">Two-stage screen</div><div class="n">0.0839</div><div class="t">mean AP when Boltz-2 re-ranks the top 10%. <b>Boltz-2 alone: 0.0840.</b></div></div>
-      <div><div class="k">Estimated cost</div><div class="n">8.5&ndash;8.9&times;</div><div class="t">lower cost for that two-stage screen, estimated on two timed targets.</div></div>
-    </div>
-
-    <div class="h-figs">
-      <figure class="h-fig" aria-label="The two-stage screen: the library, a GenFree ranking of every compound, a shortlist of the top share, Boltz-2 on the shortlist only, the final ranking">
-        <div class="fh">The two-stage screen</div>
-        <ol class="h-pipe">
-          <li><svg class="ic" aria-hidden="true"><use href="#i-lib"/></svg><span><b>Library</b><small>about 50,000 compounds</small></span></li>
-          <li class="g"><svg class="ic" aria-hidden="true"><use href="#i-rank"/></svg><span><b>GenFree</b><small>every compound, structure-generation-free</small></span></li>
-          <li><svg class="ic" aria-hidden="true"><use href="#i-cut"/></svg><span><b>Shortlist</b><small>top 5, 10 or 20%</small></span></li>
-          <li class="d"><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg><span><b>Boltz-2</b><small>on the shortlist only</small></span></li>
-          <li class="f"><svg class="ic" aria-hidden="true"><use href="#i-research"/></svg><span><b>Final ranking</b></span></li>
-        </ol>
-        <figcaption>Boltz-2 re-orders the top share; everything below keeps its first-stage order.</figcaption>
-      </figure>
-
-      <figure class="h-fig" aria-label="Wall time of three workflows on 2,048 compounds, as multiples of the GenFree time">
-        <div class="fh">Wall time, 2,048 compounds, one GPU</div>
-        <div class="h-sp">
-          <div class="grp">
-          <div class="tg">GSK3B <span>21 positives</span></div>
-          <div class="r gf"><b>GenFree</b><div class="tr"><i style="--v:1.0"></i></div><span class="v">10.6 min <em>1&times;</em></span></div>
-          <div class="r bz"><b>Boltzina</b><div class="tr"><i style="--v:11.7"></i></div><span class="v">2.1 h <em>12&times;</em></span></div>
-          <div class="r b2"><b>Boltz-2</b><div class="tr"><i style="--v:58.1"></i></div><span class="v">10.3 h <em>58&times;</em></span></div>
-          </div>
-          <div class="grp">
-          <div class="tg">NS5 <span>16 positives</span></div>
-          <div class="r gf"><b>GenFree</b><div class="tr"><i style="--v:1.0"></i></div><span class="v">6.1 min <em>1&times;</em></span></div>
-          <div class="r bz"><b>Boltzina</b><div class="tr"><i style="--v:35.9"></i></div><span class="v">3.7 h <em>36&times;</em> *</span></div>
-          <div class="r b2"><b>Boltz-2</b><div class="tr"><i style="--v:81.7"></i></div><span class="v">8.4 h <em>82&times;</em></span></div>
-          </div>
+        <p class="status">v0.1.0 &middot; open source &middot; MIT</p>
+        <h1>Rank the library. <em>Skip</em> structure generation.</h1>
+        <p class="sub">The released Boltz-2 affinity trunk and heads score every ligand, structure-generation-free.</p>
+        <div class="btns">
+          <a class="btn pri big" href="docs/index.html">Get started</a>
+          <a class="btn big" href="webgpu/web/screen.html">Try it in the browser</a>
         </div>
-        <figcaption><b>GenFree is 12 and 36 times faster than Boltzina, 58 and 82 times faster than the timed Boltz-2 run.</b> Per-target preparation is outside every bar. * Boltzina returned 2,030 of the 2,048 NS5 scores.</figcaption>
+      </div>
+      <figure class="viz" role="img" aria-label="A library of candidate ligands goes through GenFree and comes out as a ranking, written to scores.csv">
+        <div class="vh">Library</div><div class="vh mid" aria-hidden="true"></div><div class="vh">Ranking</div>
+        <div class="lib" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i class="h"></i><i></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i></div>
+        <div class="go" aria-hidden="true"><span>GenFree</span><b>&rarr;</b></div>
+        <ol aria-hidden="true"><li class="t"><span class="rk">1</span><span class="bb" style="--w:96%"></span></li><li class="t"><span class="rk">2</span><span class="bb" style="--w:88%"></span></li><li class="t"><span class="rk">3</span><span class="bb" style="--w:81%"></span></li><li class=""><span class="rk">4</span><span class="bb" style="--w:66%"></span></li><li class=""><span class="rk">5</span><span class="bb" style="--w:58%"></span></li><li class=""><span class="rk">6</span><span class="bb" style="--w:47%"></span></li><li class=""><span class="rk">7</span><span class="bb" style="--w:39%"></span></li><li class=""><span class="rk">8</span><span class="bb" style="--w:30%"></span></li></ol>
+        <div class="vf"><span><span class="p">$ </span>boltz-genfree screen screen.yaml</span><span class="o">&rarr; scores.csv</span></div>
       </figure>
+    </div>
+    <div class="hx-rail">
+      <a href="https://doi.org/10.26434/chemrxiv.15012606/v1">
+        <span class="pg" aria-hidden="true"></span>
+        <span><span class="kk">Preprint &middot; ChemRxiv</span><b>Boltz-GenFree: structure-generation-free ranking for first-stage affinity screening</b></span>
+        <span class="ar" aria-hidden="true">&nearr;</span>
+      </a>
+      <a class="data" href="https://doi.org/10.5281/zenodo.23949585"><svg class="ic" aria-hidden="true"><use href="#i-data"/></svg>Data on Zenodo<span class="ar" aria-hidden="true">&nearr;</span></a>
     </div>
   </div>
 </section>
