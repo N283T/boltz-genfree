@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boltz-GenFree</title>
+<meta name="description" content="Boltz-GenFree ranks a ligand library with the released Boltz-2 affinity checkpoint, without structure generation for any candidate.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Red+Hat+Mono:wght@400..700&display=swap">
+<link rel="stylesheet" href="site.css">
+<style>
+/* ---------- Home: one full-height, full-width hero split in two.
+   Left: the pitch and the four doors. Right: a magenta panel with the headline numbers.
+   Tokens from site.css; every box is square. ---------- */
+.ic{display:block;width:24px;height:24px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:square;stroke-linejoin:miter}
+
+.hx{--edge:max(var(--gut),calc((100vw - var(--max)) / 2 + var(--gut)));
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(380px,36vw);
+  min-height:calc(100vh - var(--bar-h));min-height:calc(100svh - var(--bar-h));
+  background:var(--tile);color:var(--tile-ink);border-bottom:4px solid var(--accent)}
+
+/* left: copy aligned with the wordmark in the bar */
+.hx-l{display:flex;flex-direction:column;justify-content:center;gap:clamp(36px,6vh,64px);
+  padding:56px clamp(32px,4vw,72px) 56px var(--edge)}
+.hx h1{margin-top:28px;font:800 clamp(44px,5.6vw,104px)/.95 var(--sans);letter-spacing:-.035em}
+.hx h1 span{display:block}
+.hx h1 em{font-style:normal;color:var(--hot)}
+.hx .sub{margin-top:24px;max-width:36ch;font:700 clamp(18px,1.6vw,24px)/1.3 var(--display);color:var(--t-ink2)}
+
+/* the four doors: a ruled 2x2 */
+.dest{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--t-line);border:1px solid var(--t-line);max-width:760px}
+.dest a{display:flex;align-items:center;gap:16px;padding:18px 18px;background:var(--tile);color:var(--tile-ink);text-decoration:none;transition:background-color .15s}
+.dest .glyph{display:grid;place-items:center;width:48px;height:48px;flex:0 0 auto;border:1px solid var(--t-line);color:var(--hot);transition:background-color .15s,color .15s,border-color .15s}
+.dest .txt{flex:1;min-width:0}
+.dest .k{display:block;font:600 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--t-mute)}
+.dest b{display:block;margin-top:5px;font:800 clamp(18px,1.4vw,22px)/1.15 var(--sans);letter-spacing:-.01em}
+.dest .go{color:var(--t-mute);transition:transform .15s,color .15s}
+.dest a:hover{background:var(--t-cell)}
+.dest a:hover .glyph{background:var(--hot);border-color:var(--hot);color:var(--tile)}
+.dest a:hover .go{color:var(--hot);transform:translateX(4px)}
+.dest a.ext:hover .go{transform:translate(3px,-3px)}
+.dest a:focus-visible{outline:3px solid var(--hot);outline-offset:-3px;position:relative;z-index:1}
+.dest a.pri{background:var(--accent)}
+.dest a.pri .glyph{border-color:rgba(255,255,255,.45);color:#fff}
+.dest a.pri .k,.dest a.pri .go{color:rgba(255,255,255,.8)}
+.dest a.pri:hover{background:#9a0f42}
+.dest a.pri:hover .glyph{background:#fff;border-color:#fff;color:var(--accent)}
+.dest a.pri:hover .go{color:#fff}
+
+.more{display:flex;flex-wrap:wrap;gap:8px 28px;margin-top:16px}
+.more a{display:inline-flex;align-items:center;gap:8px;font:600 13px/1.3 var(--mono);letter-spacing:.04em;color:var(--t-ink2);text-decoration:none}
+.more a .ic{width:18px;height:18px;color:var(--t-mute)}
+.more a .ic.s{width:14px;height:14px}
+.more a:hover,.more a:hover .ic{color:var(--hot)}
+.more a:focus-visible{outline:3px solid var(--hot);outline-offset:3px}
+
+/* right: the magenta panel, edge to edge, numbers stacked */
+.hx-r{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:center;
+  background:var(--accent);color:#fff;padding:56px clamp(32px,4vw,88px)}
+.hx-r .field{position:absolute;inset:0;pointer-events:none}
+.hx-r .field svg{position:absolute;right:0;top:50%;transform:translateY(-50%);max-width:none}
+.hx-r .field{-webkit-mask-image:linear-gradient(90deg,transparent 0,#000 70%);mask-image:linear-gradient(90deg,transparent 0,#000 70%)}
+.hx-r .field rect{fill:rgba(0,0,0,.1)}
+.hx-r .field rect.h{fill:rgba(255,255,255,.22)}
+.hx-r .field rect.a{fill:rgba(255,255,255,.4)}
+.stats{position:relative;display:flex;flex-direction:column;max-width:520px}
+.stats .lab{color:rgba(255,255,255,.75);margin-bottom:18px}
+.stats div{padding:22px 0 24px;border-top:1px solid rgba(255,255,255,.35)}
+.stats div:last-child{border-bottom:1px solid rgba(255,255,255,.35)}
+.stats .n{display:block;font:800 clamp(48px,5vw,92px)/.95 var(--sans);letter-spacing:-.035em;white-space:nowrap}
+.stats .t{display:block;margin-top:10px;font:600 12.5px/1.35 var(--mono);letter-spacing:.07em;text-transform:uppercase;color:rgba(255,255,255,.92)}
+.stats .t i{font-style:normal;color:rgba(255,255,255,.7)}
+.stats .src{display:inline-flex;align-items:center;gap:8px;margin-top:22px;font:600 13px/1.3 var(--mono);letter-spacing:.04em;color:#fff;text-decoration:none;align-self:flex-start;border-bottom:1px solid rgba(255,255,255,.5);padding-bottom:3px}
+.stats .src .ic{width:16px;height:16px}
+.stats .src:hover{border-bottom-color:#fff}
+.stats .src:focus-visible{outline:3px solid #fff;outline-offset:3px}
+
+@media (prefers-reduced-motion:reduce){.dest a,.dest .go,.dest .glyph{transition:none}.dest a:hover .go{transform:none}}
+@media (max-width:1099px){
+  .hx{grid-template-columns:minmax(0,1fr) minmax(300px,38vw)}
+  .dest{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:899px){
+  .hx{grid-template-columns:minmax(0,1fr);min-height:0}
+  .hx-l{padding:44px var(--gut) 40px}
+  .dest{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hx-r{padding:28px var(--gut)}
+  .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 16px}
+  .stats .lab{grid-column:1 / -1}
+  .stats div{padding:14px 0 0;border-bottom:0 !important}
+  .stats .n{font-size:clamp(26px,6.4vw,44px);white-space:normal}
+  .stats .src{grid-column:1 / -1}
+}
+@media (max-width:759px){
+  .hx-l{padding:36px var(--gut) 32px;gap:32px}
+  .dest{grid-template-columns:minmax(0,1fr)}
+  .dest a{padding:14px}
+  .dest .glyph{width:40px;height:40px}
+  .dest .glyph .ic{width:20px;height:20px}
+  .stats .t{font-size:10.5px;letter-spacing:.04em}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- shared site bar (identical on every page; only aria-current moves) -->
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="logo-on-dark.svg" alt="Boltz-GenFree home"></a>
+    <nav class="site-nav" aria-label="Site">
+      <ol>
+        <li><a href="index.html" aria-current="page">Home</a></li>
+        <li><a href="docs/index.html">Docs</a></li>
+        <li><a href="how-it-works.html">How it works</a></li>
+        <li><a href="results.html">Results</a></li>
+        <li><a class="wgpu" href="webgpu/web/screen.html">WebGPU</a></li>
+        <li class="gh-li pp-li"><a class="gh pp" href="https://doi.org/10.26434/chemrxiv.15012606/v1">Preprint</a></li>
+        <li class="gh-li"><a class="gh" href="https://github.com/N283T/boltz-genfree">GitHub</a></li>
+      </ol>
+    </nav>
+  </div>
+</header>
+
+<!-- icon set: 24px grid, 2px square-capped stroke -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M7 17L17 7M8 7h9v9"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M3 5h7l2 2 2-2h7v14h-7l-2 2-2-2H3zM12 7v14"/></symbol>
+  <symbol id="i-browser" viewBox="0 0 24 24"><path d="M3 4h18v16H3zM3 9h18"/><path d="M10 12.5v5l4.5-2.5z"/></symbol>
+  <symbol id="i-flow" viewBox="0 0 24 24"><path d="M3 5h7v5H3zM14 14h7v5h-7zM6.5 10v6.5H14M17.5 14V7.5H10"/></symbol>
+  <symbol id="i-paper" viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5zM14 3v5h5"/><path d="M8 12h8M8 16h8"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></symbol>
+  <symbol id="i-data" viewBox="0 0 24 24"><path d="M4 4h16v5H4zM4 9h16v5H4zM4 14h16v6H4z"/><path d="M7 6.5h3M7 11.5h3M7 17h3"/></symbol>
+</svg>
+
+<main id="main">
+<section class="hx on-dark">
+  <div class="hx-l">
+    <div>
+      <p class="status">v0.1.0 &middot; open source &middot; MIT</p>
+      <h1><span>Rank the library.</span><span><em>Skip</em> structure generation.</span></h1>
+      <p class="sub">The released Boltz-2 affinity trunk and heads score every ligand, structure-generation-free.</p>
+    </div>
+    <nav aria-label="Start here">
+      <div class="dest">
+        <a class="pri" href="docs/index.html"><span class="glyph"><svg class="ic" aria-hidden="true"><use href="#i-book"/></svg></span><span class="txt"><span class="k">Docs</span><b>Get started</b></span><svg class="ic go" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <a href="webgpu/web/screen.html"><span class="glyph"><svg class="ic" aria-hidden="true"><use href="#i-browser"/></svg></span><span class="txt"><span class="k">WebGPU</span><b>Run in the browser</b></span><svg class="ic go" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <a href="how-it-works.html"><span class="glyph"><svg class="ic" aria-hidden="true"><use href="#i-flow"/></svg></span><span class="txt"><span class="k">How it works</span><b>See the pipeline</b></span><svg class="ic go" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+        <a class="ext" href="https://doi.org/10.26434/chemrxiv.15012606/v1"><span class="glyph"><svg class="ic" aria-hidden="true"><use href="#i-paper"/></svg></span><span class="txt"><span class="k">Preprint</span><b>Read the paper</b></span><svg class="ic go" aria-hidden="true"><use href="#i-ext"/></svg></a>
+      </div>
+      <div class="more">
+        <a href="https://github.com/N283T/boltz-genfree"><svg class="ic" aria-hidden="true"><use href="#i-code"/></svg>Source on GitHub<svg class="ic s" aria-hidden="true"><use href="#i-ext"/></svg></a>
+        <a href="https://doi.org/10.5281/zenodo.23949585"><svg class="ic" aria-hidden="true"><use href="#i-data"/></svg>Data on Zenodo<svg class="ic s" aria-hidden="true"><use href="#i-ext"/></svg></a>
+      </div>
+    </nav>
+  </div>
+  <div class="hx-r">
+    <div class="field" aria-hidden="true"><svg width="870" height="1110" viewBox="0 0 870 1110"><rect x="0" y="0" width="30" height="30"/><rect x="40" y="0" width="30" height="30"/><rect x="80" y="0" width="30" height="30"/><rect x="120" y="0" width="30" height="30"/><rect x="160" y="0" width="30" height="30"/><rect x="200" y="0" width="30" height="30"/><rect x="240" y="0" width="30" height="30" class="h"/><rect x="280" y="0" width="30" height="30"/><rect x="320" y="0" width="30" height="30"/><rect x="360" y="0" width="30" height="30"/><rect x="400" y="0" width="30" height="30"/><rect x="440" y="0" width="30" height="30"/><rect x="480" y="0" width="30" height="30"/><rect x="520" y="0" width="30" height="30"/><rect x="560" y="0" width="30" height="30"/><rect x="600" y="0" width="30" height="30"/><rect x="640" y="0" width="30" height="30" class="a"/><rect x="680" y="0" width="30" height="30"/><rect x="720" y="0" width="30" height="30"/><rect x="760" y="0" width="30" height="30"/><rect x="800" y="0" width="30" height="30"/><rect x="840" y="0" width="30" height="30"/><rect x="0" y="40" width="30" height="30"/><rect x="40" y="40" width="30" height="30"/><rect x="80" y="40" width="30" height="30"/><rect x="120" y="40" width="30" height="30"/><rect x="160" y="40" width="30" height="30" class="a"/><rect x="200" y="40" width="30" height="30"/><rect x="240" y="40" width="30" height="30"/><rect x="280" y="40" width="30" height="30"/><rect x="320" y="40" width="30" height="30"/><rect x="360" y="40" width="30" height="30"/><rect x="400" y="40" width="30" height="30"/><rect x="440" y="40" width="30" height="30"/><rect x="480" y="40" width="30" height="30"/><rect x="520" y="40" width="30" height="30"/><rect x="560" y="40" width="30" height="30"/><rect x="600" y="40" width="30" height="30"/><rect x="640" y="40" width="30" height="30"/><rect x="680" y="40" width="30" height="30"/><rect x="720" y="40" width="30" height="30"/><rect x="760" y="40" width="30" height="30"/><rect x="800" y="40" width="30" height="30"/><rect x="840" y="40" width="30" height="30"/><rect x="0" y="80" width="30" height="30"/><rect x="40" y="80" width="30" height="30"/><rect x="80" y="80" width="30" height="30"/><rect x="120" y="80" width="30" height="30"/><rect x="160" y="80" width="30" height="30" class="a"/><rect x="200" y="80" width="30" height="30"/><rect x="240" y="80" width="30" height="30"/><rect x="280" y="80" width="30" height="30"/><rect x="320" y="80" width="30" height="30"/><rect x="360" y="80" width="30" height="30"/><rect x="400" y="80" width="30" height="30"/><rect x="440" y="80" width="30" height="30"/><rect x="480" y="80" width="30" height="30"/><rect x="520" y="80" width="30" height="30" class="h"/><rect x="560" y="80" width="30" height="30"/><rect x="600" y="80" width="30" height="30" class="a"/><rect x="640" y="80" width="30" height="30"/><rect x="680" y="80" width="30" height="30"/><rect x="720" y="80" width="30" height="30" class="a"/><rect x="760" y="80" width="30" height="30"/><rect x="800" y="80" width="30" height="30"/><rect x="840" y="80" width="30" height="30"/><rect x="0" y="120" width="30" height="30" class="a"/><rect x="40" y="120" width="30" height="30" class="h"/><rect x="80" y="120" width="30" height="30"/><rect x="120" y="120" width="30" height="30"/><rect x="160" y="120" width="30" height="30"/><rect x="200" y="120" width="30" height="30"/><rect x="240" y="120" width="30" height="30"/><rect x="280" y="120" width="30" height="30"/><rect x="320" y="120" width="30" height="30"/><rect x="360" y="120" width="30" height="30"/><rect x="400" y="120" width="30" height="30"/><rect x="440" y="120" width="30" height="30"/><rect x="480" y="120" width="30" height="30"/><rect x="520" y="120" width="30" height="30"/><rect x="560" y="120" width="30" height="30"/><rect x="600" y="120" width="30" height="30"/><rect x="640" y="120" width="30" height="30" class="h"/><rect x="680" y="120" width="30" height="30"/><rect x="720" y="120" width="30" height="30"/><rect x="760" y="120" width="30" height="30"/><rect x="800" y="120" width="30" height="30"/><rect x="840" y="120" width="30" height="30"/><rect x="0" y="160" width="30" height="30"/><rect x="40" y="160" width="30" height="30"/><rect x="80" y="160" width="30" height="30"/><rect x="120" y="160" width="30" height="30"/><rect x="160" y="160" width="30" height="30"/><rect x="200" y="160" width="30" height="30"/><rect x="240" y="160" width="30" height="30"/><rect x="280" y="160" width="30" height="30"/><rect x="320" y="160" width="30" height="30"/><rect x="360" y="160" width="30" height="30"/><rect x="400" y="160" width="30" height="30"/><rect x="440" y="160" width="30" height="30" class="h"/><rect x="480" y="160" width="30" height="30"/><rect x="520" y="160" width="30" height="30"/><rect x="560" y="160" width="30" height="30"/><rect x="600" y="160" width="30" height="30"/><rect x="640" y="160" width="30" height="30"/><rect x="680" y="160" width="30" height="30"/><rect x="720" y="160" width="30" height="30"/><rect x="760" y="160" width="30" height="30"/><rect x="800" y="160" width="30" height="30" class="h"/><rect x="840" y="160" width="30" height="30"/><rect x="0" y="200" width="30" height="30" class="h"/><rect x="40" y="200" width="30" height="30"/><rect x="80" y="200" width="30" height="30"/><rect x="120" y="200" width="30" height="30"/><rect x="160" y="200" width="30" height="30"/><rect x="200" y="200" width="30" height="30"/><rect x="240" y="200" width="30" height="30"/><rect x="280" y="200" width="30" height="30"/><rect x="320" y="200" width="30" height="30"/><rect x="360" y="200" width="30" height="30"/><rect x="400" y="200" width="30" height="30"/><rect x="440" y="200" width="30" height="30"/><rect x="480" y="200" width="30" height="30"/><rect x="520" y="200" width="30" height="30"/><rect x="560" y="200" width="30" height="30"/><rect x="600" y="200" width="30" height="30"/><rect x="640" y="200" width="30" height="30"/><rect x="680" y="200" width="30" height="30"/><rect x="720" y="200" width="30" height="30"/><rect x="760" y="200" width="30" height="30"/><rect x="800" y="200" width="30" height="30"/><rect x="840" y="200" width="30" height="30"/><rect x="0" y="240" width="30" height="30"/><rect x="40" y="240" width="30" height="30"/><rect x="80" y="240" width="30" height="30"/><rect x="120" y="240" width="30" height="30"/><rect x="160" y="240" width="30" height="30"/><rect x="200" y="240" width="30" height="30"/><rect x="240" y="240" width="30" height="30"/><rect x="280" y="240" width="30" height="30"/><rect x="320" y="240" width="30" height="30"/><rect x="360" y="240" width="30" height="30"/><rect x="400" y="240" width="30" height="30"/><rect x="440" y="240" width="30" height="30"/><rect x="480" y="240" width="30" height="30"/><rect x="520" y="240" width="30" height="30"/><rect x="560" y="240" width="30" height="30"/><rect x="600" y="240" width="30" height="30"/><rect x="640" y="240" width="30" height="30"/><rect x="680" y="240" width="30" height="30"/><rect x="720" y="240" width="30" height="30"/><rect x="760" y="240" width="30" height="30"/><rect x="800" y="240" width="30" height="30"/><rect x="840" y="240" width="30" height="30"/><rect x="0" y="280" width="30" height="30"/><rect x="40" y="280" width="30" height="30"/><rect x="80" y="280" width="30" height="30"/><rect x="120" y="280" width="30" height="30"/><rect x="160" y="280" width="30" height="30"/><rect x="200" y="280" width="30" height="30"/><rect x="240" y="280" width="30" height="30" class="a"/><rect x="280" y="280" width="30" height="30"/><rect x="320" y="280" width="30" height="30"/><rect x="360" y="280" width="30" height="30"/><rect x="400" y="280" width="30" height="30"/><rect x="440" y="280" width="30" height="30"/><rect x="480" y="280" width="30" height="30"/><rect x="520" y="280" width="30" height="30"/><rect x="560" y="280" width="30" height="30"/><rect x="600" y="280" width="30" height="30"/><rect x="640" y="280" width="30" height="30"/><rect x="680" y="280" width="30" height="30"/><rect x="720" y="280" width="30" height="30"/><rect x="760" y="280" width="30" height="30"/><rect x="800" y="280" width="30" height="30"/><rect x="840" y="280" width="30" height="30"/><rect x="0" y="320" width="30" height="30"/><rect x="40" y="320" width="30" height="30"/><rect x="80" y="320" width="30" height="30"/><rect x="120" y="320" width="30" height="30"/><rect x="160" y="320" width="30" height="30"/><rect x="200" y="320" width="30" height="30"/><rect x="240" y="320" width="30" height="30"/><rect x="280" y="320" width="30" height="30"/><rect x="320" y="320" width="30" height="30"/><rect x="360" y="320" width="30" height="30"/><rect x="400" y="320" width="30" height="30"/><rect x="440" y="320" width="30" height="30"/><rect x="480" y="320" width="30" height="30"/><rect x="520" y="320" width="30" height="30"/><rect x="560" y="320" width="30" height="30"/><rect x="600" y="320" width="30" height="30"/><rect x="640" y="320" width="30" height="30"/><rect x="680" y="320" width="30" height="30"/><rect x="720" y="320" width="30" height="30"/><rect x="760" y="320" width="30" height="30"/><rect x="800" y="320" width="30" height="30" class="h"/><rect x="840" y="320" width="30" height="30"/><rect x="0" y="360" width="30" height="30"/><rect x="40" y="360" width="30" height="30"/><rect x="80" y="360" width="30" height="30"/><rect x="120" y="360" width="30" height="30"/><rect x="160" y="360" width="30" height="30"/><rect x="200" y="360" width="30" height="30" class="h"/><rect x="240" y="360" width="30" height="30"/><rect x="280" y="360" width="30" height="30"/><rect x="320" y="360" width="30" height="30" class="h"/><rect x="360" y="360" width="30" height="30"/><rect x="400" y="360" width="30" height="30"/><rect x="440" y="360" width="30" height="30"/><rect x="480" y="360" width="30" height="30"/><rect x="520" y="360" width="30" height="30" class="h"/><rect x="560" y="360" width="30" height="30"/><rect x="600" y="360" width="30" height="30"/><rect x="640" y="360" width="30" height="30"/><rect x="680" y="360" width="30" height="30"/><rect x="720" y="360" width="30" height="30"/><rect x="760" y="360" width="30" height="30"/><rect x="800" y="360" width="30" height="30" class="a"/><rect x="840" y="360" width="30" height="30"/><rect x="0" y="400" width="30" height="30"/><rect x="40" y="400" width="30" height="30"/><rect x="80" y="400" width="30" height="30"/><rect x="120" y="400" width="30" height="30"/><rect x="160" y="400" width="30" height="30"/><rect x="200" y="400" width="30" height="30" class="h"/><rect x="240" y="400" width="30" height="30"/><rect x="280" y="400" width="30" height="30"/><rect x="320" y="400" width="30" height="30"/><rect x="360" y="400" width="30" height="30"/><rect x="400" y="400" width="30" height="30"/><rect x="440" y="400" width="30" height="30"/><rect x="480" y="400" width="30" height="30"/><rect x="520" y="400" width="30" height="30"/><rect x="560" y="400" width="30" height="30"/><rect x="600" y="400" width="30" height="30"/><rect x="640" y="400" width="30" height="30"/><rect x="680" y="400" width="30" height="30"/><rect x="720" y="400" width="30" height="30"/><rect x="760" y="400" width="30" height="30"/><rect x="800" y="400" width="30" height="30"/><rect x="840" y="400" width="30" height="30"/><rect x="0" y="440" width="30" height="30"/><rect x="40" y="440" width="30" height="30"/><rect x="80" y="440" width="30" height="30"/><rect x="120" y="440" width="30" height="30" class="a"/><rect x="160" y="440" width="30" height="30"/><rect x="200" y="440" width="30" height="30"/><rect x="240" y="440" width="30" height="30"/><rect x="280" y="440" width="30" height="30"/><rect x="320" y="440" width="30" height="30"/><rect x="360" y="440" width="30" height="30"/><rect x="400" y="440" width="30" height="30"/><rect x="440" y="440" width="30" height="30"/><rect x="480" y="440" width="30" height="30"/><rect x="520" y="440" width="30" height="30"/><rect x="560" y="440" width="30" height="30"/><rect x="600" y="440" width="30" height="30"/><rect x="640" y="440" width="30" height="30"/><rect x="680" y="440" width="30" height="30"/><rect x="720" y="440" width="30" height="30"/><rect x="760" y="440" width="30" height="30"/><rect x="800" y="440" width="30" height="30"/><rect x="840" y="440" width="30" height="30"/><rect x="0" y="480" width="30" height="30"/><rect x="40" y="480" width="30" height="30"/><rect x="80" y="480" width="30" height="30"/><rect x="120" y="480" width="30" height="30"/><rect x="160" y="480" width="30" height="30"/><rect x="200" y="480" width="30" height="30"/><rect x="240" y="480" width="30" height="30"/><rect x="280" y="480" width="30" height="30"/><rect x="320" y="480" width="30" height="30"/><rect x="360" y="480" width="30" height="30"/><rect x="400" y="480" width="30" height="30"/><rect x="440" y="480" width="30" height="30"/><rect x="480" y="480" width="30" height="30" class="a"/><rect x="520" y="480" width="30" height="30"/><rect x="560" y="480" width="30" height="30"/><rect x="600" y="480" width="30" height="30"/><rect x="640" y="480" width="30" height="30"/><rect x="680" y="480" width="30" height="30"/><rect x="720" y="480" width="30" height="30"/><rect x="760" y="480" width="30" height="30"/><rect x="800" y="480" width="30" height="30"/><rect x="840" y="480" width="30" height="30"/><rect x="0" y="520" width="30" height="30"/><rect x="40" y="520" width="30" height="30"/><rect x="80" y="520" width="30" height="30"/><rect x="120" y="520" width="30" height="30"/><rect x="160" y="520" width="30" height="30"/><rect x="200" y="520" width="30" height="30"/><rect x="240" y="520" width="30" height="30"/><rect x="280" y="520" width="30" height="30"/><rect x="320" y="520" width="30" height="30"/><rect x="360" y="520" width="30" height="30"/><rect x="400" y="520" width="30" height="30"/><rect x="440" y="520" width="30" height="30"/><rect x="480" y="520" width="30" height="30"/><rect x="520" y="520" width="30" height="30"/><rect x="560" y="520" width="30" height="30"/><rect x="600" y="520" width="30" height="30"/><rect x="640" y="520" width="30" height="30" class="h"/><rect x="680" y="520" width="30" height="30"/><rect x="720" y="520" width="30" height="30"/><rect x="760" y="520" width="30" height="30"/><rect x="800" y="520" width="30" height="30"/><rect x="840" y="520" width="30" height="30"/><rect x="0" y="560" width="30" height="30" class="a"/><rect x="40" y="560" width="30" height="30"/><rect x="80" y="560" width="30" height="30"/><rect x="120" y="560" width="30" height="30"/><rect x="160" y="560" width="30" height="30"/><rect x="200" y="560" width="30" height="30"/><rect x="240" y="560" width="30" height="30"/><rect x="280" y="560" width="30" height="30"/><rect x="320" y="560" width="30" height="30"/><rect x="360" y="560" width="30" height="30"/><rect x="400" y="560" width="30" height="30"/><rect x="440" y="560" width="30" height="30"/><rect x="480" y="560" width="30" height="30"/><rect x="520" y="560" width="30" height="30"/><rect x="560" y="560" width="30" height="30"/><rect x="600" y="560" width="30" height="30"/><rect x="640" y="560" width="30" height="30"/><rect x="680" y="560" width="30" height="30"/><rect x="720" y="560" width="30" height="30"/><rect x="760" y="560" width="30" height="30"/><rect x="800" y="560" width="30" height="30"/><rect x="840" y="560" width="30" height="30"/><rect x="0" y="600" width="30" height="30"/><rect x="40" y="600" width="30" height="30"/><rect x="80" y="600" width="30" height="30"/><rect x="120" y="600" width="30" height="30"/><rect x="160" y="600" width="30" height="30"/><rect x="200" y="600" width="30" height="30"/><rect x="240" y="600" width="30" height="30"/><rect x="280" y="600" width="30" height="30"/><rect x="320" y="600" width="30" height="30"/><rect x="360" y="600" width="30" height="30"/><rect x="400" y="600" width="30" height="30"/><rect x="440" y="600" width="30" height="30"/><rect x="480" y="600" width="30" height="30" class="h"/><rect x="520" y="600" width="30" height="30"/><rect x="560" y="600" width="30" height="30"/><rect x="600" y="600" width="30" height="30"/><rect x="640" y="600" width="30" height="30"/><rect x="680" y="600" width="30" height="30" class="h"/><rect x="720" y="600" width="30" height="30"/><rect x="760" y="600" width="30" height="30"/><rect x="800" y="600" width="30" height="30"/><rect x="840" y="600" width="30" height="30"/><rect x="0" y="640" width="30" height="30"/><rect x="40" y="640" width="30" height="30"/><rect x="80" y="640" width="30" height="30"/><rect x="120" y="640" width="30" height="30"/><rect x="160" y="640" width="30" height="30"/><rect x="200" y="640" width="30" height="30"/><rect x="240" y="640" width="30" height="30"/><rect x="280" y="640" width="30" height="30"/><rect x="320" y="640" width="30" height="30"/><rect x="360" y="640" width="30" height="30" class="h"/><rect x="400" y="640" width="30" height="30"/><rect x="440" y="640" width="30" height="30"/><rect x="480" y="640" width="30" height="30"/><rect x="520" y="640" width="30" height="30" class="h"/><rect x="560" y="640" width="30" height="30"/><rect x="600" y="640" width="30" height="30"/><rect x="640" y="640" width="30" height="30"/><rect x="680" y="640" width="30" height="30"/><rect x="720" y="640" width="30" height="30"/><rect x="760" y="640" width="30" height="30"/><rect x="800" y="640" width="30" height="30"/><rect x="840" y="640" width="30" height="30"/><rect x="0" y="680" width="30" height="30"/><rect x="40" y="680" width="30" height="30"/><rect x="80" y="680" width="30" height="30" class="h"/><rect x="120" y="680" width="30" height="30"/><rect x="160" y="680" width="30" height="30"/><rect x="200" y="680" width="30" height="30"/><rect x="240" y="680" width="30" height="30"/><rect x="280" y="680" width="30" height="30"/><rect x="320" y="680" width="30" height="30"/><rect x="360" y="680" width="30" height="30"/><rect x="400" y="680" width="30" height="30"/><rect x="440" y="680" width="30" height="30"/><rect x="480" y="680" width="30" height="30"/><rect x="520" y="680" width="30" height="30"/><rect x="560" y="680" width="30" height="30"/><rect x="600" y="680" width="30" height="30"/><rect x="640" y="680" width="30" height="30"/><rect x="680" y="680" width="30" height="30"/><rect x="720" y="680" width="30" height="30"/><rect x="760" y="680" width="30" height="30"/><rect x="800" y="680" width="30" height="30"/><rect x="840" y="680" width="30" height="30"/><rect x="0" y="720" width="30" height="30"/><rect x="40" y="720" width="30" height="30"/><rect x="80" y="720" width="30" height="30"/><rect x="120" y="720" width="30" height="30"/><rect x="160" y="720" width="30" height="30"/><rect x="200" y="720" width="30" height="30"/><rect x="240" y="720" width="30" height="30"/><rect x="280" y="720" width="30" height="30"/><rect x="320" y="720" width="30" height="30"/><rect x="360" y="720" width="30" height="30"/><rect x="400" y="720" width="30" height="30" class="h"/><rect x="440" y="720" width="30" height="30"/><rect x="480" y="720" width="30" height="30" class="h"/><rect x="520" y="720" width="30" height="30"/><rect x="560" y="720" width="30" height="30"/><rect x="600" y="720" width="30" height="30"/><rect x="640" y="720" width="30" height="30"/><rect x="680" y="720" width="30" height="30"/><rect x="720" y="720" width="30" height="30"/><rect x="760" y="720" width="30" height="30"/><rect x="800" y="720" width="30" height="30"/><rect x="840" y="720" width="30" height="30"/><rect x="0" y="760" width="30" height="30"/><rect x="40" y="760" width="30" height="30"/><rect x="80" y="760" width="30" height="30"/><rect x="120" y="760" width="30" height="30"/><rect x="160" y="760" width="30" height="30"/><rect x="200" y="760" width="30" height="30"/><rect x="240" y="760" width="30" height="30"/><rect x="280" y="760" width="30" height="30"/><rect x="320" y="760" width="30" height="30"/><rect x="360" y="760" width="30" height="30"/><rect x="400" y="760" width="30" height="30"/><rect x="440" y="760" width="30" height="30"/><rect x="480" y="760" width="30" height="30"/><rect x="520" y="760" width="30" height="30"/><rect x="560" y="760" width="30" height="30"/><rect x="600" y="760" width="30" height="30"/><rect x="640" y="760" width="30" height="30"/><rect x="680" y="760" width="30" height="30"/><rect x="720" y="760" width="30" height="30"/><rect x="760" y="760" width="30" height="30" class="h"/><rect x="800" y="760" width="30" height="30"/><rect x="840" y="760" width="30" height="30" class="h"/><rect x="0" y="800" width="30" height="30"/><rect x="40" y="800" width="30" height="30"/><rect x="80" y="800" width="30" height="30"/><rect x="120" y="800" width="30" height="30" class="a"/><rect x="160" y="800" width="30" height="30"/><rect x="200" y="800" width="30" height="30"/><rect x="240" y="800" width="30" height="30"/><rect x="280" y="800" width="30" height="30"/><rect x="320" y="800" width="30" height="30"/><rect x="360" y="800" width="30" height="30"/><rect x="400" y="800" width="30" height="30"/><rect x="440" y="800" width="30" height="30"/><rect x="480" y="800" width="30" height="30"/><rect x="520" y="800" width="30" height="30"/><rect x="560" y="800" width="30" height="30"/><rect x="600" y="800" width="30" height="30"/><rect x="640" y="800" width="30" height="30"/><rect x="680" y="800" width="30" height="30"/><rect x="720" y="800" width="30" height="30"/><rect x="760" y="800" width="30" height="30"/><rect x="800" y="800" width="30" height="30"/><rect x="840" y="800" width="30" height="30"/><rect x="0" y="840" width="30" height="30" class="h"/><rect x="40" y="840" width="30" height="30"/><rect x="80" y="840" width="30" height="30"/><rect x="120" y="840" width="30" height="30"/><rect x="160" y="840" width="30" height="30"/><rect x="200" y="840" width="30" height="30"/><rect x="240" y="840" width="30" height="30"/><rect x="280" y="840" width="30" height="30"/><rect x="320" y="840" width="30" height="30"/><rect x="360" y="840" width="30" height="30"/><rect x="400" y="840" width="30" height="30"/><rect x="440" y="840" width="30" height="30"/><rect x="480" y="840" width="30" height="30"/><rect x="520" y="840" width="30" height="30"/><rect x="560" y="840" width="30" height="30"/><rect x="600" y="840" width="30" height="30" class="a"/><rect x="640" y="840" width="30" height="30"/><rect x="680" y="840" width="30" height="30"/><rect x="720" y="840" width="30" height="30"/><rect x="760" y="840" width="30" height="30"/><rect x="800" y="840" width="30" height="30"/><rect x="840" y="840" width="30" height="30"/><rect x="0" y="880" width="30" height="30"/><rect x="40" y="880" width="30" height="30"/><rect x="80" y="880" width="30" height="30"/><rect x="120" y="880" width="30" height="30"/><rect x="160" y="880" width="30" height="30"/><rect x="200" y="880" width="30" height="30"/><rect x="240" y="880" width="30" height="30"/><rect x="280" y="880" width="30" height="30"/><rect x="320" y="880" width="30" height="30"/><rect x="360" y="880" width="30" height="30"/><rect x="400" y="880" width="30" height="30"/><rect x="440" y="880" width="30" height="30" class="a"/><rect x="480" y="880" width="30" height="30"/><rect x="520" y="880" width="30" height="30"/><rect x="560" y="880" width="30" height="30"/><rect x="600" y="880" width="30" height="30" class="h"/><rect x="640" y="880" width="30" height="30"/><rect x="680" y="880" width="30" height="30"/><rect x="720" y="880" width="30" height="30"/><rect x="760" y="880" width="30" height="30"/><rect x="800" y="880" width="30" height="30"/><rect x="840" y="880" width="30" height="30"/><rect x="0" y="920" width="30" height="30"/><rect x="40" y="920" width="30" height="30"/><rect x="80" y="920" width="30" height="30"/><rect x="120" y="920" width="30" height="30" class="h"/><rect x="160" y="920" width="30" height="30"/><rect x="200" y="920" width="30" height="30" class="h"/><rect x="240" y="920" width="30" height="30"/><rect x="280" y="920" width="30" height="30"/><rect x="320" y="920" width="30" height="30"/><rect x="360" y="920" width="30" height="30"/><rect x="400" y="920" width="30" height="30"/><rect x="440" y="920" width="30" height="30" class="h"/><rect x="480" y="920" width="30" height="30" class="h"/><rect x="520" y="920" width="30" height="30"/><rect x="560" y="920" width="30" height="30"/><rect x="600" y="920" width="30" height="30"/><rect x="640" y="920" width="30" height="30"/><rect x="680" y="920" width="30" height="30"/><rect x="720" y="920" width="30" height="30"/><rect x="760" y="920" width="30" height="30"/><rect x="800" y="920" width="30" height="30"/><rect x="840" y="920" width="30" height="30"/><rect x="0" y="960" width="30" height="30"/><rect x="40" y="960" width="30" height="30"/><rect x="80" y="960" width="30" height="30"/><rect x="120" y="960" width="30" height="30"/><rect x="160" y="960" width="30" height="30" class="a"/><rect x="200" y="960" width="30" height="30"/><rect x="240" y="960" width="30" height="30"/><rect x="280" y="960" width="30" height="30"/><rect x="320" y="960" width="30" height="30"/><rect x="360" y="960" width="30" height="30"/><rect x="400" y="960" width="30" height="30"/><rect x="440" y="960" width="30" height="30"/><rect x="480" y="960" width="30" height="30"/><rect x="520" y="960" width="30" height="30"/><rect x="560" y="960" width="30" height="30"/><rect x="600" y="960" width="30" height="30"/><rect x="640" y="960" width="30" height="30"/><rect x="680" y="960" width="30" height="30"/><rect x="720" y="960" width="30" height="30"/><rect x="760" y="960" width="30" height="30"/><rect x="800" y="960" width="30" height="30"/><rect x="840" y="960" width="30" height="30"/><rect x="0" y="1000" width="30" height="30"/><rect x="40" y="1000" width="30" height="30"/><rect x="80" y="1000" width="30" height="30"/><rect x="120" y="1000" width="30" height="30"/><rect x="160" y="1000" width="30" height="30"/><rect x="200" y="1000" width="30" height="30"/><rect x="240" y="1000" width="30" height="30"/><rect x="280" y="1000" width="30" height="30"/><rect x="320" y="1000" width="30" height="30"/><rect x="360" y="1000" width="30" height="30" class="h"/><rect x="400" y="1000" width="30" height="30"/><rect x="440" y="1000" width="30" height="30"/><rect x="480" y="1000" width="30" height="30"/><rect x="520" y="1000" width="30" height="30"/><rect x="560" y="1000" width="30" height="30"/><rect x="600" y="1000" width="30" height="30"/><rect x="640" y="1000" width="30" height="30"/><rect x="680" y="1000" width="30" height="30"/><rect x="720" y="1000" width="30" height="30"/><rect x="760" y="1000" width="30" height="30"/><rect x="800" y="1000" width="30" height="30"/><rect x="840" y="1000" width="30" height="30"/><rect x="0" y="1040" width="30" height="30"/><rect x="40" y="1040" width="30" height="30"/><rect x="80" y="1040" width="30" height="30"/><rect x="120" y="1040" width="30" height="30"/><rect x="160" y="1040" width="30" height="30"/><rect x="200" y="1040" width="30" height="30"/><rect x="240" y="1040" width="30" height="30"/><rect x="280" y="1040" width="30" height="30"/><rect x="320" y="1040" width="30" height="30"/><rect x="360" y="1040" width="30" height="30"/><rect x="400" y="1040" width="30" height="30"/><rect x="440" y="1040" width="30" height="30"/><rect x="480" y="1040" width="30" height="30"/><rect x="520" y="1040" width="30" height="30"/><rect x="560" y="1040" width="30" height="30"/><rect x="600" y="1040" width="30" height="30"/><rect x="640" y="1040" width="30" height="30"/><rect x="680" y="1040" width="30" height="30"/><rect x="720" y="1040" width="30" height="30" class="h"/><rect x="760" y="1040" width="30" height="30" class="h"/><rect x="800" y="1040" width="30" height="30"/><rect x="840" y="1040" width="30" height="30"/><rect x="0" y="1080" width="30" height="30"/><rect x="40" y="1080" width="30" height="30"/><rect x="80" y="1080" width="30" height="30"/><rect x="120" y="1080" width="30" height="30"/><rect x="160" y="1080" width="30" height="30"/><rect x="200" y="1080" width="30" height="30"/><rect x="240" y="1080" width="30" height="30"/><rect x="280" y="1080" width="30" height="30" class="a"/><rect x="320" y="1080" width="30" height="30"/><rect x="360" y="1080" width="30" height="30"/><rect x="400" y="1080" width="30" height="30"/><rect x="440" y="1080" width="30" height="30"/><rect x="480" y="1080" width="30" height="30"/><rect x="520" y="1080" width="30" height="30"/><rect x="560" y="1080" width="30" height="30"/><rect x="600" y="1080" width="30" height="30"/><rect x="640" y="1080" width="30" height="30"/><rect x="680" y="1080" width="30" height="30"/><rect x="720" y="1080" width="30" height="30"/><rect x="760" y="1080" width="30" height="30"/><rect x="800" y="1080" width="30" height="30"/><rect x="840" y="1080" width="30" height="30"/></svg></div>
+    <div class="stats">
+      <p class="lab">Results</p>
+      <div><span class="n">90%</span><span class="t">of Boltz-2 mean AP <i>&middot; GenFree alone</i></span></div>
+      <div><span class="n">0.0839</span><span class="t">two-stage mean AP <i>&middot; Boltz-2 0.0840</i></span></div>
+      <div><span class="n">8.5&ndash;8.9&times;</span><span class="t">lower cost <i>&middot; two-stage screen</i></span></div>
+      <a class="src" href="results.html">Results<svg class="ic" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- shared footer -->
+<footer class="foot">
+  <div class="rule"></div>
+  <div class="wrap">
+    <div class="cols">
+      <div class="fbrand">
+        <img src="logo-on-light.svg" alt="Boltz-GenFree">
+        <p>Structure-generation-free ranking for first-stage affinity screening.</p>
+      </div>
+      <div>
+        <h3>Site</h3>
+        <ul>
+          <li><a href="index.html" aria-current="page">Home</a></li>
+          <li><a href="docs/index.html">Docs</a></li>
+          <li><a href="how-it-works.html">How it works</a></li>
+          <li><a href="results.html">Results</a></li>
+          <li><a href="webgpu/web/screen.html">WebGPU</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/N283T/boltz-genfree">Source code</a></li>
+          <li><a href="https://github.com/N283T/boltz-genfree/releases">Releases</a></li>
+          <li><a href="https://github.com/N283T/boltz-genfree/issues">Issues</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Cite</h3>
+        <ul>
+          <li><a href="https://doi.org/10.26434/chemrxiv.15012606/v1">Preprint</a></li>
+          <li><a href="results.html#cite">How to cite</a></li>
+          <li><a href="https://doi.org/10.5281/zenodo.23949585">Data on Zenodo</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="legal"><span>MIT License &middot; Boltz-2 weights under their own terms</span><span>Not affiliated with the Boltz authors</span></div>
+</footer>
+</body>
+</html>

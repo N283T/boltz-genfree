@@ -4,7 +4,12 @@ on:
   push:
     branches: [main]
     paths:
-      - "docs/site/v2/**"
+      - "docs/site/**"
+      - "docs/*.md"
+      - "docs/guide/**"
+      - "README.md"
+      - "webgpu/src/**"
+      - "webgpu/web/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -19,9 +24,9 @@ concurrency:
 
 jobs:
   deploy:
-    name: Publish docs/site/v2
+    name: Publish the project site
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -29,13 +34,24 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Only the main page and its assets are public; the other pages under
-      # docs/site/v2 are working tools and stay unpublished.
-      - name: Assemble site
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      # The browser tool reads the GenFree affinity pack (35 MB) from the site itself. The pack is not in the repository; it is a
+      # release asset (see webgpu/README or docs/webgpu.md). Until that release exists the site is still published, without the pack.
+      - name: Fetch the affinity pack
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p _site
-          cp docs/site/v2/index.html _site/
-          cp -r docs/site/v2/assets _site/
+          mkdir -p webgpu/packs
+          gh release download webgpu-weights-1 --repo "$GITHUB_REPOSITORY" \
+            --pattern 'genfree-affinity.*' --dir webgpu/packs --clobber \
+            || echo "::warning::release webgpu-weights-1 not found; the browser tool will not run on this deployment"
+
+      # Pages, the Docs and the browser tool are assembled by one script, the same one used for local preview.
+      # docs/site/internal holds working tools and is never published.
+      - name: Assemble site
+        run: docs/site/assemble.sh _site
 
       - uses: actions/configure-pages@v6
 

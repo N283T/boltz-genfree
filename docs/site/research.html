@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moved &middot; Boltz-GenFree</title>
+<meta name="robots" content="noindex">
+<link rel="canonical" href="results.html">
+<meta http-equiv="refresh" content="0; url=results.html">
+<script>
+/* The Research page was split into How it works and Results; send old links to the right section. */
+(function(){
+  var h = location.hash.slice(1);
+  var how = {problem:1, how:1, prior:1, design:1, references:1};
+  var map = {discussion:'limits'};
+  var page = how[h] ? 'how-it-works.html' : 'results.html';
+  var target = h === 'prior' ? 'problem' : (map[h] || h);
+  location.replace(page + (target ? '#' + target : ''));
+})();
+</script>
+<style>body{margin:0;padding:40px 20px;background:#fafaf7;color:#161616;font:400 18px/1.6 "Helvetica Neue",Arial,sans-serif}a{color:#b8124f}</style>
+</head>
+<body>
+<p>This page has moved: <a href="how-it-works.html">How it works</a> and <a href="results.html">Results</a>.</p>
+</body>
+</html>

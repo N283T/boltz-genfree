@@ -81,8 +81,9 @@ note; write `msa: empty` to say so explicitly), `ligands.sdf`, `affinity_adapter
 cd webgpu && node tools/serve.js && open http://127.0.0.1:4180/web/screen.html
 ```
 
-Sequence and ligands sit side by side (ligands: one SMILES per line, `id,SMILES`, or a CSV/TSV with a `smiles` column).
-The MSA is an optional A3M file (none = single sequence). Below them, one row of settings: recycling (slider, 0-5), seed and
+The receptor and ligand boxes are stacked, each with a file button in its header. The receptor box takes a bare sequence or
+FASTA (the first record is used); the MSA button loads an optional A3M file (none = single sequence). Ligands: one SMILES
+per line, `id,SMILES`, or a CSV/TSV with a `smiles` column. Below them, one row of settings: recycling (slider, 0-5), seed and
 ligand conformer mode. Then the receptor-crop section, Advanced (weights URLs), and Run / Stop with the progress. Results
 appear per ligand in a table sorted by P(binder) (also by value or input order); Download scores.csv sits beside it and writes
 GenFree's columns plus `error`. A ligand that fails (for example over the size limit) is listed with its error and the run
@@ -136,6 +137,16 @@ slice, flip, take, scale, concat, add).
   shardsTotal, fromCache})`). Same-origin URLs and Node keep per-tensor byte ranges.
 - The affinity pack (35 MB) is still read from this server (`/packs/genfree-affinity.json`); the "own float32 pack" option on the
   page, and `node src/cli.js`, still use the float32 pack.
+
+### Publishing the tool on the project site
+
+`docs/site/assemble.sh` copies `webgpu/src/` and `webgpu/web/screen.html` into the site (`webgpu/web/screen.html` is the
+page behind the navigation's "WebGPU" item) and the affinity pack into `webgpu/packs/`. The pack is not in the repository: the
+Pages workflow downloads it from the release `webgpu-weights-1` (assets `genfree-affinity.json` and `genfree-affinity.bin`,
+written by `tools/convert_weights.py`) before assembling. Without that release the site is still published, but the tool
+cannot start. The trunk weights are never hosted here; the page reads LocalFold's `boltz2-int5` bundle from Hugging Face.
+To preview locally with a pack in `webgpu/packs/`: `docs/site/assemble.sh && python3 -m http.server -d _site 8000`, then open
+`http://127.0.0.1:8000/webgpu/web/screen.html`.
 
 ### Browser page
 

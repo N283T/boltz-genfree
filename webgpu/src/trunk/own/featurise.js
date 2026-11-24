@@ -28,7 +28,7 @@ import { ligandGraph, ligandGraphFromCcd } from "./ligand.js";
 import { buildMsa } from "./msa.js";
 import { atomWindows } from "./windows.js";
 
-/** GenFree's `crop_full_screen` limits (docs/usage.md), as in ../featurise.js. */
+/** GenFree's `crop_full_screen` limits (docs/guide/configuration.md), as in ../featurise.js. */
 export const LIMITS = { receptorTokens: 200, ligandTokens: 128, totalTokens: 256, totalAtoms: 2048 };
 const WINDOW = 32;
 

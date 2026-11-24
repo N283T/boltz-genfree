@@ -3,7 +3,7 @@
 Structure-generation-free Boltz-2 affinity screening.
 
 Boltz-GenFree (GenFree) runs the released Boltz-2 affinity trunk and heads directly
-from processed receptor and ligand inputs. It builds no structure for any candidate and
+from processed receptor and ligand inputs. It runs no structure generation for any candidate and
 writes compact scores for large, resumable virtual screens. It is intended as a cheap
 first stage: rank the whole library with GenFree, then spend the full Boltz-2 pipeline
 only on the top of the ranking.
@@ -25,8 +25,11 @@ uv sync --frozen --extra cuda      # --extra cuda12 for CUDA 12 PyTorch builds
 source .venv/bin/activate
 ```
 
-The Boltz-2 affinity checkpoint is downloaded on first use; weights are not
-redistributed.
+The Boltz-2 affinity checkpoint is downloaded on first use; the checkpoint itself is not
+redistributed. The one exception is the browser tool, which loads a 35 MB float32 conversion of
+the checkpoint's affinity heads (the checkpoint's own values) from the release
+[`webgpu-weights-1`](https://github.com/N283T/boltz-genfree/releases/tag/webgpu-weights-1)
+and reads the trunk weights from LocalFold's public bundle on Hugging Face.
 
 ## Usage
 
@@ -57,8 +60,14 @@ boltz-genfree screen screen.yaml                  # run; scores are written to s
 ```
 
 A re-run with the same inputs resumes where it stopped. Ligand sources, options, size
-limits, the optional reference bootstrap and fine-tuned heads are described in
-[docs/usage.md](docs/usage.md) and [docs/finetuning.md](docs/finetuning.md).
+limits, outputs, the optional reference bootstrap and fine-tuned heads are described in
+[docs/guide/configuration.md](docs/guide/configuration.md).
+
+## Website
+
+The project page, the Docs, the article and the browser tool are published at
+[n283t.github.io/boltz-genfree](https://n283t.github.io/boltz-genfree/). The site is assembled from `docs/site/` and
+the Markdown in this repository by `docs/site/assemble.sh` (preview: `docs/site/assemble.sh && python3 -m http.server -d _site`).
 
 ## WebGPU (experimental)
 
