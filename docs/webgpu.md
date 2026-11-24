@@ -73,6 +73,22 @@ in JS, so the WebGPU values lie within GenFree's own seed spread. Rank-level agr
 note; write `msa: empty` to say so explicitly), `ligands.sdf`, `affinity_adapter` / `affinity_checkpoint`, and `options` outside the list above (rejected with an error).
 `affinity_conditioner_mode: folded` is accepted and computed as `original`; `subsample_msa` / `num_subsampled_msa` must keep GenFree's defaults.
 
+### Library screening page (provisional)
+
+`web/screen.html` is a separate page for scoring a ligand list against one receptor (`web/index.html` is unchanged):
+
+```bash
+cd webgpu && node tools/serve.js && open http://127.0.0.1:4180/web/screen.html
+```
+
+Enter the sequence, an optional A3M (text or file), the ligands (one SMILES per line, `id,SMILES`, or a CSV/TSV with a
+`smiles` column) and the settings (seed, recycling steps, conformer mode, residues to keep), then Run. Results appear per
+ligand in a sortable table; Stop ends after the current ligand; Download writes `scores.csv` with GenFree's columns plus
+`error`. A ligand that fails (for example over the size limit) is listed with its error and the run continues. Verified in
+the built-in browser (Apple Metal): three ligands on a 117-residue receptor in 24 s. Not in this page yet: reference-complex
+cropping UI, MSA server, resume, a weights source other than the pack URL. `src/screen-core.js` holds the Node-free
+parts shared with the `screen` command.
+
 ### Browser page
 
 `tools/serve.js` serves `webgpu/` with HTTP Range support. The page opens the trunk pack with

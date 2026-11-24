@@ -7,33 +7,11 @@ import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { parseYaml } from "./yaml-lite.js";
+import { SCORE_COLUMNS, csvCell, parseDelimited, scoreRow } from "./screen-core.js";
+export { parseDelimited };
 import { TensorBundle } from "./bundle.js";
 
 const here = (p) => resolve(new URL(`../${p}`, import.meta.url).pathname);
-
-/** Rows of fields; quoted fields and "" escapes; delimiter configurable. */
-export function parseDelimited(text, delimiter = ",") {
-  const rows = [];
-  let row = [], field = "", quoted = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text[i];
-    if (quoted) {
-      if (c === '"' && text[i + 1] === '"') { field += '"'; i += 1; } else if (c === '"') quoted = false; else field += c;
-    } else if (c === '"') quoted = true;
-    else if (c === delimiter) { row.push(field); field = ""; }
-    else if (c === "\n" || c === "\r") {
-      if (c === "\r" && text[i + 1] === "\n") i += 1;
-      row.push(field); field = "";
-      if (row.some((x) => x !== "")) rows.push(row);
-      row = [];
-    } else field += c;
-  }
-  row.push(field);
-  if (row.some((x) => x !== "")) rows.push(row);
-  return rows;
-}
-
-const csvCell = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
 
 /** Ligand records [{id, kind: "smiles"|"ccd", value}] from the `ligands:` block. */
 export function readLigands(ligands, baseDir) {
@@ -62,7 +40,6 @@ export function readLigands(ligands, baseDir) {
   });
 }
 
-const SCORE_COLUMNS = ["record_id", "ligand_id", "ligand_kind", "ligand_value", "ligand_tokens", "chunk", "crop_budget", "receptor_tokens", "affinity_pred_value", "affinity_probability_binary"];
 const IGNORED_OPTIONS = new Set(["devices", "num_workers", "affinity_batch_size", "no_kernels", "msa_server_url", "msa_server_username", "msa_server_password", "msa_pairing_strategy", "accelerator", "flash_attn", "preprocessing_threads", "affinity_mw_correction", "subsample_msa", "num_subsampled_msa"]);
 
 export function loadScreenConfig(configPath) {
@@ -180,12 +157,7 @@ export async function runScreenCli(argv) {
         return;
       }
       const index = cfg.ligands.indexOf(lig);
-      const row = {
-        record_id: `${String(index + 1).padStart(6, "0")}_${lig.id}`, ligand_id: lig.id, ligand_kind: lig.kind, ligand_value: lig.value,
-        ligand_tokens: result.ligandTokens, chunk: `chunk_${String(Math.floor(index / cfg.chunkSize)).padStart(5, "0")}`,
-        crop_budget: "complete_input", receptor_tokens: result.receptorTokens,
-        affinity_pred_value: result.value, affinity_probability_binary: result.probability,
-      };
+      const row = scoreRow(lig, index, result, cfg.chunkSize);
       appendFileSync(logPath, `${JSON.stringify(row)}\n`);
       done.set(lig.id, row);
       print(`[${done.size}/${cfg.ligands.length}] ${lig.id}  value ${result.value.toFixed(4)}  P ${result.probability.toFixed(4)}  (${Math.round(result.timings.totalMs)} ms)`);

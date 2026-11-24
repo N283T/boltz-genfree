@@ -61,3 +61,26 @@ test("loadScreenConfig: options, msa and unsupported features", () => {
   const empty = loadScreenConfig(write("target:\n  sequence: MKT\n  msa: empty\nligands:\n  smiles: [CC]\n"));
   assert.equal(empty.a3m, null); assert.deepEqual(empty.notes, []);
 });
+
+import { SCORE_COLUMNS, parseLigandText, scoreRow, scoresCsv } from "../src/screen-core.js";
+
+test("parseLigandText: header with smiles column, id,smiles pairs, bare SMILES, tabs", () => {
+  assert.deepEqual(parseLigandText("id,smiles\na,CCO\nb,CCN\n").map((l) => [l.id, l.value]), [["a", "CCO"], ["b", "CCN"]]);
+  assert.deepEqual(parseLigandText("smiles,name\nCCO,x\n").map((l) => [l.id, l.value]), [["x", "CCO"]]);
+  assert.deepEqual(parseLigandText("SMILES\nCCO\n").map((l) => [l.id, l.value]), [["ligand_1", "CCO"]]);
+  assert.deepEqual(parseLigandText("a,CCO\nb,CCN").map((l) => [l.id, l.value]), [["a", "CCO"], ["b", "CCN"]]);
+  assert.deepEqual(parseLigandText("CCO\nCCN\n").map((l) => [l.id, l.value]), [["ligand_1", "CCO"], ["ligand_2", "CCN"]]);
+  assert.deepEqual(parseLigandText("id\tsmiles\na\tCCO\n").map((l) => [l.id, l.value]), [["a", "CCO"]]);
+  assert.deepEqual(parseLigandText(""), []);
+  assert.throws(() => parseLigandText("a,CCO\na,CCN"), /duplicate/);
+  assert.throws(() => parseLigandText("id,smiles\na,\n"), /empty SMILES/);
+});
+
+test("scoreRow and scoresCsv use GenFree's columns and record_id/chunk format", () => {
+  const row = scoreRow({ id: "phenol", kind: "smiles", value: "Oc1ccccc1" }, 1, { ligandTokens: 7, receptorTokens: 117, value: 1.5, probability: 0.25 }, 1000);
+  assert.equal(row.record_id, "000002_phenol");
+  assert.equal(row.chunk, "chunk_00000");
+  const lines = scoresCsv([row], ["error"]).trim().split("\n");
+  assert.equal(lines[0], [...SCORE_COLUMNS, "error"].join(","));
+  assert.equal(lines[1], "000002_phenol,phenol,smiles,Oc1ccccc1,7,chunk_00000,complete_input,117,1.5,0.25,");
+});

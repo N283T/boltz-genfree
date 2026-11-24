@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boltz-GenFree screen (WebGPU)</title>
+<style>
+  :root { --bg: #fff; --fg: #1b1b1b; --muted: #666; --line: #d6d6d6; --panel: #f6f6f6; --accent: #2457c5; --bad: #b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #121212; --fg: #ececec; --muted: #9a9a9a; --line: #3a3a3a; --panel: #1c1c1c; --accent: #7fa6ff; --bad: #ff8a80; } }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); margin: 0; }
+  main { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1rem; margin: 1.6rem 0 .5rem; }
+  p.lede { margin: 0 0 1rem; color: var(--muted); }
+  label { display: block; margin: .7rem 0 .2rem; font-weight: 600; }
+  .hint { font-weight: 400; color: var(--muted); }
+  input, textarea, select, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: .35rem .5rem; }
+  input[type=text], input[type=number], textarea, select { width: 100%; }
+  textarea { font-family: ui-monospace, Menlo, monospace; font-size: 13px; resize: vertical; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .25rem 1rem; }
+  .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: .45rem 1.2rem; }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { margin: .8rem 0 .3rem; min-height: 1.5em; }
+  #bar { height: 6px; background: var(--panel); border-radius: 3px; overflow: hidden; }
+  #bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  table { border-collapse: collapse; width: 100%; margin-top: .6rem; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--line); padding: .3rem .5rem; text-align: left; vertical-align: top; }
+  th { background: var(--panel); position: sticky; top: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.smiles { font-family: ui-monospace, Menlo, monospace; max-width: 22rem; overflow-wrap: anywhere; }
+  td.err { color: var(--bad); }
+  details { margin-top: 1rem; border: 1px solid var(--line); border-radius: 4px; padding: .3rem .7rem; background: var(--panel); }
+  summary { cursor: pointer; font-weight: 600; }
+  .warn { color: var(--bad); }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Boltz-GenFree screen on WebGPU</h1>
+<p class="lede">Score a list of ligands against one receptor, entirely in this page. Nothing is uploaded; the model weights are read from the pack URL below.</p>
+
+<h2>Receptor</h2>
+<label for="seq">Protein sequence <span class="hint" id="seqInfo"></span></label>
+<textarea id="seq" rows="3" spellcheck="false">QLEDSEVEAVAKGLEEMYANGVTEDNFKNYVKNNFAQQEISSVEEELNVNISDSCVANKIKDEFFAMISISAIVKAAQKKAWKELAVTVLRFAKANGLKTNAIIVAGQLALWAVQCG</textarea>
+<label for="a3m">MSA <span class="hint">(optional A3M text; the first record must be the query sequence. Empty = single sequence)</span></label>
+<textarea id="a3m" rows="3" spellcheck="false" placeholder=">query&#10;SEQUENCE&#10;>hit&#10;..."></textarea>
+<div class="row"><input type="file" id="a3mFile" accept=".a3m,.fasta,.fa,.txt"><span class="hint" id="a3mInfo"></span></div>
+<label for="crop">Receptor residues to keep <span class="hint">(0-based, e.g. 0-99,120; empty = whole sequence, must be 200 residues or fewer)</span></label>
+<input type="text" id="crop" placeholder="keep all residues">
+
+<h2>Ligands</h2>
+<label for="ligands">Ligand list <span class="hint">(one per line: <code>SMILES</code>, or <code>id,SMILES</code>, or a CSV/TSV with a <code>smiles</code> column and an optional <code>id</code> column)</span></label>
+<textarea id="ligands" rows="6" spellcheck="false">id,smiles
+glycine,NCC(=O)O
+phenol,Oc1ccccc1
+acetaminophen,CC(=O)Nc1ccc(O)cc1</textarea>
+<div class="row"><input type="file" id="ligFile" accept=".csv,.tsv,.txt,.smi"><span class="hint" id="ligInfo"></span></div>
+
+<h2>Settings</h2>
+<div class="grid">
+  <div><label for="seed">Seed</label><input type="number" id="seed" value="0" step="1"></div>
+  <div><label for="recycles">Recycling steps</label><input type="number" id="recycles" value="0" min="0" max="5" step="1"></div>
+  <div><label for="conformer">Ligand reference conformer</label>
+    <select id="conformer"><option value="skip">skip (GenFree default)</option><option value="etkdg">etkdg</option><option value="rdkit_2d">rdkit_2d</option></select></div>
+</div>
+<details>
+  <summary>Weights</summary>
+  <label for="weights">Trunk pack (manifest URL)</label>
+  <input type="text" id="weights" value="/packs/boltz2-trunk-own/boltz2-trunk-own.json">
+  <label for="affinity">Affinity pack (manifest URL)</label>
+  <input type="text" id="affinity" value="/packs/genfree-affinity.json">
+</details>
+
+<div class="row" style="margin-top:1.2rem">
+  <button class="primary" id="run">Run</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="download" disabled>Download scores.csv</button>
+</div>
+<div id="status" aria-live="polite">idle</div>
+<div id="bar"><div></div></div>
+
+<h2>Results</h2>
+<div class="row"><label for="sort" style="margin:0;font-weight:400">Sort</label>
+  <select id="sort" style="width:auto"><option value="input">input order</option><option value="value-desc">value, high first</option><option value="value-asc">value, low first</option><option value="p-desc">P(binder), high first</option></select></div>
+<table id="results">
+  <thead><tr><th class="num">#</th><th>id</th><th>SMILES</th><th class="num">value</th><th class="num">P(binder)</th><th class="num">tokens</th><th class="num">ms</th></tr></thead>
+  <tbody></tbody>
+</table>
+</main>
+
+<script type="module">
+import { deviceFromAdapter } from "../src/device.js";
+import { createOwnChain } from "../src/trunk/own/chain.js";
+import { parseLigandText, scoreRow, scoresCsv } from "../src/screen-core.js";
+
+const $ = (id) => document.getElementById(id);
+const status = (text, bad = false) => { $("status").textContent = text; $("status").className = bad ? "warn" : ""; };
+const progress = (fraction) => { $("bar").firstElementChild.style.width = `${Math.round(100 * fraction)}%`; };
+
+let chain = null, chainKey = "", device = null;
+let rows = [];          // {index, lig, result?, error?, ms}
+let stopRequested = false;
+
+$("seq").addEventListener("input", updateSeqInfo);
+function updateSeqInfo() {
+  const n = $("seq").value.replace(/\s+/g, "").length;
+  const cropped = parseIndices($("crop").value, true);
+  const used = cropped ? cropped.length : n;
+  $("seqInfo").textContent = `${n} residues${cropped ? `, keeping ${used}` : ""}${used > 200 ? " - too long, crop to 200 or fewer" : ""}`;
+  $("seqInfo").className = used > 200 ? "hint warn" : "hint";
+}
+$("crop").addEventListener("input", updateSeqInfo);
+
+function parseIndices(text, lenient = false) {
+  if (!text.trim()) return undefined;
+  const out = new Set();
+  for (const part of text.split(",")) {
+    const m = part.trim().match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) { if (lenient) return undefined; throw new Error(`bad residue entry ${JSON.stringify(part)}; expected N or A-B, comma separated`); }
+    for (let i = Number(m[1]); i <= Number(m[2] ?? m[1]); i += 1) out.add(i);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+async function loadInto(fileInput, textarea, info) {
+  const file = fileInput.files[0];
+  if (!file) return;
+  textarea.value = await file.text();
+  info.textContent = `${file.name} (${file.size.toLocaleString()} bytes)`;
+  updateSeqInfo();
+  updateLigInfo();
+}
+$("a3mFile").addEventListener("change", () => loadInto($("a3mFile"), $("a3m"), $("a3mInfo")));
+$("ligFile").addEventListener("change", () => loadInto($("ligFile"), $("ligands"), $("ligInfo")));
+function updateLigInfo() {
+  try { $("ligInfo").textContent = `${parseLigandText($("ligands").value).length} ligands`; $("ligInfo").className = "hint"; }
+  catch (e) { $("ligInfo").textContent = String(e.message); $("ligInfo").className = "hint warn"; }
+}
+$("ligands").addEventListener("input", updateLigInfo);
+
+function render() {
+  const order = [...rows];
+  const sort = $("sort").value;
+  const val = (r) => r.result?.value ?? -Infinity;
+  if (sort === "value-desc") order.sort((a, b) => val(b) - val(a));
+  else if (sort === "value-asc") order.sort((a, b) => (a.result ? val(a) : Infinity) - (b.result ? val(b) : Infinity));
+  else if (sort === "p-desc") order.sort((a, b) => (b.result?.probability ?? -1) - (a.result?.probability ?? -1));
+  const body = $("results").tBodies[0];
+  body.replaceChildren(...order.map((r) => {
+    const tr = document.createElement("tr");
+    const cell = (text, cls = "") => { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.append(td); return td; };
+    cell(r.index + 1, "num"); cell(r.lig.id); cell(r.lig.value, "smiles");
+    if (r.result) {
+      cell(r.result.value.toFixed(4), "num"); cell(r.result.probability.toFixed(4), "num"); cell(r.result.tokens, "num"); cell(Math.round(r.ms), "num");
+    } else {
+      const td = cell(r.error ?? "pending", r.error ? "err" : ""); td.colSpan = 4;
+    }
+    return tr;
+  }));
+}
+$("sort").addEventListener("change", render);
+
+$("download").addEventListener("click", () => {
+  const out = rows.filter((r) => r.result).map((r) => scoreRow(r.lig, r.index, r.result));
+  const failed = rows.filter((r) => r.error).map((r) => ({ record_id: `${String(r.index + 1).padStart(6, "0")}_${r.lig.id}`, ligand_id: r.lig.id, ligand_kind: r.lig.kind, ligand_value: r.lig.value, error: r.error }));
+  const blob = new Blob([scoresCsv([...out, ...failed], ["error"])], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "scores.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$("stop").addEventListener("click", () => { stopRequested = true; $("stop").disabled = true; status("stopping after the current ligand..."); });
+
+async function ensureChain() {
+  const trunkPack = new URL($("weights").value, location.href).href;
+  const affinityPack = new URL($("affinity").value, location.href).href;
+  const key = `${trunkPack}|${affinityPack}`;
+  if (chain && chainKey === key) return chain;
+  if (chain) { await chain.destroy(); chain = null; }
+  if (!navigator.gpu) throw new Error("this browser has no WebGPU");
+  if (!device) device = await deviceFromAdapter(await navigator.gpu.requestAdapter());
+  status("opening weights...");
+  chain = await createOwnChain({ trunkPack, affinityPack, device, onStatus: (s) => status(s) });
+  chainKey = key;
+  return chain;
+}
+
+$("run").addEventListener("click", async () => {
+  $("run").disabled = true; $("download").disabled = true; $("stop").disabled = false;
+  stopRequested = false;
+  try {
+    const sequence = $("seq").value.replace(/\s+/g, "");
+    if (!sequence) throw new Error("enter a protein sequence");
+    const ligands = parseLigandText($("ligands").value);
+    if (ligands.length === 0) throw new Error("enter at least one ligand");
+    const receptorIndices = parseIndices($("crop").value);
+    const a3m = $("a3m").value.trim() || null;
+    const options = { recycles: Number($("recycles").value), seed: Number($("seed").value) };
+    const conformer = $("conformer").value;
+    rows = ligands.map((lig, index) => ({ index, lig }));
+    render(); progress(0);
+    const c = await ensureChain();
+    const started = performance.now();
+    let done = 0;
+    for (const r of rows) {
+      if (stopRequested) break;
+      status(`ligand ${done + 1} of ${rows.length}: ${r.lig.id}`);
+      const t0 = performance.now();
+      try {
+        r.result = await c.score({ sequence, a3m, smiles: r.lig.value, receptorIndices, ligandConformer: conformer }, {
+          ...options, onStage: (name, ms) => status(`ligand ${done + 1} of ${rows.length}: ${r.lig.id} - ${name} ${Math.round(ms)} ms`),
+        });
+      } catch (e) {
+        r.error = String(e?.message ?? e);
+      }
+      r.ms = performance.now() - t0;
+      done += 1;
+      progress(done / rows.length);
+      render();
+      $("download").disabled = false;
+    }
+    const secs = Math.round((performance.now() - started) / 1000);
+    const failed = rows.filter((r) => r.error).length;
+    status(`${stopRequested ? "stopped" : "done"}: ${done} of ${rows.length} ligands in ${secs} s${failed ? `, ${failed} failed` : ""}`, failed > 0);
+  } catch (e) {
+    status(String(e?.message ?? e), true);
+  } finally {
+    $("run").disabled = false; $("stop").disabled = true;
+    $("download").disabled = !rows.some((r) => r.result || r.error);
+  }
+});
+
+updateSeqInfo();
+updateLigInfo();
+</script>
+</body>
+</html>
