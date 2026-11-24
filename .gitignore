@@ -175,3 +175,6 @@ boltz_results_*/.idea/
 webgpu/packs/
 webgpu/oracle-dumps/
 webgpu/node_modules/
+
+# assembled website (docs/site/assemble.sh)
+_site/

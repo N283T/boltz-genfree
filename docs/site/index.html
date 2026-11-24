@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boltz-GenFree</title>
+<meta name="description" content="Boltz-GenFree ranks a ligand library with the released Boltz-2 affinity checkpoint, without generating a structure for every candidate.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400;1,700&family=Red+Hat+Mono:wght@400..700&display=swap">
+<link rel="stylesheet" href="site.css">
+<style>a.kpi{display:block;color:inherit;text-decoration:none}a.kpi:hover .n{text-decoration:underline}a.kpi:focus-visible{outline-offset:-3px}</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- shared site bar (identical on every page; only aria-current moves) -->
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="index.html"><img src="logo-on-dark.svg" alt="Boltz-GenFree home"></a>
+    <nav class="site-nav" aria-label="Site">
+      <ol>
+        <li><a href="index.html" aria-current="page"><span class="nn">01</span>Home</a></li>
+        <li><a href="docs/index.html"><span class="nn">02</span>Docs</a></li>
+        <li><a href="research.html"><span class="nn">03</span>Research</a></li>
+        <li><a class="wgpu" href="webgpu/web/screen.html"><span class="nn">04</span>WebGPU</a></li>
+        <li class="gh-li"><a class="gh" href="https://github.com/N283T/boltz-genfree">GitHub</a></li>
+      </ol>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero home-hero on-dark">
+  <div class="wrap">
+    <div class="grid-hero">
+      <div>
+        <p class="status">v0.1.0 &middot; open source &middot; MIT</p>
+        <h1>Rank the library. <em>Skip</em> the structures.</h1>
+        <p class="sub">Structure-generation-free Boltz-2 affinity screening. It runs the released Boltz-2 affinity trunk and heads directly from processed receptor and ligand inputs, and builds no structure for any candidate.</p>
+        <div class="btns">
+          <a class="btn pri big" href="docs/index.html">Get started</a>
+          <a class="btn big" href="webgpu/web/screen.html">Try it in the browser</a>
+        </div>
+      </div>
+      <div class="install" aria-label="Install and run">
+        <div class="lab"><span>Terminal</span><b>Python 3.10+</b></div>
+<pre><span class="p">$ </span>git clone https://github.com/N283T/boltz-genfree.git
+<span class="p">$ </span>cd boltz-genfree
+<span class="p">$ </span>uv sync --frozen --extra cuda
+<span class="p">$ </span>boltz-genfree screen screen.yaml --prepare-only
+<span class="p">$ </span>boltz-genfree screen screen.yaml
+<span class="c"># scores are written to scores.csv</span></pre>
+      </div>
+    </div>
+    <div class="kpis-wrap">
+      <div class="kpis">
+        <a class="kpi" href="research.html#results"><div class="k">Ranking quality</div><div class="n">90%</div><div class="t">of Boltz-2&rsquo;s mean average precision on eight libraries. Boltzina: 67%.</div></a>
+        <a class="kpi" href="research.html#twostage"><div class="k">Two-stage screen</div><div class="n">0.0839</div><div class="t">mean AP when Boltz-2 re-ranks the top 10%. <b>Boltz-2 alone: 0.0840.</b></div></a>
+        <a class="kpi" href="research.html#twostage"><div class="k">Estimated cost</div><div class="n">8.5&ndash;8.9&times;</div><div class="t">lower cost for that two-stage screen, estimated on two timed targets.</div></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="shead"><span class="num">01</span><div><h2>Three ways in</h2><p>Pick by what you want to do today.</p></div></div>
+    <div class="grid doors top-accent">
+      <a class="door" href="docs/index.html">
+        <span class="tag"><i>D</i>Docs</span>
+        <h3>Run a screen</h3>
+        <p>Install the package, write a config with one receptor and one ligand source, and run a screen. Scores land in scores.csv.</p>
+        <span class="go">Read the docs</span>
+      </a>
+      <a class="door" href="research.html">
+        <span class="tag"><i>R</i>Research</span>
+        <h3>Why it works</h3>
+        <p>How the Boltz-2 affinity prediction uses a structure, what GenFree replaces, and the results on eight libraries.</p>
+        <span class="go">Read the article</span>
+      </a>
+      <a class="door" href="webgpu/web/screen.html">
+        <span class="tag"><i>W</i>WebGPU</span>
+        <h3>No install at all</h3>
+        <p>Runs in the page on WebGPU. The sequence and ligand list are not uploaded. Receptor up to 200 residues; the first load downloads about 380 MB of weights from Hugging Face and caches them.</p>
+        <span class="go">Open the tool</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="shead"><span class="num">02</span><div><h2>What changes</h2><p>The same affinity trunk and heads, fed without the generated structure.</p></div></div>
+    <div class="lanes" role="img" aria-label="Boltz-2 generates structures for each candidate and feeds the affinity module a crop and a distogram. GenFree uses the same affinity trunk and heads with no generated structure.">
+      <div class="lane">
+        <div class="ln"><b>Boltz-2</b><span class="tagbox">Per ligand</span></div>
+        <div class="step"><b>Co-fold</b><small>stage 1 complex gives the crop</small></div>
+        <div class="step s1"><b>Local poses</b><small>sampled on the crop; distogram</small></div>
+        <div class="step"><b>Affinity</b><small>released trunk and heads</small></div>
+        <div class="step"><b>Score</b><small>affinity prediction</small></div>
+      </div>
+      <div class="lane gf">
+        <div class="ln"><b>GenFree</b><span class="tagbox fast">No structure</span></div>
+        <div class="step"><b>Receptor</b><small>reference crop or full receptor</small></div>
+        <div class="step none"><b>Structure</b><small>not generated</small></div>
+        <div class="step gfs"><b>Affinity</b><small>same trunk and heads, unchanged</small></div>
+        <div class="step gfs"><b>Scores</b><small>scores.csv</small></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap split">
+    <div class="prose">
+      <div class="shead"><span class="num">03</span><div><h2>Built for the first pass</h2></div></div>
+      <p class="lede">GenFree is a cheap first stage: rank the whole library, then spend the full Boltz-2 pipeline only on the top of the ranking.</p>
+      <p>It builds no structure for any candidate and writes compact scores for large, resumable screens. One run on a single RTX 5080 scored 49,980 compounds of one target in 18,290 s; that shows feasibility on that hardware and target, not general performance.</p>
+    </div>
+    <dl class="grid facts">
+      <div><dt>Input</dt><dd>Receptor sequence (optional A3M MSA) and ligand SMILES from CSV, TSV, SDF, an inline list or CCD codes</dd></div>
+      <div><dt>Output</dt><dd>scores.csv with affinity_pred_value and affinity_probability_binary per ligand</dd></div>
+      <div><dt>Weights</dt><dd>Released Boltz-2 affinity checkpoint, downloaded on first use and not redistributed</dd></div>
+      <div><dt>Runs on</dt><dd>CUDA (uv, <code>--extra cuda</code>), or WebGPU in the browser</dd></div>
+      <div><dt>License</dt><dd>MIT; version 0.1.0, not on PyPI</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div>
+      <h2>Rank a few ligands right now, on your own GPU.</h2>
+      <p>Needs a browser with WebGPU. The sequence and ligands stay in the tab.</p>
+    </div>
+    <a class="btn pri big" href="webgpu/web/screen.html">Open the WebGPU tool</a>
+  </div>
+</section>
+</main>
+
+<!-- shared footer -->
+<footer class="foot">
+  <div class="rule"></div>
+  <div class="wrap">
+    <div class="cols">
+      <div class="fbrand">
+        <img src="logo-on-light.svg" alt="Boltz-GenFree">
+        <p>Structure-generation-free ranking for first-stage affinity screening.</p>
+      </div>
+      <div>
+        <h3>Site</h3>
+        <ul>
+          <li><a href="index.html" aria-current="page">Home</a></li>
+          <li><a href="docs/index.html">Docs</a></li>
+          <li><a href="research.html">Research</a></li>
+          <li><a href="webgpu/web/screen.html">WebGPU</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/N283T/boltz-genfree">Source code</a></li>
+          <li><a href="https://github.com/N283T/boltz-genfree/releases">Releases</a></li>
+          <li><a href="https://github.com/N283T/boltz-genfree/issues">Issues</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Cite</h3>
+        <ul>
+          <li><a href="https://doi.org/10.26434/chemrxiv.15012606/v1">Preprint</a></li>
+          <li><a href="https://doi.org/10.5281/zenodo.23949585">Data on Zenodo</a></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="legal"><span>MIT License &middot; Boltz-2 weights are not redistributed</span><span>Not affiliated with the Boltz authors</span></div>
+</footer>
+</body>
+</html>
